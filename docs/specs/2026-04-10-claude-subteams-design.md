@@ -1087,6 +1087,30 @@ Commit
 
 **Circular dependency prevention:** Skills declare `conflicts-with` in frontmatter (Section 24). Circular skill chains are banned. Linear chains (executing-plans → code-review → code-reviewer agent → security-audit if needed) are allowed — the orchestrator manages the chain, not the skills.
 
+**Subagent self-check principle:** Every subagent MUST verify its own work before returning results:
+1. Re-read every file you created/modified — does it match the brief?
+2. Run compilation check if applicable (tsc, mypy, go build)
+3. Check that all referenced files/functions/paths actually exist
+4. Only then return the result to orchestrator
+
+This reduces rework. The orchestrator still verifies (double-check), but the subagent catches obvious mistakes first.
+
+**Post-implementation nuances documentation:**
+After any implementation, BOTH subagent and orchestrator capture nuances — things that work but have caveats, workarounds, known limitations, performance constraints, hardcoded values, temporary solutions.
+
+Format (appended to the plan or CHANGELOG):
+```markdown
+### Implementation Nuances
+- `path/to/file.ts:42` — hardcoded timeout (300ms) because API doesn't support configurable timeouts
+- `path/to/handler.ts` — works for <1000 records, pagination needed for larger datasets
+- Workaround: using `any` cast at line 78 due to library type bug (tracked: github.com/lib/issue/123)
+```
+
+**Who captures nuances:**
+- Subagent: flags them in the "Notes" section of output contract
+- Orchestrator: reviews and adds any the subagent missed
+- doc-agent: consolidates into project documentation at session end
+
 ## 14. Migration from Superpowers
 
 1. Disable superpowers: `claude settings set enabledPlugins.superpowers@claude-plugins-official false`
