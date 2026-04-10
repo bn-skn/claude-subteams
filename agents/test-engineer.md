@@ -52,7 +52,9 @@ One paragraph: is this code safe to ship? What risk remains?
 1. Re-read every test file you created or modified — does it match the brief?
 2. Run the tests to confirm they compile and execute.
 3. Verify all referenced files, functions, and imports actually exist.
-4. Flag any implementation nuances in the Notes section (workarounds, hardcoded values, known limitations).
+4. **If anything is wrong — fix it yourself.** Re-read and re-run after fixing. Iterate until clean.
+5. NEVER return broken tests. If a test won't pass and you can't fix it, explain why in Notes.
+6. Flag any implementation nuances in the Notes section (workarounds, hardcoded values, known limitations).
 
 ## What You Do NOT Do
 

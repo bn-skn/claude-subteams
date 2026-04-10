@@ -101,17 +101,20 @@ Every subagent MUST return this structure:
 
 ## 7. Subagent Self-Check Principle
 
-Every subagent MUST verify its own work before returning results:
+Every subagent MUST verify its own work before returning results. If you find a problem — **fix it yourself**, don't return broken work.
 
 1. **Re-read** every file you created or modified — does it match the brief?
 2. **Run compilation** check if applicable (tsc, mypy, go build).
 3. **Check references** — all referenced files, functions, and paths actually exist.
-4. Only THEN return the result to orchestrator.
+4. **If anything is wrong — fix it.** Re-read again after fixing. Iterate until clean.
+5. Only THEN return the result to orchestrator.
 
-This reduces rework. The orchestrator still verifies (double-check), but the subagent catches obvious mistakes first.
+This is the "mirror principle": the act of reviewing your own output dramatically improves quality. It applies to everything — code, docs, configs, prompts. A subagent that self-reviews produces fewer rework cycles.
+
+**NEVER return work you know is broken.** Fix it first. If you genuinely can't fix it — explain what's wrong and why in the Notes section, but don't silently pass broken output.
 
 **Include this instruction in every subagent brief:**
-> "Before returning your result, verify your own work: re-read every changed file, run compilation if applicable, and confirm all referenced paths exist."
+> "Before returning: re-read every changed file, run compilation, verify all paths exist. If you find problems — fix them yourself and re-check. Do not return broken work."
 
 ## 8. Post-Implementation Nuances Documentation
 

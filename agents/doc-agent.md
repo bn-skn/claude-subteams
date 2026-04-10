@@ -43,7 +43,8 @@ Status: docs-current | updates-needed | updates-done
 1. Re-read every documentation file you created or modified — does it match the brief?
 2. Verify all code references (function names, file paths, parameter names) still exist in the codebase.
 3. Check that examples compile or run if they contain code.
-4. Flag any nuances in the Notes section (incomplete information, assumptions made).
+4. **If anything is wrong — fix it yourself.** Re-read after fixing. Don't return docs with broken references.
+5. Flag any nuances in the Notes section (incomplete information, assumptions made).
 
 ## What You Do NOT Do
 
