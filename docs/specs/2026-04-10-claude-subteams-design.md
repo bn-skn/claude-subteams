@@ -147,8 +147,20 @@ The main agent is a **leader, not a hiding boss**. It:
 **Source:** Rewrite of superpowers/using-superpowers
 **Trigger:** SessionStart hook
 
-Injected at every session start. Establishes:
-- Orchestrator mindset: decompose, delegate, verify
+**Lightweight injection at SessionStart.** The hook injects a compact 10-line summary, NOT the full skill. The full skill loads on demand via Skill tool when a development task is detected.
+
+Injected mini-prompt (~10 lines):
+```
+[subteams] You are an orchestrator with 9 specialized agents.
+For development tasks: invoke claude-subteams skills before acting (max 3 per task).
+For non-dev tasks: respond directly, plugin stays silent.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, 
+prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate.
+Use /subteams to load full methodology. Use /agents to see agent details.
+```
+
+Full skill (loaded on demand) establishes:
+- Orchestrator-as-leader mindset: decompose, delegate, verify
 - 1% rule: if any skill might apply, invoke it (max 3 per task)
 - Red flags table for rationalization
 - Read BACKLOG.md and active plan on session start
@@ -758,6 +770,7 @@ Each agent's `.md` file is its full system prompt — role, approach, and output
 | 6 | **doc-agent** | sonnet | Read, Write, Edit, Grep, Glob | core | Two modes: check freshness / write updates | docs-current / updates-done |
 | 7 | **researcher** | opus | Read, Grep, Glob, WebSearch, WebFetch | core | Deep research, multi-source, cites sources | findings-ready / insufficient-data |
 | 8 | **security-auditor** | opus | Read, Grep, Glob, Bash | security | OWASP Top 10, attack surface, secrets check | secure / vulnerabilities-found |
+| 9 | **devils-advocate** | opus | Read, Grep, Glob | quality | Challenges assumptions: "what if?", edge cases, scale, necessity | concerns-raised / looks-solid |
 
 ### Standardized output contract (all agents)
 
@@ -905,7 +918,7 @@ Task received
     └── Complex? → Questions (all in one message)
                        │
                        ▼
-                  Brainstorming → Spec (docs/specs/)
+                  Brainstorming → "What If?" challenge → Spec (docs/specs/)
                        │
                        ▼
                   Writing plans → Plan (docs/plans/active/)
@@ -924,6 +937,9 @@ Task received
               │                 │
               ▼                 ▼
          code-reviewer     code-reviewer
+              │                 │
+              ▼                 ▼
+        devils-advocate   devils-advocate (full pipeline only)
               │                 │
               ▼                 ▼
          test-engineer     test-engineer
@@ -1027,6 +1043,7 @@ using-subteams (SessionStart)
   ├── design-qa (WHAT to check) → design-critic agent (HOW to evaluate)
   ├── prompt-evaluation (WHAT to test) → prompt-evaluator agent (HOW to test)
   │
+  ├── devils-advocate (challenges assumptions in full pipeline, optional in lightweight)
   ├── doc-agent (check freshness + write updates, two modes)
   ├── researcher (deep research before planning, when uncertain)
   │
