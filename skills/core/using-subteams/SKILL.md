@@ -1,6 +1,6 @@
 ---
 name: using-subteams
-description: "Meta-skill establishing orchestrator methodology. Loaded at session start."
+description: "Use before any significant development work — establishing orchestrator methodology with 9 specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
 type: rigid
 ---
 

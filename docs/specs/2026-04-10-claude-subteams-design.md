@@ -147,19 +147,19 @@ The main agent is a **leader, not a hiding boss**. It:
 **Source:** Rewrite of superpowers/using-superpowers
 **Trigger:** SessionStart hook
 
-**Lightweight injection at SessionStart.** The hook injects a compact 10-line summary, NOT the full skill. The full skill loads on demand via Skill tool when a development task is detected.
+**No prompt injection.** The SessionStart hook does NOT inject methodology text. It only checks for stale state (BACKLOG, active plans).
 
-Injected mini-prompt (~10 lines):
-```
-[subteams] You are an orchestrator with 9 specialized agents.
-For development tasks: invoke claude-subteams skills before acting (max 3 per task).
-For non-dev tasks: respond directly, plugin stays silent.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, 
-prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate.
-Use /subteams to load full methodology. Use /agents to see agent details.
+**Activation is controlled by CLAUDE.md.** The install script adds a 5-line snippet to the project's CLAUDE.md (from `templates/claudemd-snippet.md`):
+```markdown
+## Development Methodology
+For development tasks use the claude-subteams plugin (orchestrator + 9 specialized agents).
+Invoke skill "claude-subteams:using-subteams" before significant development work.
+For small fixes — act directly, invoke code-review after if logic changed.
 ```
 
-Full skill (loaded on demand) establishes:
+This is **user-controlled**: remove the snippet from CLAUDE.md and the plugin is silent. No need to uninstall.
+
+The full using-subteams skill loads on demand via Skill tool. It establishes:
 - Orchestrator-as-leader mindset: decompose, delegate, verify
 - 1% rule: if any skill might apply, invoke it (max 3 per task)
 - Red flags table for rationalization

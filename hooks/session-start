@@ -1,32 +1,19 @@
 #!/bin/bash
-# SessionStart hook — lightweight injection
-# Injects a compact summary instead of the full skill to avoid context bloat.
-# Full methodology loads on demand via Skill tool.
-
-cat <<'INJECT'
-[claude-subteams] You are an orchestrator-leader with 9 specialized agents.
-
-For development tasks: invoke claude-subteams skills before acting (max 3 per task).
-For non-dev tasks: respond directly, plugin stays silent.
-
-Agents: code-reviewer, test-engineer, architecture-guard, design-critic,
-prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate.
-
-Key principles: delegate when beneficial, do directly when faster. Subagents are
-smart AI — give them tools and context. Mirror principle: verify your own work
-before returning. Ask user clarifying questions before significant work.
-
-Full pipeline (significant changes): brainstorm → plan → implement → review → devil's advocate → test → commit
-Lightweight (small changes): implement → compile check → commit
-
-Invoke skill "claude-subteams:using-subteams" for full methodology reference.
-INJECT
+# SessionStart hook — minimal, no prompt injection
+# Only checks for stale state from previous session.
+# Methodology activation is controlled by CLAUDE.md, not by this hook.
 
 # Check for stale state from previous session
 if [ -f "BACKLOG.md" ]; then
   IN_PROGRESS=$(grep -c "^\- \[ \].*In Progress\|^## In Progress" BACKLOG.md 2>/dev/null || true)
   if [ "$IN_PROGRESS" -gt 0 ]; then
-    echo ""
-    echo "[subteams] Note: BACKLOG.md has in-progress items. Check if they are stale from a previous session."
+    echo "[subteams] BACKLOG.md has in-progress items — may be stale from a previous session."
+  fi
+fi
+
+if [ -d "docs/plans/active" ]; then
+  ACTIVE_PLANS=$(find docs/plans/active -name "*.md" 2>/dev/null | wc -l)
+  if [ "$ACTIVE_PLANS" -gt 0 ]; then
+    echo "[subteams] $ACTIVE_PLANS active plan(s) in docs/plans/active/."
   fi
 fi
