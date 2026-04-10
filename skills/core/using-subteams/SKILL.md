@@ -42,6 +42,7 @@ Before applying any development skill, classify the task:
 | 6 | doc-agent | sonnet | Read, Write, Edit, Grep, Glob | Doc freshness check, doc updates |
 | 7 | researcher | opus | Read, Grep, Glob, WebSearch, WebFetch | Uncertain technology, deep research |
 | 8 | security-auditor | opus | Read, Grep, Glob, Bash | Security-sensitive changes, secrets, auth |
+| 9 | devils-advocate | opus | Read, Grep, Glob | Full pipeline: challenges assumptions, edge cases, scale, necessity |
 
 ## 5. Deep Research Before Work
 
@@ -61,7 +62,7 @@ Before applying any development skill, classify the task:
 | Criteria | Pipeline | Steps |
 |----------|----------|-------|
 | Small change (<3 files, no logic) | Lightweight | Implement → tsc → done |
-| Significant change (logic, 3+ files, cross-module) | Full | Implement → tsc → code-reviewer → test-engineer → commit |
+| Significant change (logic, 3+ files, cross-module) | Full | Implement → tsc → code-reviewer → devils-advocate → test-engineer → commit |
 | Structural change (new module, architecture) | Full + architecture-guard | Full pipeline + architecture-guard + doc-agent |
 
 ## 8. Dynamic User Interviewing

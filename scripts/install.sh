@@ -113,5 +113,25 @@ echo "[claude-subteams] Recommended MCP servers (not required, but improve resea
 echo "  - context7      : https://github.com/upstash/context7"
 echo "  - playwright    : https://github.com/microsoft/playwright-mcp"
 echo "  - github        : https://github.com/github/github-mcp-server"
+
+# --- Offer to add CLAUDE.md snippet -----------------------------------------
+
+echo ""
+SNIPPET_FILE="$PLUGIN_DIR/templates/claudemd-snippet.md"
+CLAUDEMD="CLAUDE.md"
+
+read -r -p "[claude-subteams] Would you like to add the claude-subteams snippet to your CLAUDE.md? [y/N] " ADD_SNIPPET
+if [[ "${ADD_SNIPPET,,}" == "y" ]]; then
+  if [ -f "$SNIPPET_FILE" ]; then
+    echo "" >> "$CLAUDEMD"
+    cat "$SNIPPET_FILE" >> "$CLAUDEMD"
+    echo "[claude-subteams] Snippet appended to $CLAUDEMD."
+  else
+    echo "[claude-subteams] WARNING: Snippet template not found at $SNIPPET_FILE."
+  fi
+else
+  echo "[claude-subteams] You can add it manually later from templates/claudemd-snippet.md"
+fi
+
 echo ""
 echo "[claude-subteams] Installation complete. Restart Claude Code to activate."

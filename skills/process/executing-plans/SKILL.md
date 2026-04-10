@@ -51,6 +51,7 @@ For each task in the current batch:
 3. **Run quality gates** after each subagent returns:
    - [ ] **Compilation check** — does it build without errors?
    - [ ] **Code review** — dispatch reviewer subagent for spec compliance
+   - [ ] **Devils-advocate challenge** (full pipeline only) — dispatch devils-advocate to challenge assumptions, edge cases, scale, necessity
    - [ ] **Test verification** — run tests, verify new + existing pass
    - [ ] Gate passes: proceed to next task
    - [ ] Gate fails: retry with feedback (max 3 retries)

@@ -47,12 +47,13 @@ bash ~/.claude/plugins/claude-subteams/scripts/install.sh
 | `doc-agent` | sonnet | Documentation freshness checks and updates. Write access, no Bash. |
 | `researcher` | opus | Deep technology research. Read + web (WebSearch, WebFetch). |
 | `security-auditor` | opus | Security-sensitive changes, secrets, and auth flows. Read-only access. |
+| `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline only. |
 
 ## Hooks
 
 | Event | Hook | Purpose |
 |---|---|---|
-| `SessionStart` | `session-start` | Injects `using-subteams` methodology into context; warns about stale in-progress backlog items. |
+| `SessionStart` | `session-start` | Checks for stale BACKLOG items and active plans from previous sessions. No prompt injection — activation via CLAUDE.md. |
 | `PreToolUse` (Bash) | `pre-commit-gate` | Runs tsc / mypy / go build before any git commit; warns on files over 200 lines. |
 | `PreToolUse` (Bash) | `pre-push-check` | Safety check before git push. |
 | `PostToolUse` (Edit/Write) | `post-edit-check` | Async check after file edits. |

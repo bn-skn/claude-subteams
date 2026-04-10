@@ -2,7 +2,7 @@
 
 > **For agentic workers:** This plan is designed for parallel subagent execution. Independent workstreams can run simultaneously. Use the orchestrator-briefing protocol for each subagent dispatch.
 
-**Goal:** Build the claude-subteams plugin — a team-based development methodology for Claude Code with 43 skills, 8 agents, 6 hooks.
+**Goal:** Build the claude-subteams plugin — a team-based development methodology for Claude Code with 43 skills, 9 agents, 6 hooks.
 
 **Architecture:** Fork superpowers 5.0.7 structure. Skills as `skills/<subteam>/<name>/SKILL.md`. Agents as `agents/<name>.md`. Hooks as shell scripts in `hooks/`. Plugin loaded via `~/.claude/plugins/claude-subteams/`.
 
@@ -544,9 +544,9 @@ Create one SKILL.md per skill:
 
 ---
 
-## WS11: Agents (8 agents)
+## WS11: Agents (9 agents)
 
-### Task 11.1: All 8 agents
+### Task 11.1: All 9 agents
 
 **Files:**
 - Create: `agents/code-reviewer.md`
@@ -557,6 +557,7 @@ Create one SKILL.md per skill:
 - Create: `agents/doc-agent.md`
 - Create: `agents/researcher.md`
 - Create: `agents/security-auditor.md`
+- Create: `agents/devils-advocate.md`
 
 Each agent .md follows this structure:
 ```markdown
@@ -580,9 +581,9 @@ tools: <list>
 <explicit boundaries>
 ```
 
-Reference: Spec Section 5 (table of all 8 agents with roles, models, tools, output statuses).
+Reference: Spec Section 5 (table of all 9 agents with roles, models, tools, output statuses).
 
-- [ ] **Step 1: Write all 8 agent .md files**
+- [ ] **Step 1: Write all 9 agent .md files**
 - [ ] **Step 2: Commit**
 
 ---

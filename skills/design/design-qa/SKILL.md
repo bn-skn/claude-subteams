@@ -73,34 +73,25 @@ Run each heuristic against the implementation:
 
 ## 7. Output Format
 
-The design-critic agent MUST return results in this structure:
+The design-critic agent returns results in this structure:
 
 ```
 Status: approved | needs-work
 
-### Spec Coverage
-X/Y requirements implemented
-
-### Heuristics Score
-X/10 passing
-
 ### Design Issues
-- [file:line] Heuristic violated. Impact. Suggested improvement.
+- [file:line] Heuristic violated. Impact on user. Suggested improvement.
 
 ### Accessibility Issues
-- [file:line] WCAG criterion. Severity. Fix.
+- [file:line] WCAG criterion. Severity (A/AA/AAA). Fix.
 
-### Visual Issues
-- [list of visual consistency problems]
+### What Works Well
+- Specific praise for good design decisions.
 
-### Responsive Issues
-- [list of responsive behavior problems]
+### Questions
+- Assumptions about target users or design system.
 
-### Critical Fixes (must fix before shipping)
-- [list]
-
-### Recommended Fixes (should fix, not blocking)
-- [list]
+### Notes
+- Heuristics referenced, any design system docs found.
 ```
 
 ## 8. Critical Rules

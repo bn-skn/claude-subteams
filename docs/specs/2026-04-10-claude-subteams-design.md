@@ -41,7 +41,7 @@ The main agent is a **leader, not a hiding boss**. It:
 |--------|-------------|----------|
 | Focus | Single agent discipline | Team orchestration |
 | Testing | TDD (tests before code) | Adversarial (tests after code, tries to break) |
-| Agents | 1 (code-reviewer) | 7 specialized |
+| Agents | 1 (code-reviewer) | 9 specialized |
 | Model selection | Inherited | sonnet/opus per task (default: opus) |
 | Enforcement | Red flags tables | Red flags + hooks + CI linters |
 | Scope | Universal process | Full SDLC (25 areas) |
@@ -116,7 +116,8 @@ The main agent is a **leader, not a hiding boss**. It:
 │   ├── prompt-evaluator.md
 │   ├── doc-agent.md
 │   ├── researcher.md
-│   └── security-auditor.md
+│   ├── security-auditor.md
+│   └── devils-advocate.md
 ├── hooks/
 │   ├── hooks.json
 │   ├── session-start
@@ -994,7 +995,7 @@ Prompt-eng: subagent-prompt-design, prompt-evaluation, self-optimization, skill-
 Ops: ci-cd-pipeline, monitoring-logging, incident-management, scaffolding
 Specialized: mobile-development, data-engineering, i18n-localization
 
-### Total: 43 skills, 8 agents, 6 hooks (+ custom agents on-the-fly)
+### Total: 43 skills, 9 agents, 6 hooks (+ custom agents on-the-fly)
 
 ## 10. Plugin Manifest (plugin.json)
 
@@ -1141,8 +1142,8 @@ Format (appended to the plan or CHANGELOG):
 The plugin tests itself using its own skills:
 
 1. **Skill coverage test:** For each of 43 skills, create 3 test scenarios (simple, medium, edge case). Run via prompt-evaluation.
-2. **Hook integration test:** Start session → verify using-subteams injected → make edit → verify post-edit-check fires → attempt commit → verify gate behavior → end session → verify reminder.
-3. **Agent contract test:** For each of 8 agents, send standardized input → verify output matches contract format (status, changes, verification, questions).
+2. **Hook integration test:** Start session → verify CLAUDE.md snippet activates using-subteams → make edit → verify post-edit-check fires → attempt commit → verify gate behavior → end session → verify reminder.
+3. **Agent contract test:** For each of 9 agents, send standardized input → verify output matches contract format (status, changes, verification, questions).
 4. **Conflict test:** Load all 43 skills, send ambiguous prompt → verify no more than 3 skills activate, correct ones are prioritized.
 5. **Fire test:** Run full pipeline on a real project with a real feature implementation.
 
@@ -1461,7 +1462,7 @@ Features from superpowers that were changed or removed, with rationale:
 | **TDD (iron law)** | Made optional (Section 23) | Adversarial testing fits most workflows better; TDD available for those who want it |
 | **Single agent model** | Replaced with orchestrator + subteams | Delegation improves quality through specialization |
 | **Inherited model** | Replaced with explicit model selection | Opus by default, sonnet for routine — cost/quality optimization |
-| **One code-reviewer agent** | Expanded to 8 specialized agents | Different tasks need different expertise |
+| **One code-reviewer agent** | Expanded to 9 specialized agents | Different tasks need different expertise |
 | **docs/superpowers/ directory** | Replaced with docs/specs/, docs/plans/ | Cleaner organization, living documentation |
 
 ## 27. Effectiveness Metrics
@@ -1516,8 +1517,8 @@ Each reviewer gets: Read, Grep, Glob tools only. Reports issues in standard form
 ## 29. Success Criteria
 
 - [ ] All 43 skills have SKILL.md with frontmatter (including requires/conflicts-with), checklists, red flags
-- [ ] All 8 agents have .md with personality, approach, and output contract
-- [ ] All 4 hooks work (SessionStart injects, pre-commit gates, Stop reminds, post-edit checks)
+- [ ] All 9 agents have .md with personality, approach, and output contract
+- [ ] All 4 hooks work (CLAUDE.md activates, pre-commit gates, Stop reminds, post-edit checks)
 - [ ] Plugin loads via `claude --plugin-dir ~/.claude/plugins/claude-subteams`
 - [ ] Skills don't conflict (no overlapping triggers, dependency declarations prevent circular chains)
 - [ ] Forked superpowers skills maintain original quality

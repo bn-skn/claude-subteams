@@ -130,6 +130,10 @@ These are improvements that do not block the commit:
 | "LGTM" without evidence | Same as not reviewing |
 | Blocking on preferences | Preferences are not defects |
 
+## After Review: Next Step
+
+In the full pipeline, after code review passes, the next step is **devils-advocate** — a challenge pass that questions assumptions, edge cases, scale, and necessity before the code proceeds to testing. This catches design-level issues that a code review focused on implementation details may miss.
+
 ## The Bottom Line
 
 Review for defects. Document findings with evidence. Critical issues block the commit. Everything else is a discussion.

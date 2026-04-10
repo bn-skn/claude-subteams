@@ -27,10 +27,11 @@ You MUST create a task for each of these items and complete them in order:
 3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
 4. **Propose 2-3 approaches** — with trade-offs and your recommendation
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
-6. **Write design doc** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md` and commit
-7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-8. **User reviews written spec** — ask user to review the spec file before proceeding
-9. **Transition to implementation** — invoke claude-subteams:writing-plans skill to create implementation plan
+6. **"What If?" Challenge** — generate 5-10 "what if" questions about the design and present to the user (see below)
+7. **Write design doc** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md` and commit
+8. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
+9. **User reviews written spec** — ask user to review the spec file before proceeding
+10. **Transition to implementation** — invoke claude-subteams:writing-plans skill to create implementation plan
 
 ## The Process
 
@@ -57,6 +58,23 @@ You MUST create a task for each of these items and complete them in order:
 - Ask after each section whether it looks right so far
 - Cover: architecture, components, data flow, error handling, testing
 - Be ready to go back and clarify if something does not make sense
+
+**"What If?" Challenge:**
+
+After presenting the design and getting user approval on the sections, but BEFORE writing the spec, run a "What If?" challenge. Generate 5-10 probing questions about the design covering:
+
+- **Scale:** What if this needs to handle 10x/100x the expected load?
+- **Dependencies:** What if a key dependency becomes unavailable or changes its API?
+- **Edge cases:** What if inputs are malformed, empty, enormous, or adversarial?
+- **Necessity:** What if we removed this component entirely — would anything break?
+- **Assumptions:** What if our core assumption about [X] is wrong?
+- **Timing:** What if operations happen out of order or concurrently?
+- **Failure modes:** What if [critical step] fails silently?
+- **Integration:** What if the consuming system expects a different contract?
+- **Migration:** What if we need to change this design 6 months from now?
+- **Security:** What if an attacker targets this specific component?
+
+Present these questions to the user. Discuss any that surface real concerns. Adjust the design if needed before writing the spec. This catches assumptions early and is cheaper than discovering them during implementation.
 
 **Design for isolation and clarity:**
 

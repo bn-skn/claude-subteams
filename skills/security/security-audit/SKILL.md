@@ -112,6 +112,17 @@ For deep analysis beyond this checklist, dispatch to the security-auditor agent 
 3. Inventory of environment variables and secrets
 4. Known areas of concern
 
+**Expected agent output:**
+```
+Status: secure | vulnerabilities-found
+### Critical Vulnerabilities (must fix)
+### Medium Risk Issues
+### Low Risk / Hardening Suggestions
+### Secrets Check (exposed? rotated? gitignored?)
+### Questions
+### Notes
+```
+
 ## Red Flags
 
 - SQL concatenation with user input -- immediate injection risk
