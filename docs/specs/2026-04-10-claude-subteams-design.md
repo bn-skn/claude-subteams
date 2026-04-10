@@ -1,7 +1,7 @@
 # Claude Subteams Plugin — Design Specification
 
 **Date:** 2026-04-10
-**Status:** Approved (v5, 2026-04-10)
+**Status:** Implemented v1.0 (2026-04-10). Published: github.com/bn-skn/claude-subteams
 **Author:** Bogdan + Claude Opus 4.6
 **Reviewed by:** code-reviewer agent (2026-04-10)
 
