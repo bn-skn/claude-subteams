@@ -64,19 +64,67 @@ Before applying any development skill, classify the task:
 | Significant change (logic, 3+ files, cross-module) | Full | Implement → tsc → code-reviewer → test-engineer → commit |
 | Structural change (new module, architecture) | Full + architecture-guard | Full pipeline + architecture-guard + doc-agent |
 
-## 8. User Approval Flow
+## 8. Dynamic User Interviewing
+
+Before any significant work, the orchestrator MUST ensure it fully understands the task. This is not optional.
+
+1. **Assess confidence** — for each: business logic/purpose, tech stack/constraints, edge cases, success criteria, scope boundaries.
+2. **If confident in ALL** — proceed to planning/implementation.
+3. **If uncertain on ANY** — ask clarifying questions (all in one message, max 3 rounds).
+4. **Dynamic depth** — adapt to task complexity:
+   - Simple fix ("change button color") — 0 questions, just do it.
+   - Feature ("add authentication") — 3-5 questions.
+   - Architecture ("redesign data layer") — 5-10 questions.
+
+### Subagent Escalation to User
+
+When a subagent returns questions the orchestrator cannot answer from context:
+
+1. Collect the subagent's questions.
+2. Present to user: "My subagent working on X has questions I can't answer from our discussion:"
+3. User answers.
+4. Orchestrator re-briefs the subagent with answers.
+
+This is normal. Asking the user is ALWAYS better than guessing.
+
+### Interview Red Flags
+
+| Thought | Reality |
+|---------|---------|
+| "I know what they want" | You are guessing. Ask. |
+| "The code makes it obvious" | Business context is not in code. Ask. |
+| "I'll figure it out as I go" | You will build the wrong thing. Ask first. |
+| "They said 'just do it'" | They mean "don't overthink," not "don't ask." Clarify scope. |
+
+## 9. User Approval Flow
 
 1. **Small/routine tasks** — just do it, report when done.
 2. **Important/risky tasks** — show plan first, get user approval before executing.
 3. **Destructive operations** — ALWAYS ask first. Never delete, overwrite, or force-push without explicit user approval.
+4. **User can always:**
+   - Say "just do it" — skip brainstorming/planning, go straight to implementation.
+   - Say "skip review" — skip code-review and testing gates (escape hatch).
+   - Say "stop" — abort current pipeline at any point.
+   - Ask questions at any time — orchestrator responds and adjusts plan.
 
-## 9. Session Start Checklist
+## 10. MCP Server Integration
+
+Optional MCP servers that enhance plugin capabilities (none required):
+
+| MCP Server | Purpose | Used by |
+|------------|---------|---------|
+| **context7** | Up-to-date library docs (replaces stale training data) | All development skills, deep research |
+| **playwright** | Browser automation, screenshots, E2E testing | design-qa, design-to-code, adversarial-testing |
+
+Skills that need MCP gracefully degrade if unavailable (e.g., design-qa skips screenshot comparison, uses code review only).
+
+## 11. Session Start Checklist
 
 1. Read BACKLOG.md if it exists in the project root.
 2. Read active plan from docs/plans/active/ if one exists.
 3. Orient: understand what was done last session, what is pending.
 
-## 10. Red Flags Table
+## 12. Red Flags Table
 
 | Rationalization | Why It Is Wrong | Correct Action |
 |-----------------|-----------------|----------------|
@@ -89,7 +137,7 @@ Before applying any development skill, classify the task:
 | "I'll refactor this unrelated code while I'm here" | Scope creep breaks focus | Stay on task, note refactoring for BACKLOG |
 | "One more subagent pass will fix it" | Diminishing returns after pass 2 | Max 3 passes, then escalate or do it yourself |
 
-## 11. Critical Rules
+## 13. Critical Rules
 
 1. NEVER commit before the pipeline passes (tsc, review, tests).
 2. NEVER spawn more than 3 subagents for a single task without user awareness.

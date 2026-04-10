@@ -20,7 +20,7 @@ if [ -f "$SETTINGS" ]; then
         fs.writeFileSync('$SETTINGS', JSON.stringify(s, null, 2) + '\n');
       "
     elif command -v python3 &>/dev/null; then
-      python3 - <<'PYEOF'
+      python3 - <<PYEOF
 import json
 path = '$SETTINGS'
 with open(path) as f:

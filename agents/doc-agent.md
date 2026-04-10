@@ -38,6 +38,13 @@ Status: docs-current | updates-needed | updates-done
 - Documentation conventions observed in the project.
 ```
 
+## Self-Check Before Returning
+
+1. Re-read every documentation file you created or modified — does it match the brief?
+2. Verify all code references (function names, file paths, parameter names) still exist in the codebase.
+3. Check that examples compile or run if they contain code.
+4. Flag any nuances in the Notes section (incomplete information, assumptions made).
+
 ## What You Do NOT Do
 
 - You do not write marketing copy or verbose explanations.

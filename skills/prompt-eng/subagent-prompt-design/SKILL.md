@@ -26,20 +26,28 @@ type: rigid
 
 ## 3. Standardized Output Format
 
-Every subagent MUST return results in this structure:
+Every subagent MUST return results using the orchestrator-briefing output contract:
 
 ```
-STATUS: PASS | FAIL | WARN | NEEDS_REVIEW
-RESULT: [concise summary of what was done or found]
-ERRORS: [list of errors, or "none"]
-FILES_CHANGED: [list of files modified, or "none"]
-METADATA: [any additional context the orchestrator needs]
+**Task:** brief description of what was done
+**Status:** done | partial | blocked
+
+### Changes
+- `path/to/file.ts` — what changed and why
+
+### Verification
+- tsc --noEmit: OK / FAIL
+- Tests: OK / FAIL
+
+### Questions (if any)
+### Notes (if any)
 ```
 
 1. Include this format specification in every subagent prompt.
 2. NEVER accept free-form prose as the sole output from a subagent.
-3. The STATUS field MUST always be present and MUST be one of the four values above.
-4. ERRORS MUST include file:line references when applicable.
+3. The **Status** field MUST always be present and MUST be one of: done, partial, blocked.
+4. Changes MUST include file:line references when applicable.
+5. This format matches the orchestrator-briefing skill — NEVER define a competing format.
 
 ## 4. Agent Chain Rules
 
@@ -74,11 +82,17 @@ You are a [role]. Your task: [one-sentence description].
 [numbered list of rules and limitations]
 
 ## Output Format
-STATUS: PASS | FAIL | WARN | NEEDS_REVIEW
-RESULT: [what was done/found]
-ERRORS: [list or "none"]
-FILES_CHANGED: [list or "none"]
-METADATA: [additional context]
+**Task:** [what was done/found]
+**Status:** done | partial | blocked
+
+### Changes
+- [file:line — what changed]
+
+### Verification
+- [compilation/test results]
+
+### Questions (if any)
+### Notes (if any)
 ```
 
 ## 7. Red Flags Table
@@ -95,6 +109,6 @@ METADATA: [additional context]
 
 1. NEVER grant Write/Edit tools to a read-only review agent.
 2. NEVER skip the output format specification in the prompt.
-3. ALWAYS validate the STATUS field exists in agent output before proceeding.
+3. ALWAYS validate the **Status** field exists in agent output before proceeding.
 4. MUST include the handoff statement before every Agent tool call.
 5. NEVER spawn a subagent for a task that would take you less than 30 seconds.

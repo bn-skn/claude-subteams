@@ -44,7 +44,7 @@ else
       fs.writeFileSync('$SETTINGS', JSON.stringify(s, null, 2) + '\n');
     "
   elif command -v python3 &>/dev/null; then
-    python3 - <<'PYEOF'
+    python3 - <<PYEOF
 import json, sys
 path = '$SETTINGS'
 with open(path) as f:
@@ -80,7 +80,7 @@ if grep -q '"superpowers"' "$SETTINGS" 2>/dev/null; then
         fs.writeFileSync('$SETTINGS', JSON.stringify(s, null, 2) + '\n');
       "
     elif command -v python3 &>/dev/null; then
-      python3 - <<'PYEOF'
+      python3 - <<PYEOF
 import json
 path = '$SETTINGS'
 with open(path) as f:

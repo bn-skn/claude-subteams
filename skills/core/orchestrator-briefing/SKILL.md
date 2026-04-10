@@ -99,7 +99,37 @@ Every subagent MUST return this structure:
 4. Dispatch all independent tasks in ONE message (multiple Agent tool calls).
 5. After all return — verify, integrate, resolve any conflicts.
 
-## 7. Red Flags Table
+## 7. Subagent Self-Check Principle
+
+Every subagent MUST verify its own work before returning results:
+
+1. **Re-read** every file you created or modified — does it match the brief?
+2. **Run compilation** check if applicable (tsc, mypy, go build).
+3. **Check references** — all referenced files, functions, and paths actually exist.
+4. Only THEN return the result to orchestrator.
+
+This reduces rework. The orchestrator still verifies (double-check), but the subagent catches obvious mistakes first.
+
+**Include this instruction in every subagent brief:**
+> "Before returning your result, verify your own work: re-read every changed file, run compilation if applicable, and confirm all referenced paths exist."
+
+## 8. Post-Implementation Nuances Documentation
+
+After any implementation, BOTH subagent and orchestrator capture nuances — things that work but have caveats, workarounds, known limitations, performance constraints, hardcoded values, temporary solutions.
+
+**Subagent:** Flags nuances in the "Notes" section of the output contract.
+
+**Orchestrator:** Reviews and adds any the subagent missed.
+
+**Format (appended to the plan or CHANGELOG):**
+```markdown
+### Implementation Nuances
+- `path/to/file.ts:42` — hardcoded timeout (300ms) because API doesn't support configurable timeouts
+- `path/to/handler.ts` — works for <1000 records, pagination needed for larger datasets
+- Workaround: using `any` cast at line 78 due to library type bug (tracked: github.com/lib/issue/123)
+```
+
+## 9. Red Flags Table
 
 | Rationalization | Why It Is Wrong | Correct Action |
 |-----------------|-----------------|----------------|

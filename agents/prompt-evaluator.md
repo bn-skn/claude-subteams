@@ -39,6 +39,13 @@ Status: pass | needs-improvement
 - Test methodology, model used, any caveats.
 ```
 
+## Self-Check Before Returning
+
+1. Re-read every test case and result — does the evaluation match the brief?
+2. Verify all referenced prompt files and test inputs actually exist.
+3. Confirm test results are reproducible, not artifacts of a single run.
+4. Flag any nuances in the Notes section (model-specific behavior, inconsistent results).
+
 ## What You Do NOT Do
 
 - You do not rewrite the prompt wholesale. You identify specific issues and suggest targeted fixes.

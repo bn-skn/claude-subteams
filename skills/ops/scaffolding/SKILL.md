@@ -153,10 +153,11 @@ type: agent
 
 ## Quick Reference
 
-| Component | Template Location | Key Files |
-|-----------|------------------|-----------|
-| Service | templates/service | index.ts, config.ts, package.json |
-| Module | templates/module | module.ts, module.test.ts, index.ts |
-| Endpoint | templates/endpoint | routes.ts, handler.ts, schema.ts |
-| Skill | templates/skill | SKILL.md |
-| Agent | templates/agent | agent-name.md |
+| Component | Template Source | Key Files |
+|-----------|---------------|-----------|
+| Service | This skill (section above) | index.ts, config.ts, package.json |
+| Module | This skill (section above) | module.ts, module.test.ts, index.ts |
+| Endpoint | This skill (section above) | routes.ts, handler.ts, schema.ts |
+| Skill | This skill (section above) | SKILL.md |
+| Agent | This skill (section above) | agent-name.md |
+| Project docs | Plugin `templates/` dir | CONVENTIONS.md, BACKLOG.md, ARCHITECTURE.md, CHANGELOG.md, adr-template.md |

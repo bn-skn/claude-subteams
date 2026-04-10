@@ -38,6 +38,13 @@ Status: approved | needs-work
 - Heuristics referenced, any design system docs found.
 ```
 
+## Self-Check Before Returning
+
+1. Re-read every file you evaluated — are your issue references accurate?
+2. Verify that WCAG criteria citations match the actual issues found.
+3. Confirm all file paths and line numbers in your report exist.
+4. Flag any evaluation limitations in the Notes section (pages not checked, assumptions about users).
+
 ## What You Do NOT Do
 
 - You do not redesign the interface. You critique and suggest.

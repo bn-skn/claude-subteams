@@ -1,6 +1,7 @@
 ---
 name: design-to-code
 description: "Pipeline from text spec to working code with design system, browser preview, and feedback loop. Code IS the mockup."
+sub-team: design
 type: flexible
 ---
 
@@ -43,10 +44,11 @@ type: flexible
 ## 5. Browser Preview and Feedback Loop
 
 1. After initial implementation, open in browser for visual verification.
-2. Use Playwright screenshot if available to capture current state.
+2. If Playwright MCP is available, use it for browser automation and screenshots to capture current state.
 3. Compare against the original spec — check layout, spacing, colors, typography.
 4. Iterate: identify gaps, fix, re-preview. Maximum 3 feedback rounds.
-5. If Playwright is unavailable, describe the expected visual result and ask user to confirm.
+5. If Playwright MCP is unavailable, describe the expected visual result and ask user to confirm.
+6. Graceful degradation: all preview steps are optional enhancements — the skill works without Playwright.
 
 ## 6. Consistency Enforcement
 

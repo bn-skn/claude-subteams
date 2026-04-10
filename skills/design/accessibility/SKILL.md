@@ -1,6 +1,7 @@
 ---
 name: accessibility
 description: "WCAG 2.1 AA compliance audit: semantic HTML, keyboard navigation, screen reader support, color contrast, and ARIA attributes."
+sub-team: design
 type: flexible
 ---
 

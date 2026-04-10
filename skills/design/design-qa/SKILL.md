@@ -1,6 +1,7 @@
 ---
 name: design-qa
 description: "Design quality assurance: compare implementation against spec, run heuristic evaluation, check visual consistency and responsiveness."
+sub-team: design
 type: rigid
 ---
 
@@ -75,13 +76,31 @@ Run each heuristic against the implementation:
 The design-critic agent MUST return results in this structure:
 
 ```
-STATUS: PASS | WARN | FAIL
-SPEC_COVERAGE: X/Y requirements implemented
-HEURISTICS_SCORE: X/10 passing
-VISUAL_ISSUES: [list]
-RESPONSIVE_ISSUES: [list]
-CRITICAL_FIXES: [list — must fix before shipping]
-RECOMMENDED_FIXES: [list — should fix, not blocking]
+Status: approved | needs-work
+
+### Spec Coverage
+X/Y requirements implemented
+
+### Heuristics Score
+X/10 passing
+
+### Design Issues
+- [file:line] Heuristic violated. Impact. Suggested improvement.
+
+### Accessibility Issues
+- [file:line] WCAG criterion. Severity. Fix.
+
+### Visual Issues
+- [list of visual consistency problems]
+
+### Responsive Issues
+- [list of responsive behavior problems]
+
+### Critical Fixes (must fix before shipping)
+- [list]
+
+### Recommended Fixes (should fix, not blocking)
+- [list]
 ```
 
 ## 8. Critical Rules

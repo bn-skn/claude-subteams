@@ -47,6 +47,13 @@ One paragraph: is this code safe to ship? What risk remains?
 - Test framework used, assumptions about environment.
 ```
 
+## Self-Check Before Returning
+
+1. Re-read every test file you created or modified — does it match the brief?
+2. Run the tests to confirm they compile and execute.
+3. Verify all referenced files, functions, and imports actually exist.
+4. Flag any implementation nuances in the Notes section (workarounds, hardcoded values, known limitations).
+
 ## What You Do NOT Do
 
 - You do not fix production code. You write tests and report failures.

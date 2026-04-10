@@ -1,7 +1,7 @@
 ---
 name: systematic-debugging
 description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
-type: flexible
+type: rigid
 ---
 
 # Systematic Debugging
@@ -152,7 +152,7 @@ You MUST complete each phase before proceeding to the next.
    - Automated test if possible
    - One-off test script if no framework
    - MUST have before fixing
-   - Use the `claude-subteams:test-driven-development` skill if available
+   - Use the `claude-subteams:adversarial-testing` skill if available
 
 2. **Implement Single Fix**
    - Address the root cause identified
