@@ -1159,7 +1159,56 @@ The plugin tests itself using its own skills:
 | User approval: small=do, big=plan first | Added Section 22 |
 | Future Codex integration | Added Section 25 |
 
-## 17. Recommended MCP Servers
+## 17. Dynamic User Interviewing
+
+Before any significant work, the orchestrator MUST ensure it fully understands the task. This is not optional — it prevents wasted effort and hallucinations.
+
+### Interview process
+
+```
+Task received → Orchestrator confident in ALL of these?
+  ├── Business logic / purpose → WHY are we doing this?
+  ├── Tech stack / constraints → WHAT tools, languages, frameworks?
+  ├── Edge cases / error scenarios → WHAT can go wrong?
+  ├── Success criteria → HOW do we know it's done?
+  ├── Scope boundaries → WHAT is out of scope?
+  │
+  ├── YES to all → proceed to planning/implementation
+  └── NO to any → ask clarifying questions (all in one message)
+        │
+        ├── User answers → re-evaluate confidence
+        └── Still unclear → ask follow-up (max 3 rounds of questions)
+```
+
+### Dynamic depth
+
+The interview adapts to task complexity:
+- Simple fix ("change button color") → 0 questions, just do it
+- Feature ("add authentication") → 3-5 questions (stack, flow, edge cases)
+- Architecture ("redesign the data layer") → 5-10 questions (constraints, migration, compatibility)
+
+### Subagent escalation to user
+
+When a subagent returns questions that the orchestrator cannot answer from context:
+1. Orchestrator collects the questions
+2. Presents them to the user: "My subagent working on X has questions I can't answer from our discussion:"
+3. User answers
+4. Orchestrator re-briefs the subagent with answers
+
+This is normal and expected. The orchestrator is NOT expected to know everything — asking the user is always better than guessing.
+
+### Red flags (interview skip rationalizations)
+
+| Thought | Reality |
+|---------|---------|
+| "I know what they want" | You're guessing. Ask. |
+| "The code makes it obvious" | Business context is not in code. Ask. |
+| "I'll figure it out as I go" | You'll build the wrong thing. Ask first. |
+| "They said 'just do it'" | They mean "don't overthink," not "don't ask." Clarify scope. |
+
+## 18. MCP Server Integration
+
+### Recommended MCP Servers
 
 Plugin adapts its capabilities based on available MCP servers. None are required — all are optional enhancements.
 
@@ -1171,7 +1220,37 @@ Plugin adapts its capabilities based on available MCP servers. None are required
 
 **Detection:** session-start hook checks for available MCP servers and reports capabilities. Skills that need MCP gracefully degrade if unavailable (e.g., design-qa skips screenshot comparison, uses code review only).
 
-## 18. Distribution & Installation
+### MCP Setup
+
+The plugin does NOT bundle MCP servers — they are installed separately. The install script recommends them:
+
+```bash
+# context7 (library docs) — installed as Claude Code plugin
+# Already available if plugin is enabled in settings.json
+
+# playwright (browser automation) — installed as Claude Code plugin
+# Already available if plugin is enabled in settings.json
+
+# firecrawl (web scraping) — requires API key
+# Add to project .mcp.json:
+{
+  "mcpServers": {
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": { "FIRECRAWL_API_KEY": "<your-key>" }
+    }
+  }
+}
+```
+
+**No .env needed for the plugin itself.** MCP servers that need API keys (firecrawl) are configured in the project's `.mcp.json`, not in the plugin. context7 and playwright are Claude Code plugins that need no API keys.
+
+### Plugin .mcp.json
+
+The plugin MAY ship a `.mcp.json` with recommended server configs. Users copy what they need to their project. The plugin never modifies project configs automatically.
+
+## 19. Distribution & Installation
 
 ### Install
 ```bash
@@ -1358,7 +1437,42 @@ Track these to validate the methodology works:
 
 Display metrics when user asks. No automated collection in v1 — manual tracking via doc-agent or CHANGELOG entries.
 
-## 28. Success Criteria
+## 28. Quality Assurance Process (for the plugin itself)
+
+The plugin was built by parallel subagents. This means potential inconsistencies. Mandatory QA:
+
+### Review cycle (iterate until stable)
+
+```
+1. Full review — subagent reads EVERY file, flags issues
+2. Fix — orchestrator fixes flagged issues
+3. Re-review — fresh subagent verifies fixes
+4. Repeat until clean pass
+```
+
+### What to check in review
+
+| Check | Why |
+|-------|-----|
+| Cross-references between skills | Skill A mentions skill B — does B exist? Is the name correct? |
+| Agent output contracts match skill expectations | code-review skill expects "pass/issues-found" — does code-reviewer agent return this? |
+| Namespace consistency | No remaining "superpowers:" references |
+| Frontmatter completeness | Every SKILL.md has name, description, type |
+| Checklist quality | Numbered steps, not vague prose. NEVER/ALWAYS/MUST present |
+| Red flags tables | Present in rigid skills |
+| No hallucinated tools/commands | Every bash command, CLI tool, library mentioned actually exists |
+| Forked skills properly adapted | Not just copy-paste from superpowers with broken references |
+
+### Review assignment
+
+Use 3 reviewer subagents in parallel:
+- Reviewer A: core + process + quality (20 files)
+- Reviewer B: architecture + security + design (12 files)
+- Reviewer C: prompt-eng + ops + specialized + agents + templates (22 files)
+
+Each reviewer gets: Read, Grep, Glob tools only. Reports issues in standard format.
+
+## 29. Success Criteria
 
 - [ ] All 43 skills have SKILL.md with frontmatter (including requires/conflicts-with), checklists, red flags
 - [ ] All 8 agents have .md with personality, approach, and output contract
