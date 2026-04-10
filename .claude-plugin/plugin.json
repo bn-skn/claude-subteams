@@ -1,0 +1,19 @@
+{
+  "name": "claude-subteams",
+  "description": "Team-based development methodology: orchestrator + specialized sub-teams with adversarial testing, architecture enforcement, and full SDLC coverage",
+  "version": "1.0.0",
+  "author": {
+    "name": "Bogdan",
+    "url": "https://github.com/bnskn/claude-subteams"
+  },
+  "keywords": [
+    "development-methodology",
+    "orchestration",
+    "subagents",
+    "testing",
+    "architecture",
+    "code-review",
+    "quality",
+    "security"
+  ]
+}

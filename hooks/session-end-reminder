@@ -1,0 +1,8 @@
+#!/bin/bash
+# Stop hook — reminds to update documentation before session ends
+
+echo "[subteams] Session ending. Quick checklist:"
+echo "  - BACKLOG.md updated? (completed tasks marked done)"
+echo "  - CHANGELOG.md updated? (if features/fixes shipped)"
+echo "  - Active plan moved to completed/? (if feature finished)"
+echo "  - ADR created? (if architectural decisions were made)"

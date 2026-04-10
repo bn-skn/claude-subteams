@@ -1,0 +1,57 @@
+#!/bin/bash
+# PreToolUse hook for Bash — checks git commit commands
+# Runs compilation check and warns about large files
+
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+
+# Only act on git commit commands
+if ! echo "$COMMAND" | grep -q "git commit"; then
+  exit 0
+fi
+
+ERRORS=""
+
+# Stack-agnostic compilation check
+if [ -f "tsconfig.json" ]; then
+  TSC_OUTPUT=$(npx tsc --noEmit 2>&1)
+  if [ $? -ne 0 ]; then
+    ERRORS="[subteams:pre-commit-gate] TypeScript compilation failed:\n$TSC_OUTPUT\n\nFix compilation errors before committing."
+  fi
+elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+  # Python — try mypy if available
+  if command -v mypy &>/dev/null; then
+    MYPY_OUTPUT=$(mypy . --no-error-summary 2>&1 | head -20)
+    if [ $? -ne 0 ]; then
+      ERRORS="[subteams:pre-commit-gate] mypy check found issues:\n$MYPY_OUTPUT"
+    fi
+  fi
+elif [ -f "go.mod" ]; then
+  GO_OUTPUT=$(go build ./... 2>&1)
+  if [ $? -ne 0 ]; then
+    ERRORS="[subteams:pre-commit-gate] Go build failed:\n$GO_OUTPUT"
+  fi
+fi
+
+# Check staged files for >200 lines
+LARGE_FILES=$(git diff --cached --name-only 2>/dev/null | while read f; do
+  if [ -f "$f" ]; then
+    LINES=$(wc -l < "$f")
+    if [ "$LINES" -gt 200 ]; then
+      echo "  $f ($LINES lines)"
+    fi
+  fi
+done)
+
+if [ -n "$ERRORS" ]; then
+  echo -e "$ERRORS"
+  exit 2
+fi
+
+if [ -n "$LARGE_FILES" ]; then
+  echo "[subteams:pre-commit-gate] Warning: these staged files exceed 200 lines:"
+  echo "$LARGE_FILES"
+  echo "Consider splitting them for better maintainability."
+fi
+
+exit 0

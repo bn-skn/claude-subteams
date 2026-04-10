@@ -1,0 +1,27 @@
+#!/bin/bash
+# SessionStart hook — injects using-subteams meta-skill
+# Reads the skill content and outputs it so Claude receives the methodology at session start
+
+PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SKILL_FILE="$PLUGIN_ROOT/skills/core/using-subteams/SKILL.md"
+
+if [ -f "$SKILL_FILE" ]; then
+  # Extract content after frontmatter (skip --- delimited header)
+  CONTENT=$(awk '/^---$/{c++;next}c>=2' "$SKILL_FILE")
+  if [ -z "$CONTENT" ]; then
+    CONTENT=$(cat "$SKILL_FILE")
+  fi
+  echo "$CONTENT"
+else
+  echo "claude-subteams plugin loaded. Warning: using-subteams skill not found at $SKILL_FILE"
+fi
+
+# Check for stale state from previous session
+if [ -f "BACKLOG.md" ]; then
+  # Check if any tasks are marked "In Progress" — might be stale from crashed session
+  IN_PROGRESS=$(grep -c "^\- \[ \].*In Progress\|^## In Progress" BACKLOG.md 2>/dev/null || true)
+  if [ "$IN_PROGRESS" -gt 0 ]; then
+    echo ""
+    echo "[subteams] Note: BACKLOG.md has in-progress items. Check if they are stale from a previous session."
+  fi
+fi

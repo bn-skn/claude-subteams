@@ -1,0 +1,25 @@
+#!/bin/bash
+# PostToolUse hook for Edit/Write — lightweight checks on source files
+
+INPUT=$(cat)
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+
+if [ -z "$FILE_PATH" ] || [ ! -f "$FILE_PATH" ]; then
+  exit 0
+fi
+
+# Block edits to CLAUDE.md and SKILL.md unless explicitly requested
+BASENAME=$(basename "$FILE_PATH")
+if [ "$BASENAME" = "CLAUDE.md" ] || [ "$BASENAME" = "SKILL.md" ]; then
+  echo "[subteams:post-edit-check] Warning: $BASENAME was modified. These are protected files — ensure the user explicitly requested this change."
+fi
+
+# Check file size
+if echo "$FILE_PATH" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
+  LINES=$(wc -l < "$FILE_PATH")
+  if [ "$LINES" -gt 200 ]; then
+    echo "[subteams:post-edit-check] Warning: $FILE_PATH is $LINES lines (>200). Consider splitting into smaller modules."
+  fi
+fi
+
+exit 0
