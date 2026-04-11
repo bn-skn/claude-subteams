@@ -62,9 +62,13 @@ Use this skill when creating new modules, reviewing project structure, or runnin
 
 ## File Rules
 
+**FIRST:** Check if the project has a `CONVENTIONS.md`. If it does — follow ITS rules, not these defaults. These defaults apply ONLY when no project conventions exist.
+
+To create a CONVENTIONS.md for a new project, use the template: `templates/CONVENTIONS.md` from this plugin.
+
 These apply to CODE files only (not documentation, not config, not generated files).
 
-### Size Limits
+### Size Limits (defaults — override via CONVENTIONS.md)
 
 1. **Maximum 200 lines per file.** Files over 200 lines are doing too much.
 2. **Maximum 30 lines per function or method.** Long functions hide complexity.

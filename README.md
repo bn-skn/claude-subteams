@@ -19,6 +19,23 @@ git clone https://github.com/bnskn/claude-subteams ~/.claude/plugins/claude-subt
 bash ~/.claude/plugins/claude-subteams/scripts/install.sh
 ```
 
+## Activation
+
+After install, add this snippet to your project's `CLAUDE.md` (or global `~/.claude/CLAUDE.md`):
+
+```markdown
+## Development Methodology
+
+For development tasks use the claude-subteams plugin (orchestrator + 9 specialized agents).
+Invoke skill "claude-subteams:using-subteams" before significant development work.
+For small fixes — act directly, invoke code-review after if logic changed.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate.
+```
+
+This is also available as a file: `templates/claudemd-snippet.md`.
+
+**To deactivate:** remove the snippet from CLAUDE.md. No need to uninstall the plugin.
+
 ## Skills
 
 | Sub-team | Skill | Description |

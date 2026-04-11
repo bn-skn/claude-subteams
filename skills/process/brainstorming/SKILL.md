@@ -127,16 +127,12 @@ Wait for the user's response. Only proceed once the user approves.
 - **Incremental validation** - Present design, get approval before moving on
 - **Be flexible** - Go back and clarify when something does not make sense
 
-## Visual Companion
+## Visual Content
 
-A browser-based companion for showing mockups, diagrams, and visual options during brainstorming. Available as a tool — not a mode.
+When brainstorming involves visual questions (UI mockups, architecture diagrams, layout comparisons), use available tools:
 
-**Offering the companion:** When you anticipate that upcoming questions will involve visual content (mockups, layouts, diagrams), offer it once for consent:
-> "Some of what we are working on might be easier to explain if I can show it to you in a web browser. I can put together mockups, diagrams, comparisons, and other visuals as we go. This feature is still new and can be token-intensive. Want to try it? (Requires opening a local URL)"
+- **Playwright browser** (if available via MCP) — render components, take screenshots, show mockups
+- **Excalidraw diagrams** — architecture, data flow, system diagrams
+- **Terminal** — for text-based questions (requirements, tradeoffs, scope decisions)
 
-**This offer MUST be its own message.** Do not combine it with clarifying questions or any other content.
-
-**Per-question decision:** Even after the user accepts, decide FOR EACH QUESTION whether to use the browser or the terminal. The test: **would the user understand this better by seeing it than reading it?**
-
-If they agree to the companion, read the detailed guide before proceeding:
-`skills/process/brainstorming/visual-companion.md`
+The test: **would the user understand this better by seeing it than reading it?** If yes — use a visual tool. If no — terminal is fine.
