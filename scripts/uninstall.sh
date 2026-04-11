@@ -16,16 +16,16 @@ if [ -f "$SETTINGS" ]; then
       node -e "
         const fs = require('fs');
         const s = JSON.parse(fs.readFileSync('$SETTINGS', 'utf8'));
-        s.enabledPlugins = (s.enabledPlugins || []).filter(p => p !== 'claude-subteams');
+        if (s.enabledPlugins) delete s.enabledPlugins['claude-subteams'];
         fs.writeFileSync('$SETTINGS', JSON.stringify(s, null, 2) + '\n');
       "
     elif command -v python3 &>/dev/null; then
       python3 - <<PYEOF
 import json
-path = '$SETTINGS'
+path = "$SETTINGS"
 with open(path) as f:
     s = json.load(f)
-s['enabledPlugins'] = [p for p in s.get('enabledPlugins', []) if p != 'claude-subteams']
+s.get('enabledPlugins', {}).pop('claude-subteams', None)
 with open(path, 'w') as f:
     json.dump(s, f, indent=2)
     f.write('\n')
@@ -58,7 +58,6 @@ fi
 
 echo ""
 echo "[claude-subteams] Uninstall complete."
-echo "  Note: Project-level files (BACKLOG.md, ARCHITECTURE.md, CONVENTIONS.md, etc.)"
-echo "  were NOT removed. Delete them manually if you no longer need them."
-echo ""
+echo "  Note: Project-level files (BACKLOG.md, CONVENTIONS.md, etc.) were NOT removed."
+echo "  Also remove the snippet from your CLAUDE.md if you added it."
 echo "  Restart Claude Code for changes to take effect."

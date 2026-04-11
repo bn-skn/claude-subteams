@@ -5,7 +5,7 @@ set -euo pipefail
 
 PLUGIN_DIR="$HOME/.claude/plugins/claude-subteams"
 SETTINGS="$HOME/.claude/settings.json"
-REPO_URL="https://github.com/bnskn/claude-subteams"
+REPO_URL="https://github.com/bn-skn/claude-subteams"
 
 echo "[claude-subteams] Installing..."
 
@@ -28,30 +28,26 @@ if [ ! -f "$SETTINGS" ]; then
   echo '{}' > "$SETTINGS"
 fi
 
-# Check if already enabled
+# enabledPlugins is an OBJECT {"plugin-name": true}, not an array
 if grep -q '"claude-subteams"' "$SETTINGS" 2>/dev/null; then
   echo "[claude-subteams] Already listed in settings.json."
 else
-  # Use node if available for safe JSON mutation; fall back to Python
   if command -v node &>/dev/null; then
     node -e "
       const fs = require('fs');
       const s = JSON.parse(fs.readFileSync('$SETTINGS', 'utf8'));
-      s.enabledPlugins = s.enabledPlugins || [];
-      if (!s.enabledPlugins.includes('claude-subteams')) {
-        s.enabledPlugins.push('claude-subteams');
-      }
+      if (!s.enabledPlugins) s.enabledPlugins = {};
+      s.enabledPlugins['claude-subteams'] = true;
       fs.writeFileSync('$SETTINGS', JSON.stringify(s, null, 2) + '\n');
     "
   elif command -v python3 &>/dev/null; then
     python3 - <<PYEOF
-import json, sys
-path = '$SETTINGS'
+import json
+path = "$SETTINGS"
 with open(path) as f:
     s = json.load(f)
-s.setdefault('enabledPlugins', [])
-if 'claude-subteams' not in s['enabledPlugins']:
-    s['enabledPlugins'].append('claude-subteams')
+s.setdefault('enabledPlugins', {})
+s['enabledPlugins']['claude-subteams'] = True
 with open(path, 'w') as f:
     json.dump(s, f, indent=2)
     f.write('\n')
@@ -64,11 +60,11 @@ fi
 
 # --- Warn about superpowers conflict --------------------------------------
 
-if grep -q '"superpowers"' "$SETTINGS" 2>/dev/null; then
+if grep -q '"superpowers@claude-plugins-official": true' "$SETTINGS" 2>/dev/null; then
   echo ""
   echo "[claude-subteams] WARNING: The 'superpowers' plugin is enabled."
-  echo "  claude-subteams provides its own methodology (brainstorming, plans, dispatch)."
-  echo "  Running both together may cause conflicts or redundant prompts."
+  echo "  claude-subteams includes its own methodology (brainstorming, plans, review, testing)."
+  echo "  Running both together may cause conflicts."
   echo ""
   read -r -p "  Disable superpowers now? [y/N] " ANSWER
   if [[ "${ANSWER,,}" == "y" ]]; then
@@ -76,16 +72,16 @@ if grep -q '"superpowers"' "$SETTINGS" 2>/dev/null; then
       node -e "
         const fs = require('fs');
         const s = JSON.parse(fs.readFileSync('$SETTINGS', 'utf8'));
-        s.enabledPlugins = (s.enabledPlugins || []).filter(p => p !== 'superpowers');
+        if (s.enabledPlugins) delete s.enabledPlugins['superpowers@claude-plugins-official'];
         fs.writeFileSync('$SETTINGS', JSON.stringify(s, null, 2) + '\n');
       "
     elif command -v python3 &>/dev/null; then
       python3 - <<PYEOF
 import json
-path = '$SETTINGS'
+path = "$SETTINGS"
 with open(path) as f:
     s = json.load(f)
-s['enabledPlugins'] = [p for p in s.get('enabledPlugins', []) if p != 'superpowers']
+s.get('enabledPlugins', {}).pop('superpowers@claude-plugins-official', None)
 with open(path, 'w') as f:
     json.dump(s, f, indent=2)
     f.write('\n')
@@ -109,10 +105,9 @@ echo "  Agents  : $AGENT_COUNT"
 # --- Recommended MCP servers ----------------------------------------------
 
 echo ""
-echo "[claude-subteams] Recommended MCP servers (not required, but improve research tasks):"
-echo "  - context7      : https://github.com/upstash/context7"
-echo "  - playwright    : https://github.com/microsoft/playwright-mcp"
-echo "  - github        : https://github.com/github/github-mcp-server"
+echo "[claude-subteams] Recommended MCP servers (not required):"
+echo "  - context7   : up-to-date library docs"
+echo "  - playwright : browser automation for design QA"
 
 # --- Offer to add CLAUDE.md snippet -----------------------------------------
 
@@ -120,7 +115,7 @@ echo ""
 SNIPPET_FILE="$PLUGIN_DIR/templates/claudemd-snippet.md"
 CLAUDEMD="CLAUDE.md"
 
-read -r -p "[claude-subteams] Would you like to add the claude-subteams snippet to your CLAUDE.md? [y/N] " ADD_SNIPPET
+read -r -p "[claude-subteams] Add the activation snippet to your CLAUDE.md? [y/N] " ADD_SNIPPET
 if [[ "${ADD_SNIPPET,,}" == "y" ]]; then
   if [ -f "$SNIPPET_FILE" ]; then
     echo "" >> "$CLAUDEMD"
