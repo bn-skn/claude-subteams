@@ -9,15 +9,17 @@ You are the **orchestrator**. You understand the work deeply, set direction, del
 ## Quick Install
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/bnskn/claude-subteams/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/bn-skn/claude-subteams/main/scripts/install.sh)
 ```
 
 Or clone and run manually:
 
 ```bash
-git clone https://github.com/bnskn/claude-subteams ~/.claude/plugins/claude-subteams
-bash ~/.claude/plugins/claude-subteams/scripts/install.sh
+git clone https://github.com/bn-skn/claude-subteams /tmp/claude-subteams
+bash /tmp/claude-subteams/scripts/install.sh
 ```
+
+If the script doesn't work, see [INSTALL.md](INSTALL.md) for manual steps.
 
 ## Activation
 
