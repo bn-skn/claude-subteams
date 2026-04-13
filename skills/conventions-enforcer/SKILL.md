@@ -1,8 +1,6 @@
 ---
 name: conventions-enforcer
 description: Validates project structure against CONVENTIONS.md. Checks file sizes, import directions, and naming conventions. Generates compliance reports and provides templates for new projects.
-sub-team: architecture
-type: rigid
 ---
 
 # Conventions Enforcer

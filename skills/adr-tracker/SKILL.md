@@ -1,8 +1,6 @@
 ---
 name: adr-tracker
 description: Tracks architectural decisions using lightweight MADR format. Creates, numbers, and stores ADRs in docs/adr/ for project-wide decision history.
-sub-team: architecture
-type: flexible
 ---
 
 # ADR Tracker

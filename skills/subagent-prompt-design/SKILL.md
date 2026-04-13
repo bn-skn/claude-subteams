@@ -1,7 +1,6 @@
 ---
 name: subagent-prompt-design
 description: "Design subagent prompts with minimal context, restricted tools, standardized output, and explicit handoff protocols."
-type: rigid
 ---
 
 # Subagent Prompt Design

@@ -1,9 +1,6 @@
 ---
 name: refactoring
 description: When and how to refactor safely. Identifies god-files, circular dependencies, and DRY violations. Small steps with tests at every stage.
-requires: []
-conflicts-with: []
-type: flexible
 ---
 
 # Refactoring

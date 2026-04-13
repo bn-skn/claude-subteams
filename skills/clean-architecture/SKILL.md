@@ -1,9 +1,6 @@
 ---
 name: clean-architecture
 description: Enforces layered architecture with strict dependency direction, file size limits, and naming conventions. Requires CONVENTIONS.md in project root.
-sub-team: architecture
-type: rigid
-requires: [conventions-enforcer]
 ---
 
 # Clean Architecture

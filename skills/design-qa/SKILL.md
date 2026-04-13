@@ -1,8 +1,6 @@
 ---
 name: design-qa
 description: "Design quality assurance: compare implementation against spec, run heuristic evaluation, check visual consistency and responsiveness."
-sub-team: design
-type: rigid
 ---
 
 # Design QA

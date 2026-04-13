@@ -1,8 +1,6 @@
 ---
 name: design-to-code
 description: "Pipeline from text spec to working code with design system, browser preview, and feedback loop. Code IS the mockup."
-sub-team: design
-type: flexible
 ---
 
 # Design-to-Code Pipeline

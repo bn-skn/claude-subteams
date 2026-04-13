@@ -1,7 +1,7 @@
 ---
 name: using-subteams
 description: "Use before any significant development work — establishing orchestrator methodology with 9 specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
-type: rigid
+version: 1.0.0
 ---
 
 # Using Subteams — Orchestrator Meta-Skill

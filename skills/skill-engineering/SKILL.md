@@ -1,7 +1,6 @@
 ---
 name: skill-engineering
 description: "Standards for writing high-quality SKILL.md files: one job per skill, numbered checklists, critical rules, and mandatory testing."
-type: rigid
 ---
 
 # Skill Engineering
@@ -43,7 +42,6 @@ Every SKILL.md MUST contain:
 ---
 name: kebab-case-name
 description: "One sentence. Starts with verb or noun. Ends with period."
-type: rigid | flexible
 ---
 ```
 

@@ -1,8 +1,6 @@
 ---
 name: api-design
 description: Guidelines for REST API design including resource naming, HTTP methods, status codes, versioning, validation with Zod, and OpenAPI spec generation.
-sub-team: architecture
-type: flexible
 ---
 
 # API Design

@@ -1,8 +1,6 @@
 ---
 name: database-design
 description: Guidelines for database schema design, migration management, query optimization, and SQLite-specific configuration including WAL mode and FTS5.
-sub-team: architecture
-type: flexible
 ---
 
 # Database Design

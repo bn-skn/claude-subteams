@@ -1,8 +1,6 @@
 ---
 name: service-boundaries
 description: Decision framework for service decomposition -- when to split vs keep together, bounded contexts, data ownership, and communication patterns.
-sub-team: architecture
-type: flexible
 ---
 
 # Service Boundaries

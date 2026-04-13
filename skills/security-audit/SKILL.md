@@ -1,8 +1,6 @@
 ---
 name: security-audit
 description: Security audit checklist covering OWASP Top 10, prompt injection protection, input validation, and auth/authz review. Dispatches to security-auditor agent for deep analysis.
-sub-team: security
-type: rigid
 ---
 
 # Security Audit

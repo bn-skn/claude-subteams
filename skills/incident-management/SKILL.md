@@ -1,7 +1,6 @@
 ---
 name: incident-management
 description: Use when responding to production incidents, conducting root cause analysis, or writing postmortems
-type: flexible
 ---
 
 # Incident Management

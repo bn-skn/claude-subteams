@@ -1,7 +1,6 @@
 ---
 name: prompt-evaluation
 description: "Evaluate prompts and skills with representative test inputs, regression test cases, and pass/fail metrics."
-type: rigid
 ---
 
 # Prompt Evaluation

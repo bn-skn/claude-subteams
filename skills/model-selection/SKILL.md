@@ -1,7 +1,6 @@
 ---
 name: model-selection
 description: "Guide for choosing sonnet vs opus for subagents."
-type: flexible
 ---
 
 # Model Selection — Sonnet vs Opus
@@ -80,6 +79,7 @@ Is the task routine with zero logic?
 | doc-agent | sonnet | opus if docs require technical accuracy review |
 | researcher | opus | Never — research requires synthesis |
 | security-auditor | opus | Never — security is always high-risk |
+| devils-advocate | opus | Never — challenging assumptions requires deep reasoning |
 
 ## 6. Critical Rules
 

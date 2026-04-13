@@ -1,9 +1,6 @@
 ---
 name: adversarial-testing
 description: Try to BREAK the code, not confirm it works. Write tests that find bugs through edge cases, invalid data, race conditions, and boundary violations.
-requires: []
-conflicts-with: [test-driven-development]
-type: rigid
 ---
 
 # Adversarial Testing

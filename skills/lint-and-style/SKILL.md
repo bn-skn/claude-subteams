@@ -1,9 +1,6 @@
 ---
 name: lint-and-style
 description: Enforce consistent code style and quality through linters, formatters, and editor configuration. Covers ESLint, Prettier, EditorConfig, and language-specific tooling.
-requires: []
-conflicts-with: []
-type: flexible
 ---
 
 # Lint and Style

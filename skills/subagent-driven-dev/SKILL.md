@@ -1,7 +1,6 @@
 ---
 name: subagent-driven-dev
 description: Use when executing implementation plans with independent tasks — fresh subagent per task with two-stage review
-type: rigid
 ---
 
 # Subagent-Driven Development

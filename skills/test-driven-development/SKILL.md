@@ -1,9 +1,6 @@
 ---
 name: test-driven-development
 description: Red-Green-Refactor cycle. Write the test first, watch it fail, write minimal code to pass. Optional alternative to adversarial-testing.
-requires: []
-conflicts-with: [adversarial-testing]
-type: rigid
 ---
 
 # Test-Driven Development (TDD)

@@ -1,9 +1,6 @@
 ---
 name: code-review
 description: Structured code review checklist covering security, correctness, performance, maintainability, and SOLID principles. Defines WHAT to check and HOW to brief the code-reviewer agent.
-requires: []
-conflicts-with: []
-type: rigid
 ---
 
 # Code Review

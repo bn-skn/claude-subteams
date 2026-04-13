@@ -1,9 +1,6 @@
 ---
 name: verification-gate
 description: Use when about to claim work is complete, fixed, or passing. Requires running verification commands, backup before destructive changes, doc freshness checks, and stack-agnostic compilation checks. Evidence before assertions, always.
-requires: []
-conflicts-with: []
-type: rigid
 ---
 
 # Verification Gate

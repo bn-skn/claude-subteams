@@ -1,7 +1,6 @@
 ---
 name: data-engineering
 description: Use when building data pipelines, ETL processes, data validation, or data quality systems
-type: flexible
 ---
 
 # Data Engineering

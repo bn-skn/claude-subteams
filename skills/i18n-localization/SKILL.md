@@ -1,7 +1,6 @@
 ---
 name: i18n-localization
 description: Use when implementing internationalization, translation workflows, or locale-specific formatting
-type: flexible
 ---
 
 # Internationalization and Localization

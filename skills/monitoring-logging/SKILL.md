@@ -1,7 +1,6 @@
 ---
 name: monitoring-logging
 description: Use when implementing structured logging, health checks, alerting, or observability for services
-type: flexible
 ---
 
 # Monitoring and Logging

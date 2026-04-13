@@ -1,7 +1,6 @@
 ---
 name: brainstorming
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
-type: rigid
 ---
 
 # Brainstorming Ideas Into Designs
@@ -40,9 +39,9 @@ You MUST create a task for each of these items and complete them in order:
 - Check out the current project state first (files, docs, recent commits)
 - Before asking detailed questions, assess scope: if the request describes multiple independent subsystems, flag this immediately. Do not spend questions refining details of a project that needs to be decomposed first.
 - If the project is too large for a single spec, help the user decompose into sub-projects. Then brainstorm the first sub-project through the normal design flow. Each sub-project gets its own spec, plan, and implementation cycle.
-- For appropriately-scoped projects, ask questions one at a time to refine the idea
+- For appropriately-scoped projects, ask all questions in one message (batch them). After the user answers, if new questions arise — send another batch. Never drip-feed questions one at a time.
 - Prefer multiple choice questions when possible, but open-ended is fine too
-- Only one question per message
+- Maximum 3 rounds of questions total
 - Focus on understanding: purpose, constraints, success criteria
 
 **Exploring approaches:**

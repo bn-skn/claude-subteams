@@ -1,8 +1,6 @@
 ---
 name: dependency-audit
 description: Audits project dependencies for vulnerabilities, lockfile integrity, license compliance, and unused packages. Defines update strategy for patch, minor, and major versions.
-sub-team: security
-type: flexible
 ---
 
 # Dependency Audit

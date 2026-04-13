@@ -1,7 +1,6 @@
 ---
 name: orchestrator-briefing
 description: "Subagent communication protocol. Use before any Agent tool call."
-type: rigid
 ---
 
 # Orchestrator Briefing — Subagent Communication Protocol

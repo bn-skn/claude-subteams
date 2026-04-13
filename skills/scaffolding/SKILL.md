@@ -1,7 +1,6 @@
 ---
 name: scaffolding
 description: Use when creating new services, modules, API endpoints, skills, or agents from templates
-type: flexible
 ---
 
 # Scaffolding
@@ -104,7 +103,6 @@ my-service/
 ---
 name: skill-name
 description: Use when [specific trigger condition]
-type: flexible
 ---
 ```
 
@@ -129,7 +127,6 @@ type: flexible
 ---
 name: agent-name
 description: Brief description of agent's role
-type: agent
 ---
 ```
 

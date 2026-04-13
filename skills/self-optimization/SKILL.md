@@ -1,7 +1,6 @@
 ---
 name: self-optimization
 description: "Iterative improvement cycle for prompts, skills, and CLAUDE.md: identify problem, diagnose, edit, test, deploy."
-type: flexible
 ---
 
 # Self-Optimization

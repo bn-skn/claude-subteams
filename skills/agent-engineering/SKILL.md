@@ -1,7 +1,6 @@
 ---
 name: agent-engineering
 description: "Design multi-agent systems: orchestrator + specialists pattern, context engineering, token efficiency, and standardized contracts."
-type: flexible
 ---
 
 # Agent Engineering

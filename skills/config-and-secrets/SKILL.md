@@ -1,8 +1,6 @@
 ---
 name: config-and-secrets
 description: Manages environment configuration, secrets protection, .gitignore enforcement, rotation strategy, and protected file integrity for CLAUDE.md and SKILL.md.
-sub-team: security
-type: flexible
 ---
 
 # Config and Secrets

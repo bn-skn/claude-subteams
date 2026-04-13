@@ -1,7 +1,6 @@
 ---
 name: git-workflow
 description: Branching strategy, conventional commits, and PR workflow for all development work
-type: rigid
 ---
 
 # Git Workflow
@@ -88,7 +87,6 @@ Closes #42
 
 refactor(api): extract validation into middleware
 
-test: add integration tests for payment flow
 ```
 
 ## The Correct Commit Pattern

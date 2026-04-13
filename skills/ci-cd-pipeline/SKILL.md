@@ -1,7 +1,6 @@
 ---
 name: ci-cd-pipeline
 description: Use when setting up or modifying CI/CD pipelines, deployment workflows, or environment promotion strategies
-type: flexible
 ---
 
 # CI/CD Pipeline
@@ -91,13 +90,11 @@ dev (auto on merge to main)
 
 ```yaml
 name: CI/CD Pipeline
-on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
-jobs:
   lint:
     runs-on: ubuntu-latest
     steps:

@@ -1,7 +1,6 @@
 ---
 name: executing-plans
 description: Use when you have a written implementation plan to execute with subagent orchestration and quality gates
-type: rigid
 ---
 
 # Executing Plans

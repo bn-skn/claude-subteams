@@ -1,7 +1,6 @@
 ---
 name: mobile-development
 description: Use when building, architecting, or deploying mobile applications with React Native, Flutter, or native platforms
-type: flexible
 ---
 
 # Mobile Development

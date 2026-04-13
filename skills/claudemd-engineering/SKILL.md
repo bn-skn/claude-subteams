@@ -1,7 +1,6 @@
 ---
 name: claudemd-engineering
 description: "Standards for writing and maintaining CLAUDE.md files: concise, prioritized, and regularly pruned."
-type: flexible
 ---
 
 # CLAUDE.md Engineering

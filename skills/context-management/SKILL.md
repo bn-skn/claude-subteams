@@ -1,7 +1,6 @@
 ---
 name: context-management
 description: "Managing context window, checkpoints, and session summaries."
-type: flexible
 ---
 
 # Context Management — Checkpoints, Compaction, and Session Summaries

@@ -1,9 +1,6 @@
 ---
 name: error-handling
 description: Resilient error handling patterns including retry with backoff, circuit breakers, graceful degradation, and structured error reporting. Fix root causes, not symptoms.
-requires: []
-conflicts-with: []
-type: flexible
 ---
 
 # Error Handling
