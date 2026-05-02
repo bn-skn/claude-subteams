@@ -5,7 +5,8 @@
       "hooks": [{
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start",
-        "async": false
+        "async": false,
+        "timeout": 10000
       }]
     }],
     "PreToolUse": [
@@ -14,7 +15,8 @@
         "hooks": [{
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-commit-gate",
-          "async": false
+          "async": false,
+          "timeout": 30000
         }]
       },
       {
@@ -22,7 +24,8 @@
         "hooks": [{
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-push-check",
-          "async": false
+          "async": false,
+          "timeout": 5000
         }]
       }
     ],
@@ -31,7 +34,8 @@
       "hooks": [{
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-check",
-        "async": true
+        "async": true,
+        "timeout": 5000
       }]
     }],
     "Stop": [{
@@ -39,7 +43,8 @@
       "hooks": [{
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-end-reminder",
-        "async": false
+        "async": false,
+        "timeout": 5000
       }]
     }],
     "UserPromptSubmit": [{
@@ -47,7 +52,8 @@
       "hooks": [{
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-check",
-        "async": true
+        "async": true,
+        "timeout": 5000
       }]
     }]
   }

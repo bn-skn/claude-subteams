@@ -3,36 +3,45 @@
 
 set -euo pipefail
 
-PLUGIN_DIR="$HOME/.claude/plugins/claude-subteams"
+MARKETPLACE="claude-subteams"
+PLUGIN_NAME="claude-subteams"
+PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/$MARKETPLACE/plugins/$PLUGIN_NAME"
+INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
 SETTINGS="$HOME/.claude/settings.json"
+PLUGIN_KEY="${PLUGIN_NAME}@${MARKETPLACE}"
 
 echo "[claude-subteams] Uninstalling..."
 
-# --- Remove from settings.json --------------------------------------------
+# --- Remove from settings.json (enabledPlugins) ------------------------------
 
 if [ -f "$SETTINGS" ]; then
-  if grep -q '"claude-subteams"' "$SETTINGS" 2>/dev/null; then
+  if grep -q "\"$PLUGIN_KEY\"" "$SETTINGS" 2>/dev/null; then
     if command -v node &>/dev/null; then
-      node -e "
-        const fs = require('fs');
-        const s = JSON.parse(fs.readFileSync('$SETTINGS', 'utf8'));
-        if (s.enabledPlugins) delete s.enabledPlugins['claude-subteams'];
-        fs.writeFileSync('$SETTINGS', JSON.stringify(s, null, 2) + '\n');
-      "
+      PLUGIN_KEY_VAL="$PLUGIN_KEY" SETTINGS_FILE="$SETTINGS" \
+      node -e '
+        const fs = require("fs");
+        const path = process.env.SETTINGS_FILE;
+        const key = process.env.PLUGIN_KEY_VAL;
+        const s = JSON.parse(fs.readFileSync(path, "utf8"));
+        if (s.enabledPlugins) delete s.enabledPlugins[key];
+        fs.writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
+      '
     elif command -v python3 &>/dev/null; then
-      python3 - <<PYEOF
-import json
-path = "$SETTINGS"
+      PLUGIN_KEY_VAL="$PLUGIN_KEY" SETTINGS_FILE="$SETTINGS" \
+      python3 -c '
+import json, os
+path = os.environ["SETTINGS_FILE"]
+key = os.environ["PLUGIN_KEY_VAL"]
 with open(path) as f:
     s = json.load(f)
-s.get('enabledPlugins', {}).pop('claude-subteams', None)
-with open(path, 'w') as f:
+s.get("enabledPlugins", {}).pop(key, None)
+with open(path, "w") as f:
     json.dump(s, f, indent=2)
-    f.write('\n')
-PYEOF
+    f.write("\n")
+'
     else
       echo "[claude-subteams] WARNING: Neither node nor python3 found."
-      echo "  Remove claude-subteams from enabledPlugins in $SETTINGS manually."
+      echo "  Remove \"$PLUGIN_KEY\" from enabledPlugins in $SETTINGS manually."
     fi
     echo "[claude-subteams] Removed from enabledPlugins in settings.json."
   else
@@ -42,18 +51,67 @@ else
   echo "[claude-subteams] settings.json not found — nothing to update."
 fi
 
-# --- Remove plugin directory ----------------------------------------------
+# --- Remove from installed_plugins.json --------------------------------------
+
+if [ -f "$INSTALLED_PLUGINS" ]; then
+  if grep -q "\"$PLUGIN_KEY\"" "$INSTALLED_PLUGINS" 2>/dev/null; then
+    if command -v node &>/dev/null; then
+      PLUGIN_KEY_VAL="$PLUGIN_KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" \
+      node -e '
+        const fs = require("fs");
+        const path = process.env.PLUGINS_FILE;
+        const key = process.env.PLUGIN_KEY_VAL;
+        const s = JSON.parse(fs.readFileSync(path, "utf8"));
+        if (s.plugins) delete s.plugins[key];
+        fs.writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
+      '
+    elif command -v python3 &>/dev/null; then
+      PLUGIN_KEY_VAL="$PLUGIN_KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" \
+      python3 -c '
+import json, os
+path = os.environ["PLUGINS_FILE"]
+key = os.environ["PLUGIN_KEY_VAL"]
+with open(path) as f:
+    s = json.load(f)
+s.get("plugins", {}).pop(key, None)
+with open(path, "w") as f:
+    json.dump(s, f, indent=2)
+    f.write("\n")
+'
+    fi
+    echo "[claude-subteams] Removed from installed_plugins.json."
+  else
+    echo "[claude-subteams] Not found in installed_plugins.json."
+  fi
+fi
+
+# --- Remove plugin directory --------------------------------------------------
 
 if [ -d "$PLUGIN_DIR" ]; then
-  read -r -p "[claude-subteams] Remove $PLUGIN_DIR? [y/N] " ANSWER
+  if [ -t 0 ] || [ -e /dev/tty ]; then
+    read -r -p "[claude-subteams] Remove $PLUGIN_DIR? [y/N] " ANSWER </dev/tty 2>/dev/null || ANSWER="y"
+  else
+    ANSWER="y"
+  fi
   if [[ "${ANSWER,,}" == "y" ]]; then
     rm -rf "$PLUGIN_DIR"
     echo "[claude-subteams] Plugin directory removed."
+    # Clean up empty parent dirs
+    rmdir "$HOME/.claude/plugins/marketplaces/$MARKETPLACE/plugins" 2>/dev/null || true
+    rmdir "$HOME/.claude/plugins/marketplaces/$MARKETPLACE" 2>/dev/null || true
   else
     echo "[claude-subteams] Plugin directory kept at $PLUGIN_DIR."
   fi
 else
-  echo "[claude-subteams] Plugin directory not found — nothing to remove."
+  echo "[claude-subteams] Plugin directory not found at $PLUGIN_DIR — nothing to remove."
+fi
+
+# --- Clean up old install path (if exists) ------------------------------------
+
+OLD_DIR="$HOME/.claude/plugins/claude-subteams"
+if [ -d "$OLD_DIR" ]; then
+  echo "[claude-subteams] Found old install at $OLD_DIR — removing..."
+  rm -rf "$OLD_DIR"
 fi
 
 echo ""

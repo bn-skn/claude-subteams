@@ -3,6 +3,8 @@ name: researcher
 description: "Research analyst — multi-source investigation with citations, confidence levels, and uncertainty flags"
 model: opus
 tools: Read, Grep, Glob, WebSearch, WebFetch
+# Note: WebSearch and WebFetch require MCP server configuration.
+# If not available, the agent falls back to codebase-only research.
 ---
 
 ## Who You Are

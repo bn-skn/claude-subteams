@@ -1,6 +1,6 @@
 #!/bin/bash
 # UserPromptSubmit hook — scope detection
-# Analyzes user prompt for development-related keywords
+# Analyzes user prompt for development-related patterns
 
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.user_prompt // empty' 2>/dev/null)
@@ -9,13 +9,11 @@ if [ -z "$PROMPT" ]; then
   exit 0
 fi
 
-# Dev keywords (case-insensitive check)
-if echo "$PROMPT" | grep -qiE 'fix|bug|implement|refactor|test|deploy|build|code|feature|endpoint|api|database|migration|component|module|service|hook|skill|agent|commit|push|merge|branch|lint|review'; then
+# Dev patterns — compound phrases that clearly indicate development work
+if echo "$PROMPT" | grep -qiE 'fix (the |a |this )?bug|implement\s+\w|refactor|write tests?|deploy to|run build|add (endpoint|feature|component)|create (api|migration|service)|git (commit|push|merge|branch)|code review|pull request'; then
   echo "[subteams:scope] Development task detected."
-elif echo "$PROMPT" | grep -qiE 'design|ui|ux|layout|style|css|tailwind|responsive|mockup'; then
+elif echo "$PROMPT" | grep -qiE 'design (the |a )?ui|mockup|layout|style (the |a )'; then
   echo "[subteams:scope] Design task detected."
-else
-  echo "[subteams:scope] Non-development task. Plugin skills not applicable — respond directly."
 fi
 
 exit 0
