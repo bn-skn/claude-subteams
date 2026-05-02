@@ -183,10 +183,10 @@ echo "  Agents : $AGENT_COUNT"
 echo "  Hooks  : $HOOK_COUNT"
 echo "  Path   : $PLUGIN_DIR"
 
-if [ "$SKILL_COUNT" -lt 40 ]; then
+if [ "$SKILL_COUNT" -lt 10 ]; then
   echo ""
-  echo "[claude-subteams] WARNING: Expected 46 skills, found $SKILL_COUNT."
-  echo "  The plugin may not work correctly. See INSTALL.md for troubleshooting."
+  echo "[claude-subteams] WARNING: Only $SKILL_COUNT skills found — something went wrong."
+  echo "  See INSTALL.md for troubleshooting."
 fi
 
 # --- CLAUDE.md snippet (interactive only) ---------------------------------

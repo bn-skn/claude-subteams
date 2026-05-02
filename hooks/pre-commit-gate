@@ -2,11 +2,18 @@
 # PreToolUse hook for Bash — checks git commit commands
 # Runs compilation check and warns about large files
 
+# Source nvm if available (hooks run in minimal shell without .bashrc)
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
-# Only act on git commit commands
-if ! echo "$COMMAND" | grep -q "git commit"; then
+# Only act on commands containing git commit (skip echo/printf/comments)
+if ! echo "$COMMAND" | grep -qE '\bgit\s+commit\b'; then
+  exit 0
+fi
+if echo "$COMMAND" | grep -qE '^\s*(echo|printf|#)'; then
   exit 0
 fi
 
@@ -14,28 +21,32 @@ ERRORS=""
 
 # Stack-agnostic compilation check
 if [ -f "tsconfig.json" ]; then
-  TSC_OUTPUT=$(npx tsc --noEmit 2>&1)
-  if [ $? -ne 0 ]; then
-    ERRORS="[subteams:pre-commit-gate] TypeScript compilation failed:\n$TSC_OUTPUT\n\nFix compilation errors before committing."
+  if command -v npx &>/dev/null; then
+    if ! TSC_OUTPUT=$(npx tsc --noEmit 2>&1); then
+      ERRORS="[subteams:pre-commit-gate] TypeScript compilation failed:\n$TSC_OUTPUT\n\nFix compilation errors before committing."
+    fi
+  else
+    echo "[subteams:pre-commit-gate] Warning: npx not found in PATH — skipping TypeScript check. Ensure nvm is set up or node is installed globally."
   fi
 elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
-  # Python — try mypy if available
   if command -v mypy &>/dev/null; then
-    MYPY_OUTPUT=$(mypy . --no-error-summary 2>&1 | head -20)
-    if [ $? -ne 0 ]; then
+    if ! MYPY_OUTPUT=$(mypy . --no-error-summary 2>&1 | head -20); then
       ERRORS="[subteams:pre-commit-gate] mypy check found issues:\n$MYPY_OUTPUT"
     fi
   fi
 elif [ -f "go.mod" ]; then
-  GO_OUTPUT=$(go build ./... 2>&1)
-  if [ $? -ne 0 ]; then
-    ERRORS="[subteams:pre-commit-gate] Go build failed:\n$GO_OUTPUT"
+  if command -v go &>/dev/null; then
+    if ! GO_OUTPUT=$(go build ./... 2>&1); then
+      ERRORS="[subteams:pre-commit-gate] Go build failed:\n$GO_OUTPUT"
+    fi
+  else
+    echo "[subteams:pre-commit-gate] Warning: go not found in PATH — skipping Go build check."
   fi
 fi
 
-# Check staged files for >200 lines
+# Check staged files for >200 lines (total file size, not diff)
 LARGE_FILES=$(git diff --cached --name-only 2>/dev/null | while read f; do
-  if [ -f "$f" ]; then
+  if [ -f "$f" ] && echo "$f" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
     LINES=$(wc -l < "$f")
     if [ "$LINES" -gt 200 ]; then
       echo "  $f ($LINES lines)"
@@ -49,7 +60,7 @@ if [ -n "$ERRORS" ]; then
 fi
 
 if [ -n "$LARGE_FILES" ]; then
-  echo "[subteams:pre-commit-gate] Warning: these staged files exceed 200 lines:"
+  echo "[subteams:pre-commit-gate] Warning: these files exceed 200 lines:"
   echo "$LARGE_FILES"
   echo "Consider splitting them for better maintainability."
 fi

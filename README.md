@@ -21,6 +21,35 @@ bash /tmp/claude-subteams/scripts/install.sh
 
 If the script doesn't work, see [INSTALL.md](INSTALL.md) for manual steps.
 
+### Development / Testing
+
+To test the plugin locally without installing:
+
+```bash
+git clone https://github.com/bn-skn/claude-subteams /path/to/claude-subteams
+claude --plugin-dir /path/to/claude-subteams
+```
+
+Use `/reload-plugins` inside Claude Code to hot-reload after changes.
+
+### Requirements
+
+- **Node.js** (via nvm or global) — required for pre-commit-gate hook (tsc check)
+- **jq** — used by hooks to parse JSON input
+- **git** — install.sh clones via git
+
+### Update
+
+```bash
+bash /path/to/claude-subteams/scripts/update.sh
+```
+
+### Uninstall
+
+```bash
+bash /path/to/claude-subteams/scripts/uninstall.sh
+```
+
 ## Activation
 
 After install, add this snippet to your project's `CLAUDE.md` (or global `~/.claude/CLAUDE.md`):
