@@ -3,6 +3,13 @@
 
 set -euo pipefail
 
+# --- Safety checks ------------------------------------------------------------
+
+if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ]; then
+  echo "[claude-subteams] ERROR: \$HOME is unset or root. Aborting." >&2
+  exit 1
+fi
+
 MARKETPLACE="claude-subteams"
 PLUGIN_NAME="claude-subteams"
 PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/$MARKETPLACE/plugins/$PLUGIN_NAME"

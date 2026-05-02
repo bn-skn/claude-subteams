@@ -1,15 +1,19 @@
 #!/bin/bash
 # PreToolUse hook for Bash — warns before git push
 
-INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+if ! command -v jq &>/dev/null; then
+  exit 0
+fi
 
-if ! echo "$COMMAND" | grep -qE '^\s*git\s+push\b'; then
+INPUT=$(cat)
+COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+
+if ! printf '%s\n' "$COMMAND" | grep -qE '\bgit\s+push\b'; then
   exit 0
 fi
 
 # Strong warning for main/master (word boundary match)
-if echo "$COMMAND" | grep -qE '\b(main|master)\b'; then
+if printf '%s\n' "$COMMAND" | grep -qE '\b(main|master)\b'; then
   echo "[subteams:pre-push-check] WARNING: Pushing directly to main/master. Are you sure? Consider using a feature branch and PR."
 else
   echo "[subteams:pre-push-check] Pushing to remote. Confirm: tests passed and code reviewed this session?"
