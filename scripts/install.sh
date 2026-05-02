@@ -17,15 +17,33 @@ if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ]; then
   exit 1
 fi
 
-MARKETPLACE="claude-subteams"
+MARKETPLACE="bn-skn"
 PLUGIN_NAME="claude-subteams"
 PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/$MARKETPLACE/plugins/$PLUGIN_NAME"
+MARKETPLACE_DIR="$HOME/.claude/plugins/marketplaces/$MARKETPLACE"
 INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
+KNOWN_MARKETPLACES="$HOME/.claude/plugins/known_marketplaces.json"
 SETTINGS="$HOME/.claude/settings.json"
 REPO_URL="https://github.com/bn-skn/claude-subteams"
 PLUGIN_KEY="${PLUGIN_NAME}@${MARKETPLACE}"
 
 echo "[claude-subteams] Installing..."
+
+# --- Check dependencies -------------------------------------------------------
+
+MISSING_DEPS=""
+if ! command -v git &>/dev/null; then MISSING_DEPS="$MISSING_DEPS git"; fi
+if ! command -v jq &>/dev/null; then
+  echo "[claude-subteams] WARNING: jq not found. Plugin hooks require jq to parse JSON."
+  echo "  Install: apt install jq / brew install jq / apk add jq"
+fi
+if ! command -v node &>/dev/null && ! command -v python3 &>/dev/null; then
+  MISSING_DEPS="$MISSING_DEPS node-or-python3"
+fi
+if [ -n "$MISSING_DEPS" ]; then
+  echo "[claude-subteams] ERROR: Missing required dependencies:$MISSING_DEPS" >&2
+  exit 1
+fi
 
 # --- Clone or update ----------------------------------------------------------
 
@@ -60,12 +78,135 @@ except: print("unknown", end="")
   fi
 fi
 
-# --- Clean up old install path (if exists) ------------------------------------
+# --- Create marketplace wrapper -----------------------------------------------
 
-OLD_DIR="$HOME/.claude/plugins/claude-subteams"
-if [ -d "$OLD_DIR" ] && [ "$OLD_DIR" != "$PLUGIN_DIR" ]; then
-  echo "[claude-subteams] Removing old install at $OLD_DIR..."
-  rm -rf "$OLD_DIR"
+MARKETPLACE_JSON="$MARKETPLACE_DIR/.claude-plugin/marketplace.json"
+if [ ! -f "$MARKETPLACE_JSON" ]; then
+  mkdir -p "$MARKETPLACE_DIR/.claude-plugin"
+  cat > "$MARKETPLACE_JSON" << MEOF
+{
+  "\$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "$MARKETPLACE",
+  "description": "Local marketplace for claude-subteams plugin",
+  "owner": {
+    "name": "Bogdan",
+    "url": "https://github.com/bn-skn"
+  },
+  "plugins": [
+    {
+      "name": "$PLUGIN_NAME",
+      "description": "Orchestrator + 9 specialized sub-team agents with quality pipeline and SDLC hooks",
+      "category": "development",
+      "source": "./plugins/$PLUGIN_NAME",
+      "homepage": "https://github.com/bn-skn/claude-subteams"
+    }
+  ]
+}
+MEOF
+  echo "[claude-subteams] Created marketplace wrapper at $MARKETPLACE_DIR."
+fi
+
+# --- Register marketplace in known_marketplaces.json --------------------------
+
+mkdir -p "$HOME/.claude/plugins"
+if [ ! -f "$KNOWN_MARKETPLACES" ]; then
+  echo '{}' > "$KNOWN_MARKETPLACES"
+fi
+
+if ! grep -q "\"$MARKETPLACE\"" "$KNOWN_MARKETPLACES" 2>/dev/null; then
+  if command -v node &>/dev/null; then
+    MKT_NAME="$MARKETPLACE" MKT_DIR="$MARKETPLACE_DIR" MKT_FILE="$KNOWN_MARKETPLACES" \
+    node -e '
+      const fs = require("fs");
+      const path = process.env.MKT_FILE;
+      const name = process.env.MKT_NAME;
+      const dir = process.env.MKT_DIR;
+      const s = JSON.parse(fs.readFileSync(path, "utf8"));
+      s[name] = {
+        source: { source: "local", path: dir },
+        installLocation: dir,
+        lastUpdated: new Date().toISOString()
+      };
+      fs.writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
+    '
+  elif command -v python3 &>/dev/null; then
+    MKT_NAME="$MARKETPLACE" MKT_DIR="$MARKETPLACE_DIR" MKT_FILE="$KNOWN_MARKETPLACES" \
+    python3 -c '
+import json, os
+from datetime import datetime, timezone
+path = os.environ["MKT_FILE"]
+name = os.environ["MKT_NAME"]
+d = os.environ["MKT_DIR"]
+with open(path) as f:
+    s = json.load(f)
+s[name] = {
+    "source": {"source": "local", "path": d},
+    "installLocation": d,
+    "lastUpdated": datetime.now(timezone.utc).isoformat()
+}
+with open(path, "w") as f:
+    json.dump(s, f, indent=2)
+    f.write("\n")
+'
+  fi
+  echo "[claude-subteams] Registered marketplace in known_marketplaces.json."
+else
+  echo "[claude-subteams] Marketplace already registered."
+fi
+
+# --- Clean up old install paths -----------------------------------------------
+
+# Old marketplace name (claude-subteams == plugin name, causes cache recursion bug)
+OLD_MKT_DIR="$HOME/.claude/plugins/marketplaces/claude-subteams"
+if [ -d "$OLD_MKT_DIR" ] && [ "$OLD_MKT_DIR" != "$MARKETPLACE_DIR" ]; then
+  echo "[claude-subteams] Migrating from old marketplace path..."
+  rm -rf "$OLD_MKT_DIR"
+  # Clean old marketplace from known_marketplaces.json
+  if command -v node &>/dev/null; then
+    MKT_FILE="$KNOWN_MARKETPLACES" node -e '
+      const fs = require("fs");
+      const path = process.env.MKT_FILE;
+      const s = JSON.parse(fs.readFileSync(path, "utf8"));
+      delete s["claude-subteams"];
+      fs.writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
+    ' 2>/dev/null || true
+  fi
+fi
+
+# Old flat install path
+OLD_FLAT="$HOME/.claude/plugins/claude-subteams"
+if [ -d "$OLD_FLAT" ]; then
+  rm -rf "$OLD_FLAT"
+fi
+
+# Clean old enabledPlugins key
+OLD_KEY="claude-subteams@claude-subteams"
+if [ "$OLD_KEY" != "$PLUGIN_KEY" ] && grep -q "\"$OLD_KEY\"" "$SETTINGS" 2>/dev/null; then
+  if command -v node &>/dev/null; then
+    OLD_KEY_VAL="$OLD_KEY" SETTINGS_FILE="$SETTINGS" node -e '
+      const fs = require("fs");
+      const path = process.env.SETTINGS_FILE;
+      const key = process.env.OLD_KEY_VAL;
+      const s = JSON.parse(fs.readFileSync(path, "utf8"));
+      if (s.enabledPlugins) delete s.enabledPlugins[key];
+      fs.writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
+    ' 2>/dev/null || true
+  fi
+  echo "[claude-subteams] Cleaned old enabledPlugins key."
+fi
+
+# Clean old installed_plugins key
+if [ "$OLD_KEY" != "$PLUGIN_KEY" ] && grep -q "\"$OLD_KEY\"" "$INSTALLED_PLUGINS" 2>/dev/null; then
+  if command -v node &>/dev/null; then
+    OLD_KEY_VAL="$OLD_KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" node -e '
+      const fs = require("fs");
+      const path = process.env.PLUGINS_FILE;
+      const key = process.env.OLD_KEY_VAL;
+      const s = JSON.parse(fs.readFileSync(path, "utf8"));
+      if (s.plugins) delete s.plugins[key];
+      fs.writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
+    ' 2>/dev/null || true
+  fi
 fi
 
 # --- Register in installed_plugins.json ---------------------------------------
@@ -211,6 +352,7 @@ echo "[claude-subteams] Installed (v$PLUGIN_VERSION):"
 echo "  Skills : $SKILL_COUNT"
 echo "  Agents : $AGENT_COUNT"
 echo "  Hooks  : $HOOK_COUNT"
+echo "  Key    : $PLUGIN_KEY"
 echo "  Path   : $PLUGIN_DIR"
 
 if [ "$SKILL_COUNT" -lt 10 ]; then

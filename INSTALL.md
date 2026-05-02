@@ -5,7 +5,7 @@ If the install script doesn't work, follow these steps manually.
 ## Step 1: Clone the repo
 
 ```bash
-git clone https://github.com/bn-skn/claude-subteams ~/.claude/plugins/marketplaces/claude-subteams/plugins/claude-subteams
+git clone https://github.com/bn-skn/claude-subteams ~/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams
 ```
 
 ## Step 2: Register the plugin
@@ -16,10 +16,10 @@ Add to `~/.claude/plugins/installed_plugins.json` (create if missing):
 {
   "version": 2,
   "plugins": {
-    "claude-subteams@claude-subteams": [
+    "claude-subteams@bn-skn": [
       {
         "scope": "user",
-        "installPath": "/YOUR/HOME/.claude/plugins/marketplaces/claude-subteams/plugins/claude-subteams",
+        "installPath": "/YOUR/HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams",
         "version": "1.1.0",
         "installedAt": "2026-01-01T00:00:00.000Z",
         "lastUpdated": "2026-01-01T00:00:00.000Z"
@@ -38,7 +38,7 @@ Add to `~/.claude/settings.json`:
 ```json
 {
   "enabledPlugins": {
-    "claude-subteams@claude-subteams": true
+    "claude-subteams@bn-skn": true
   }
 }
 ```
@@ -72,7 +72,7 @@ Restart Claude Code (new session or `/reload-plugins`), then check:
 
 **Plugin not recognized?**
 - Check `installed_plugins.json` — `installPath` must be absolute and correct
-- Check `settings.json` — `enabledPlugins` key must match exactly: `"claude-subteams@claude-subteams": true`
+- Check `settings.json` — `enabledPlugins` key must match exactly: `"claude-subteams@bn-skn": true`
 
 **Conflicts with superpowers?**
 - Remove `"superpowers@claude-plugins-official": true` from `settings.json` enabledPlugins

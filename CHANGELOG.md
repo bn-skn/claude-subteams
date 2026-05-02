@@ -43,3 +43,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - install.sh, uninstall.sh, update.sh scripts
 - Templates: CONVENTIONS.md, ARCHITECTURE.md, BACKLOG.md, CHANGELOG.md, ADR template
 - Hooks: pre-commit-gate, pre-push-check, post-edit-check, session-start, session-end-reminder, user-prompt-check
+
+## [1.2.0] - 2026-05-03
+
+### Fixed
+- **Critical:** Renamed marketplace from "claude-subteams" to "bn-skn" to avoid cache recursion bug (#34200) when marketplace name == plugin name
+- install.sh: now creates marketplace wrapper and registers in known_marketplaces.json
+- install.sh: jq dependency check with warning at install time
+- install.sh: git dependency check (hard fail)
+- uninstall.sh: cleans known_marketplaces.json
+- All scripts: migration from old marketplace name (claude-subteams@claude-subteams → claude-subteams@bn-skn)
+
+### Changed
+- Plugin key changed: `claude-subteams@claude-subteams` → `claude-subteams@bn-skn`
+- Version bumped to 1.2.0
