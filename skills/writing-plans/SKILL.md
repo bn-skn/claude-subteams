@@ -129,6 +129,28 @@ Every step MUST contain the actual content an engineer needs. These are **plan f
 - Steps that describe what to do without showing how (code blocks required for code steps)
 - References to types, functions, or methods not defined in any task
 
+## Risks & Nuances Section (Mandatory)
+
+Every plan MUST include a Risks & Nuances section after the task list:
+
+```markdown
+## Risks & Nuances
+
+### Known Risks
+- [Risk]: Description, probability (low/medium/high), impact, mitigation
+
+### Non-Obvious Behavior
+- [Nuance]: What might surprise the implementer or reviewer
+
+### Dependencies
+- [Dep]: What this feature depends on, what depends on it, migration concerns
+
+### Rollback Plan
+- How to revert if things go wrong (git revert, data migrations, API contracts, external state)
+```
+
+If you cannot identify ANY risks — you have not thought hard enough. Re-read the plan and consider: what if the network is down? What if the data is malformed? What if two users do this simultaneously? What if the dependency changes its API?
+
 ## Remember
 - Exact file paths always
 - Complete code in every step — if a step changes code, show the code

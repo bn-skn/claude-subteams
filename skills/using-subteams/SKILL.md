@@ -1,6 +1,6 @@
 ---
 name: using-subteams
-description: "Use before any significant development work — establishing orchestrator methodology with 9 specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
+description: "Use before any significant development work — establishing orchestrator methodology with 10 specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
 version: 1.0.0
 ---
 
@@ -45,9 +45,10 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 | 6 | doc-agent | sonnet | Read, Write, Edit, Grep, Glob | Doc freshness after code changes | Updated docs + diff summary |
 | 7 | researcher | opus | Read, Grep, Glob, WebSearch, WebFetch | Uncertain technology, unfamiliar APIs, deep research | Research summary + recommendations |
 | 8 | security-auditor | opus | Read, Grep, Glob, Bash | Security-sensitive changes, secrets, auth, crypto | Vulnerability report + severity |
-| 9 | devils-advocate | opus | Read, Grep, Glob | Full pipeline: challenges assumptions, edge cases, scale, necessity | Challenge report + rebuttals |
+| 9 | developer | sonnet | Read, Write, Edit, Bash, Grep, Glob | Implementation tasks dispatched via executing-plans | Code changes + test results + risks |
+| 10 | devils-advocate | opus | Read, Grep, Glob | Full pipeline: challenges assumptions, edge cases, scale, necessity | Challenge report + rebuttals |
 
-**Model note:** All agents default to opus except doc-agent (sonnet). See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
+**Model note:** All agents default to opus except doc-agent and developer (sonnet). See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
 
 ## 3. Scope Detection
 
@@ -94,33 +95,68 @@ Before starting any task, scan available skills for relevance.
 
 Every development task follows one of three pipelines. Choose based on scope and risk.
 
-```dot
-digraph pipeline_decision {
-    rankdir=LR;
-    "Classify task" [shape=box];
-    "< 3 files,\nno logic?" [shape=diamond];
-    "Structural\nchange?" [shape=diamond];
-    "Lightweight" [shape=box, style=filled, fillcolor="#e8f5e9"];
-    "Full" [shape=box, style=filled, fillcolor="#fff3e0"];
-    "Full + Arch" [shape=box, style=filled, fillcolor="#fce4ec"];
-
-    "Classify task" -> "< 3 files,\nno logic?";
-    "< 3 files,\nno logic?" -> "Lightweight" [label="yes"];
-    "< 3 files,\nno logic?" -> "Structural\nchange?" [label="no"];
-    "Structural\nchange?" -> "Full + Arch" [label="yes"];
-    "Structural\nchange?" -> "Full" [label="no"];
-}
-```
-
-| Pipeline | Criteria | Steps | Agents Involved |
-|----------|----------|-------|-----------------|
-| **Lightweight** | < 3 files, no business logic, mechanical changes (renames, imports, formatting, config) | Implement → tsc/lint → done | You alone |
-| **Full** | Business logic, 3+ files, cross-module, user-facing behavior | Implement → tsc → code-reviewer → devils-advocate → test-engineer → commit | code-reviewer, devils-advocate, test-engineer |
-| **Full + Architecture** | New module, structural change, dependency changes, API surface changes | Full pipeline + architecture-guard + doc-agent | All of Full + architecture-guard, doc-agent |
+| Pipeline | Criteria | Steps |
+|----------|----------|-------|
+| **Lightweight** | < 3 files, no business logic, mechanical changes | Implement → tsc/lint → done |
+| **Full** | Business logic, 3+ files, cross-module, user-facing | See Full Pipeline below |
+| **Full + Architecture** | New module, structural change, dependency changes | Full Pipeline + architecture-guard + doc-agent |
 
 **Pipeline escalation:** If you start lightweight and discover the change is more complex than expected — STOP and escalate to full. Do not continue lightweight "because you already started."
 
 **Pipeline shortcuts:** The user can say "skip review" or "just do it" to bypass gates. Honor this — they are the leader. But log that gates were skipped.
+
+### Full Pipeline (step by step)
+
+```
+1. BRAINSTORM     → Understand task (brainstorming skill)
+2. PLAN           → Write implementation plan (writing-plans skill)
+3. DEFEND PLAN    → Devils-advocate reviews the plan (catches bad assumptions early)
+4. BACKUP         → git tag backup/pre-<feature>-$(date +%s)
+5. IMPLEMENT      → Developer agent writes code (dispatched via executing-plans or subagent-driven-dev)
+   └── Per task:  developer implements → tsc check → (orchestrator reviews before commit)
+6. TRIPLE REVIEW  → Three reviewers in parallel:
+   ├── code-reviewer    (correctness, SOLID, security)
+   ├── architecture-guard (structure, dependencies, drift)
+   └── devils-advocate   (assumptions, edge cases, scale)
+7. FIX FINDINGS   → Address critical/important findings from all 3 reviewers
+8. TEST           → test-engineer writes adversarial tests
+9. VERIFY         → verification-gate (evidence before claims)
+10. RISKS & DOCS  → Document risks, nuances, update docs (doc-agent)
+11. FINISH        → finishing-branch (merge/PR)
+12. CLEANUP       → Remove backup tag, worktree
+```
+
+**Steps 1-3** can be compressed for well-understood tasks. If the user says "just implement X" and X is clear — skip brainstorming, write a brief plan, and proceed.
+
+**Step 3 (Plan Defense)** is where devils-advocate reviews the PLAN, not the code. This catches:
+- Over-engineering ("do we really need this?")
+- Missing edge cases in the design
+- Dependency risks
+- Scale assumptions
+
+**Step 6 (Triple Review)** runs three agents IN PARALLEL after implementation:
+- Dispatch all three in a single message (one Agent call per reviewer)
+- Collect findings, deduplicate, prioritize
+- Fix critical findings before testing
+
+**Step 10 (Risks & Docs)** is mandatory for Full pipeline:
+- Every plan must have a "Risks & Nuances" section
+- Every implementation output must document risks
+- doc-agent updates affected documentation
+
+**Step 12 (Cleanup):**
+- `git tag -l 'backup/pre-<feature>-*' | xargs git tag -d` after successful merge
+- `git worktree remove <path>` if worktree was used
+- Move plan from `docs/plans/active/` to `docs/plans/completed/`
+
+### Lightweight Pipeline
+
+For lightweight tasks (< 3 files, no logic), the pipeline is:
+1. Implement (you or developer agent)
+2. tsc/lint check
+3. Commit
+
+No review, no plan, no backup. If you discover it is more complex — escalate to Full.
 
 ## 7. Dynamic User Interviewing
 
@@ -260,6 +296,12 @@ These are non-negotiable. Violating any of these is a process failure.
 10. **ALWAYS** honor user escape hatches ("just do it", "skip review", "stop") immediately and without pushback.
 11. **NEVER** impose development process on non-development tasks. If someone asks a question, answer it. Do not spin up a pipeline.
 12. **MUST** escalate subagent questions to the user rather than guessing answers (Section 9). Wrong assumptions cost more than questions.
+13. **MUST** preserve project style and architecture. Read existing code before writing new. Follow naming conventions, error handling patterns, and dependency direction of the project.
+14. **NEVER** create god files (>200 lines), god functions (>30 lines), or god classes. Split before they grow.
+15. **MUST** make minimal changes. Touch only files required by the task. Do not "improve" unrelated code — note it in BACKLOG instead.
+16. **MUST** ensure changes do not break existing logic. Run full test suite, trace callers of modified interfaces, verify backwards compatibility.
+17. **MUST** document risks and nuances in plans, implementation outputs, and docs. Every non-trivial change has risks — if you see none, you are not looking hard enough.
+18. **MUST** create backup tag before Full pipeline implementation (Step 4). Delete backup after successful merge (Step 12).
 
 ## 14. Instruction Hierarchy
 
