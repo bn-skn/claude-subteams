@@ -9,8 +9,11 @@ export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
-# Only act on actual git commit commands (not echo, comments, etc.)
-if ! echo "$COMMAND" | grep -qE '^\s*(git\s+commit\b|git\s+-C\s+\S+\s+commit\b)'; then
+# Only act on commands containing git commit (skip echo/printf/comments)
+if ! echo "$COMMAND" | grep -qE '\bgit\s+commit\b'; then
+  exit 0
+fi
+if echo "$COMMAND" | grep -qE '^\s*(echo|printf|#)'; then
   exit 0
 fi
 
@@ -19,8 +22,7 @@ ERRORS=""
 # Stack-agnostic compilation check
 if [ -f "tsconfig.json" ]; then
   if command -v npx &>/dev/null; then
-    TSC_OUTPUT=$(npx tsc --noEmit 2>&1)
-    if [ $? -ne 0 ]; then
+    if ! TSC_OUTPUT=$(npx tsc --noEmit 2>&1); then
       ERRORS="[subteams:pre-commit-gate] TypeScript compilation failed:\n$TSC_OUTPUT\n\nFix compilation errors before committing."
     fi
   else
@@ -28,15 +30,17 @@ if [ -f "tsconfig.json" ]; then
   fi
 elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
   if command -v mypy &>/dev/null; then
-    MYPY_OUTPUT=$(mypy . --no-error-summary 2>&1 | head -20)
-    if [ $? -ne 0 ]; then
+    if ! MYPY_OUTPUT=$(mypy . --no-error-summary 2>&1 | head -20); then
       ERRORS="[subteams:pre-commit-gate] mypy check found issues:\n$MYPY_OUTPUT"
     fi
   fi
 elif [ -f "go.mod" ]; then
-  GO_OUTPUT=$(go build ./... 2>&1)
-  if [ $? -ne 0 ]; then
-    ERRORS="[subteams:pre-commit-gate] Go build failed:\n$GO_OUTPUT"
+  if command -v go &>/dev/null; then
+    if ! GO_OUTPUT=$(go build ./... 2>&1); then
+      ERRORS="[subteams:pre-commit-gate] Go build failed:\n$GO_OUTPUT"
+    fi
+  else
+    echo "[subteams:pre-commit-gate] Warning: go not found in PATH — skipping Go build check."
   fi
 fi
 

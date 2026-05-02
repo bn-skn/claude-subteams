@@ -78,6 +78,9 @@ with open(path, "w") as f:
     json.dump(s, f, indent=2)
     f.write("\n")
 '
+    else
+      echo "[claude-subteams] WARNING: Neither node nor python3 found."
+      echo "  Remove \"$PLUGIN_KEY\" from $INSTALLED_PLUGINS manually."
     fi
     echo "[claude-subteams] Removed from installed_plugins.json."
   else
@@ -88,8 +91,10 @@ fi
 # --- Remove plugin directory --------------------------------------------------
 
 if [ -d "$PLUGIN_DIR" ]; then
-  if [ -t 0 ] || [ -e /dev/tty ]; then
-    read -r -p "[claude-subteams] Remove $PLUGIN_DIR? [y/N] " ANSWER </dev/tty 2>/dev/null || ANSWER="y"
+  if [ "${1:-}" = "--force" ] || [ "${1:-}" = "-y" ]; then
+    ANSWER="y"
+  elif [ -t 0 ]; then
+    read -r -p "[claude-subteams] Remove $PLUGIN_DIR? [y/N] " ANSWER
   else
     ANSWER="y"
   fi
