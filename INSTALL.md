@@ -20,7 +20,7 @@ Add to `~/.claude/plugins/installed_plugins.json` (create if missing):
       {
         "scope": "user",
         "installPath": "/YOUR/HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "installedAt": "2026-01-01T00:00:00.000Z",
         "lastUpdated": "2026-01-01T00:00:00.000Z"
       }

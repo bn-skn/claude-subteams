@@ -113,7 +113,7 @@ if [ ! -f "$KNOWN_MARKETPLACES" ]; then
   echo '{}' > "$KNOWN_MARKETPLACES"
 fi
 
-if ! grep -q "\"$MARKETPLACE\"" "$KNOWN_MARKETPLACES" 2>/dev/null; then
+if ! grep -qF "\"$MARKETPLACE\"" "$KNOWN_MARKETPLACES" 2>/dev/null; then
   if command -v node &>/dev/null; then
     MKT_NAME="$MARKETPLACE" MKT_DIR="$MARKETPLACE_DIR" MKT_FILE="$KNOWN_MARKETPLACES" \
     node -e '
@@ -158,7 +158,7 @@ fi
 
 # Old marketplace name (claude-subteams == plugin name, causes cache recursion bug)
 OLD_MKT_DIR="$HOME/.claude/plugins/marketplaces/claude-subteams"
-if [ -d "$OLD_MKT_DIR" ] && [ "$OLD_MKT_DIR" != "$MARKETPLACE_DIR" ]; then
+if [ -d "$OLD_MKT_DIR" ] && [ "$OLD_MKT_DIR" != "$MARKETPLACE_DIR" ] && [ -d "$PLUGIN_DIR/.git" ]; then
   echo "[claude-subteams] Migrating from old marketplace path..."
   rm -rf "$OLD_MKT_DIR"
   # Clean old marketplace from known_marketplaces.json
@@ -181,7 +181,7 @@ fi
 
 # Clean old enabledPlugins key
 OLD_KEY="claude-subteams@claude-subteams"
-if [ "$OLD_KEY" != "$PLUGIN_KEY" ] && grep -q "\"$OLD_KEY\"" "$SETTINGS" 2>/dev/null; then
+if [ "$OLD_KEY" != "$PLUGIN_KEY" ] && grep -qF "\"$OLD_KEY\"" "$SETTINGS" 2>/dev/null; then
   if command -v node &>/dev/null; then
     OLD_KEY_VAL="$OLD_KEY" SETTINGS_FILE="$SETTINGS" node -e '
       const fs = require("fs");
@@ -196,7 +196,7 @@ if [ "$OLD_KEY" != "$PLUGIN_KEY" ] && grep -q "\"$OLD_KEY\"" "$SETTINGS" 2>/dev/
 fi
 
 # Clean old installed_plugins key
-if [ "$OLD_KEY" != "$PLUGIN_KEY" ] && grep -q "\"$OLD_KEY\"" "$INSTALLED_PLUGINS" 2>/dev/null; then
+if [ "$OLD_KEY" != "$PLUGIN_KEY" ] && grep -qF "\"$OLD_KEY\"" "$INSTALLED_PLUGINS" 2>/dev/null; then
   if command -v node &>/dev/null; then
     OLD_KEY_VAL="$OLD_KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" node -e '
       const fs = require("fs");
@@ -271,7 +271,7 @@ if [ ! -f "$SETTINGS" ]; then
   echo '{}' > "$SETTINGS"
 fi
 
-if ! grep -q "\"$PLUGIN_KEY\"" "$SETTINGS" 2>/dev/null; then
+if ! grep -qF "\"$PLUGIN_KEY\"" "$SETTINGS" 2>/dev/null; then
   if command -v node &>/dev/null; then
     PLUGIN_KEY_VAL="$PLUGIN_KEY" SETTINGS_FILE="$SETTINGS" \
     node -e '

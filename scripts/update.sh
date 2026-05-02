@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-MARKETPLACE="claude-subteams"
+MARKETPLACE="bn-skn"
 PLUGIN_NAME="claude-subteams"
 PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/$MARKETPLACE/plugins/$PLUGIN_NAME"
 

@@ -26,7 +26,7 @@ echo "[claude-subteams] Uninstalling..."
 if [ -f "$SETTINGS" ]; then
   # Remove both current and old keys
   for KEY in "$PLUGIN_KEY" "claude-subteams@claude-subteams"; do
-    if grep -q "\"$KEY\"" "$SETTINGS" 2>/dev/null; then
+    if grep -qF "\"$KEY\"" "$SETTINGS" 2>/dev/null; then
       if command -v node &>/dev/null; then
         KEY_VAL="$KEY" SETTINGS_FILE="$SETTINGS" \
         node -e '
@@ -63,7 +63,7 @@ fi
 
 if [ -f "$INSTALLED_PLUGINS" ]; then
   for KEY in "$PLUGIN_KEY" "claude-subteams@claude-subteams"; do
-    if grep -q "\"$KEY\"" "$INSTALLED_PLUGINS" 2>/dev/null; then
+    if grep -qF "\"$KEY\"" "$INSTALLED_PLUGINS" 2>/dev/null; then
       if command -v node &>/dev/null; then
         KEY_VAL="$KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" \
         node -e '
@@ -100,7 +100,7 @@ fi
 
 if [ -f "$KNOWN_MARKETPLACES" ]; then
   for MKT in "$MARKETPLACE" "claude-subteams"; do
-    if grep -q "\"$MKT\"" "$KNOWN_MARKETPLACES" 2>/dev/null; then
+    if grep -qF "\"$MKT\"" "$KNOWN_MARKETPLACES" 2>/dev/null; then
       if command -v node &>/dev/null; then
         MKT_VAL="$MKT" MKT_FILE="$KNOWN_MARKETPLACES" \
         node -e '
