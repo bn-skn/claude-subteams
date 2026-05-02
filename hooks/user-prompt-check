@@ -2,17 +2,21 @@
 # UserPromptSubmit hook — scope detection
 # Analyzes user prompt for development-related patterns
 
+if ! command -v jq &>/dev/null; then
+  exit 0
+fi
+
 INPUT=$(cat)
-PROMPT=$(echo "$INPUT" | jq -r '.user_prompt // empty' 2>/dev/null)
+PROMPT=$(printf '%s' "$INPUT" | jq -r '.user_prompt // empty' 2>/dev/null)
 
 if [ -z "$PROMPT" ]; then
   exit 0
 fi
 
 # Dev patterns — compound phrases that clearly indicate development work
-if echo "$PROMPT" | grep -qiE 'fix (the |a |this )?bug|implement\s+\w|refactor|write tests?|deploy to|run build|add (endpoint|feature|component)|create (api|migration|service)|git (commit|push|merge|branch)|code review|pull request'; then
+if printf '%s\n' "$PROMPT" | grep -qiE 'fix (the |a |this )?bug|implement\s+\w|refactor|write tests?|deploy to|run build|add (endpoint|feature|component)|create (api|migration|service)|git (commit|push|merge|branch)|code review|pull request'; then
   echo "[subteams:scope] Development task detected."
-elif echo "$PROMPT" | grep -qiE 'design (the |a )?ui|mockup|layout|style (the |a )'; then
+elif printf '%s\n' "$PROMPT" | grep -qiE 'design (the |a )?ui|mockup|layout|style (the |a )'; then
   echo "[subteams:scope] Design task detected."
 fi
 

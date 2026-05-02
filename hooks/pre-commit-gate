@@ -6,14 +6,19 @@
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
-
-# Only act on commands containing git commit (skip echo/printf/comments)
-if ! echo "$COMMAND" | grep -qE '\bgit\s+commit\b'; then
+# Check jq availability
+if ! command -v jq &>/dev/null; then
   exit 0
 fi
-if echo "$COMMAND" | grep -qE '^\s*(echo|printf|#)'; then
+
+INPUT=$(cat)
+COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+
+# Only act on commands containing git commit (skip echo/printf/comments)
+if ! printf '%s\n' "$COMMAND" | grep -qE '\bgit\s+commit\b'; then
+  exit 0
+fi
+if printf '%s\n' "$COMMAND" | grep -qE '^\s*(echo|printf|#)'; then
   exit 0
 fi
 
@@ -45,8 +50,8 @@ elif [ -f "go.mod" ]; then
 fi
 
 # Check staged files for >200 lines (total file size, not diff)
-LARGE_FILES=$(git diff --cached --name-only 2>/dev/null | while read f; do
-  if [ -f "$f" ] && echo "$f" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
+LARGE_FILES=$(git diff --cached --name-only 2>/dev/null | while IFS= read -r f; do
+  if [ -f "$f" ] && printf '%s\n' "$f" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
     LINES=$(wc -l < "$f")
     if [ "$LINES" -gt 200 ]; then
       echo "  $f ($LINES lines)"

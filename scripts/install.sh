@@ -10,6 +10,13 @@
 
 set -euo pipefail
 
+# --- Safety checks ------------------------------------------------------------
+
+if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ]; then
+  echo "[claude-subteams] ERROR: \$HOME is unset or root. Aborting." >&2
+  exit 1
+fi
+
 MARKETPLACE="claude-subteams"
 PLUGIN_NAME="claude-subteams"
 PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/$MARKETPLACE/plugins/$PLUGIN_NAME"
@@ -20,7 +27,7 @@ PLUGIN_KEY="${PLUGIN_NAME}@${MARKETPLACE}"
 
 echo "[claude-subteams] Installing..."
 
-# --- Clone or update ------------------------------------------------------
+# --- Clone or update ----------------------------------------------------------
 
 if [ -d "$PLUGIN_DIR/.git" ]; then
   echo "[claude-subteams] Already installed — pulling latest..."
@@ -33,7 +40,27 @@ else
   git clone "$REPO_URL" "$PLUGIN_DIR"
 fi
 
-# --- Clean up old install path (if exists) --------------------------------
+# --- Read version from plugin.json -------------------------------------------
+
+PLUGIN_VERSION="unknown"
+if [ -f "$PLUGIN_DIR/.claude-plugin/plugin.json" ]; then
+  if command -v node &>/dev/null; then
+    PLUGIN_VERSION=$(PJSON="$PLUGIN_DIR/.claude-plugin/plugin.json" node -e '
+      const fs = require("fs");
+      try { process.stdout.write(JSON.parse(fs.readFileSync(process.env.PJSON, "utf8")).version || "unknown"); } catch(e) { process.stdout.write("unknown"); }
+    ' 2>/dev/null || echo "unknown")
+  elif command -v python3 &>/dev/null; then
+    PLUGIN_VERSION=$(PJSON="$PLUGIN_DIR/.claude-plugin/plugin.json" python3 -c '
+import json, os
+try:
+    with open(os.environ["PJSON"]) as f:
+        print(json.load(f).get("version", "unknown"), end="")
+except: print("unknown", end="")
+' 2>/dev/null || echo "unknown")
+  fi
+fi
+
+# --- Clean up old install path (if exists) ------------------------------------
 
 OLD_DIR="$HOME/.claude/plugins/claude-subteams"
 if [ -d "$OLD_DIR" ] && [ "$OLD_DIR" != "$PLUGIN_DIR" ]; then
@@ -41,49 +68,53 @@ if [ -d "$OLD_DIR" ] && [ "$OLD_DIR" != "$PLUGIN_DIR" ]; then
   rm -rf "$OLD_DIR"
 fi
 
-# --- Register in installed_plugins.json -----------------------------------
+# --- Register in installed_plugins.json ---------------------------------------
 
 if [ ! -f "$INSTALLED_PLUGINS" ]; then
   echo '{"version": 2, "plugins": {}}' > "$INSTALLED_PLUGINS"
 fi
 
 if command -v node &>/dev/null; then
-  PLUGIN_DIR_VAL="$PLUGIN_DIR" PLUGIN_KEY_VAL="$PLUGIN_KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" \
+  PLUGIN_DIR_VAL="$PLUGIN_DIR" PLUGIN_KEY_VAL="$PLUGIN_KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" PLUGIN_VER="$PLUGIN_VERSION" \
   node -e '
     const fs = require("fs");
     const path = process.env.PLUGINS_FILE;
     const key = process.env.PLUGIN_KEY_VAL;
     const dir = process.env.PLUGIN_DIR_VAL;
+    const ver = process.env.PLUGIN_VER;
     const s = JSON.parse(fs.readFileSync(path, "utf8"));
     if (!s.plugins) s.plugins = {};
     const now = new Date().toISOString();
     if (!s.plugins[key] || !Array.isArray(s.plugins[key]) || s.plugins[key].length === 0) {
-      s.plugins[key] = [{ scope: "user", installPath: dir, version: "1.0.0", installedAt: now, lastUpdated: now }];
+      s.plugins[key] = [{ scope: "user", installPath: dir, version: ver, installedAt: now, lastUpdated: now }];
       console.log("[claude-subteams] Registered in installed_plugins.json.");
     } else {
       s.plugins[key][0].lastUpdated = now;
-      console.log("[claude-subteams] Already registered — updated timestamp.");
+      s.plugins[key][0].version = ver;
+      console.log("[claude-subteams] Already registered — updated timestamp and version.");
     }
     fs.writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
   '
 elif command -v python3 &>/dev/null; then
-  PLUGIN_DIR_VAL="$PLUGIN_DIR" PLUGIN_KEY_VAL="$PLUGIN_KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" \
+  PLUGIN_DIR_VAL="$PLUGIN_DIR" PLUGIN_KEY_VAL="$PLUGIN_KEY" PLUGINS_FILE="$INSTALLED_PLUGINS" PLUGIN_VER="$PLUGIN_VERSION" \
   python3 -c '
 import json, os
 from datetime import datetime, timezone
 path = os.environ["PLUGINS_FILE"]
 key = os.environ["PLUGIN_KEY_VAL"]
 d = os.environ["PLUGIN_DIR_VAL"]
+ver = os.environ["PLUGIN_VER"]
 with open(path) as f:
     s = json.load(f)
 s.setdefault("plugins", {})
 now = datetime.now(timezone.utc).isoformat()
 if key not in s["plugins"] or not isinstance(s["plugins"][key], list) or len(s["plugins"][key]) == 0:
-    s["plugins"][key] = [{"scope": "user", "installPath": d, "version": "1.0.0", "installedAt": now, "lastUpdated": now}]
+    s["plugins"][key] = [{"scope": "user", "installPath": d, "version": ver, "installedAt": now, "lastUpdated": now}]
     print("[claude-subteams] Registered in installed_plugins.json.")
 else:
     s["plugins"][key][0]["lastUpdated"] = now
-    print("[claude-subteams] Already registered — updated timestamp.")
+    s["plugins"][key][0]["version"] = ver
+    print("[claude-subteams] Already registered — updated timestamp and version.")
 with open(path, "w") as f:
     json.dump(s, f, indent=2)
     f.write("\n")
@@ -93,7 +124,7 @@ else
   echo "  See INSTALL.md for manual registration steps."
 fi
 
-# --- Add to settings.json enabledPlugins ----------------------------------
+# --- Add to settings.json enabledPlugins --------------------------------------
 
 if [ ! -f "$SETTINGS" ]; then
   echo '{}' > "$SETTINGS"
@@ -131,16 +162,15 @@ else
   echo "[claude-subteams] Already enabled in settings.json."
 fi
 
-# --- Warn about superpowers conflict --------------------------------------
+# --- Warn about superpowers conflict ------------------------------------------
 
 if grep -q '"superpowers@claude-plugins-official": true' "$SETTINGS" 2>/dev/null; then
   echo ""
   echo "[claude-subteams] WARNING: The 'superpowers' plugin is enabled."
   echo "  claude-subteams replaces superpowers methodology."
   echo "  Running both may cause conflicts."
-  # Use /dev/tty for interactive input (works even when piped via curl)
-  if [ -t 0 ] || [ -e /dev/tty ]; then
-    read -r -p "  Disable superpowers now? [y/N] " ANSWER </dev/tty 2>/dev/null || ANSWER="N"
+  if [ -t 0 ]; then
+    read -r -p "  Disable superpowers now? [y/N] " ANSWER
     if [[ "${ANSWER,,}" == "y" ]]; then
       if command -v node &>/dev/null; then
         SETTINGS_FILE="$SETTINGS" node -e '
@@ -171,13 +201,13 @@ with open(path, "w") as f:
   fi
 fi
 
-# --- Verify ---------------------------------------------------------------
+# --- Verify -------------------------------------------------------------------
 
 echo ""
 SKILL_COUNT=$(find "$PLUGIN_DIR/skills" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
 AGENT_COUNT=$(find "$PLUGIN_DIR/agents" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
 HOOK_COUNT=$(find "$PLUGIN_DIR/hooks" -maxdepth 1 -type f -not -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
-echo "[claude-subteams] Installed:"
+echo "[claude-subteams] Installed (v$PLUGIN_VERSION):"
 echo "  Skills : $SKILL_COUNT"
 echo "  Agents : $AGENT_COUNT"
 echo "  Hooks  : $HOOK_COUNT"
@@ -189,20 +219,27 @@ if [ "$SKILL_COUNT" -lt 10 ]; then
   echo "  See INSTALL.md for troubleshooting."
 fi
 
-# --- CLAUDE.md snippet (interactive only) ---------------------------------
+# --- CLAUDE.md snippet (interactive only) -------------------------------------
 
-if [ -t 0 ] || [ -e /dev/tty ]; then
+if [ -t 0 ]; then
   echo ""
-  read -r -p "[claude-subteams] Add activation snippet to ./CLAUDE.md? [y/N] " ADD_SNIPPET </dev/tty 2>/dev/null || ADD_SNIPPET="N"
-  if [[ "${ADD_SNIPPET,,}" == "y" ]]; then
-    SNIPPET_FILE="$PLUGIN_DIR/templates/claudemd-snippet.md"
-    if [ -f "$SNIPPET_FILE" ]; then
-      echo "" >> "CLAUDE.md"
-      cat "$SNIPPET_FILE" >> "CLAUDE.md"
-      echo "[claude-subteams] Snippet appended to ./CLAUDE.md."
-    else
-      echo "[claude-subteams] WARNING: Snippet template not found."
+  if [ -f "CLAUDE.md" ] && grep -q "claude-subteams" "CLAUDE.md" 2>/dev/null; then
+    echo "[claude-subteams] Activation snippet already in ./CLAUDE.md — skipping."
+  elif [ -f "CLAUDE.md" ]; then
+    read -r -p "[claude-subteams] Add activation snippet to ./CLAUDE.md? [y/N] " ADD_SNIPPET
+    if [[ "${ADD_SNIPPET,,}" == "y" ]]; then
+      SNIPPET_FILE="$PLUGIN_DIR/templates/claudemd-snippet.md"
+      if [ -f "$SNIPPET_FILE" ]; then
+        echo "" >> "CLAUDE.md"
+        cat "$SNIPPET_FILE" >> "CLAUDE.md"
+        echo "[claude-subteams] Snippet appended to ./CLAUDE.md."
+      else
+        echo "[claude-subteams] WARNING: Snippet template not found."
+      fi
     fi
+  else
+    echo "[claude-subteams] No CLAUDE.md in current directory — snippet not added."
+    echo "  Add it manually later. See README.md for the snippet."
   fi
 fi
 

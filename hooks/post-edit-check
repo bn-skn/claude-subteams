@@ -1,8 +1,12 @@
 #!/bin/bash
 # PostToolUse hook for Edit/Write — lightweight checks on source files
 
+if ! command -v jq &>/dev/null; then
+  exit 0
+fi
+
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 
 if [ -z "$FILE_PATH" ] || [ ! -f "$FILE_PATH" ]; then
   exit 0
@@ -15,7 +19,7 @@ if [ "$BASENAME" = "CLAUDE.md" ] || [ "$BASENAME" = "SKILL.md" ]; then
 fi
 
 # Check file size
-if echo "$FILE_PATH" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
+if printf '%s\n' "$FILE_PATH" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
   LINES=$(wc -l < "$FILE_PATH")
   if [ "$LINES" -gt 200 ]; then
     echo "[subteams:post-edit-check] Warning: $FILE_PATH is $LINES lines (>200). Consider splitting into smaller modules."
