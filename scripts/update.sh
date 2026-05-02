@@ -11,7 +11,16 @@ echo "[claude-subteams] Updating..."
 
 # --- Check old path and migrate if needed ------------------------------------
 
+OLD_MKT_DIR="$HOME/.claude/plugins/marketplaces/claude-subteams/plugins/claude-subteams"
 OLD_DIR="$HOME/.claude/plugins/claude-subteams"
+# Check old marketplace name path
+if [ -d "$OLD_MKT_DIR/.git" ] && [ ! -d "$PLUGIN_DIR" ]; then
+  echo "[claude-subteams] Found old marketplace install — migrating..."
+  mkdir -p "$(dirname "$PLUGIN_DIR")"
+  mv "$OLD_MKT_DIR" "$PLUGIN_DIR"
+  echo "[claude-subteams] Migrated to $PLUGIN_DIR."
+fi
+
 if [ -d "$OLD_DIR/.git" ] && [ ! -d "$PLUGIN_DIR" ]; then
   echo "[claude-subteams] Found old install at $OLD_DIR — migrating..."
   mkdir -p "$(dirname "$PLUGIN_DIR")"
