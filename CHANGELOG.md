@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [1.1.0] - 2026-05-02
 
 ### Fixed
+- All hooks: jq availability check with graceful exit if missing
+- All hooks: printf instead of echo for variable output (handles -e/-n)
+- pre-commit-gate: IFS= read -r for filenames with spaces/backslashes
+- install.sh/uninstall.sh: HOME safety check (prevent rm -rf on empty HOME)
+- install.sh: version read from plugin.json instead of hardcoded
+- install.sh: CLAUDE.md snippet checks existence, skips duplicates
+- INSTALL.md: version updated to 1.1.0
 - **Critical:** uninstall.sh and update.sh used wrong plugin path — could not uninstall or update after install.sh
 - **Critical:** uninstall.sh used wrong enabledPlugins key (`claude-subteams` instead of `claude-subteams@claude-subteams`)
 - **Critical:** pre-commit-gate failed on systems using nvm — npx not in PATH for hook shell
