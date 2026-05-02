@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] - 2026-05-03
+
+### Added
+- **Developer agent** — implementation specialist with coding standards: modular code, minimal diffs, no god files, preserve project style, don't break other logic, document risks
+- **Full Pipeline v2** in using-subteams:
+  - Step 3: Plan Defense (devils-advocate reviews plan before implementation)
+  - Step 4: Backup tag before implementation
+  - Step 6: Triple Review (code-reviewer + architecture-guard + devils-advocate in parallel)
+  - Step 10: Mandatory risk & nuance documentation
+  - Step 12: Cleanup (remove backup tag, worktree, move plan to completed)
+- 6 new Critical Rules (#13-18): preserve style, no god files, minimal changes, don't break logic, document risks, backup tags
+- Mandatory "Risks & Nuances" section in writing-plans skill
+
+### Changed
+- Agent count: 9 → 10
+- Pipeline: reactive (implement → review) → proactive (plan → defend → backup → implement → triple review → test → verify → document → finish → cleanup)
+- Devils-advocate: now used twice — once for plan defense, once for code challenge
+
 ## [1.2.0] - 2026-05-03
 
 ### Fixed

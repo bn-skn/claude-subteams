@@ -57,10 +57,10 @@ After install, add this snippet to your project's `CLAUDE.md` (or global `~/.cla
 ```markdown
 ## Development Methodology
 
-For development tasks use the claude-subteams plugin (orchestrator + 9 specialized agents).
+For development tasks use the claude-subteams plugin (orchestrator + 10 specialized agents).
 Invoke skill "claude-subteams:using-subteams" before significant development work.
 For small fixes — act directly, invoke code-review after if logic changed.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer.
 ```
 
 This is also available as a file: `templates/claudemd-snippet.md`.
@@ -96,6 +96,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | `researcher` | opus | Deep technology research. Read + web (WebSearch, WebFetch). |
 | `security-auditor` | opus | Security-sensitive changes, secrets, and auth flows. Read-only access. |
 | `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline only. |
+| `developer` | sonnet | Implementation specialist: modular code, minimal diffs, style preservation. |
 
 ## Hooks
 
