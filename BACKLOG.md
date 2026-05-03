@@ -1,7 +1,7 @@
 # Backlog
 
 ## In Progress
-- [ ] Fire test on claudebot — real development task with plugin active
+- [x] Fire test on claudebot — real development task with plugin active
 
 ## Next Up
 - [ ] Polish remaining 41 skills iteratively (prioritize by usage frequency)

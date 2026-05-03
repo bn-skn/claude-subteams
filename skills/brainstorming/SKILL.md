@@ -1,13 +1,13 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation through structured interviewing."
 ---
 
 # Brainstorming Ideas Into Designs
 
-Help turn ideas into fully formed designs and specs through natural collaborative dialogue.
+Help turn ideas into fully formed designs and specs through structured interviewing — a phased dialogue that builds understanding incrementally.
 
-Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design and get user approval.
+The orchestrator conducts the interview directly (NOT a subagent). You are already in the conversation context with the user. A subagent with a clean context would waste time re-asking what you already know.
 
 <HARD-GATE>
 Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
@@ -23,7 +23,7 @@ You MUST create a task for each of these items and complete them in order:
 
 1. **Explore project context** — check files, docs, recent commits
 2. **Offer visual companion** (if topic will involve visual questions) — this is its own message, not combined with a clarifying question. See the Visual Companion section below.
-3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
+3. **Interview the user** — phased questioning to build full understanding (see Interview Process below)
 4. **Propose 2-3 approaches** — with trade-offs and your recommendation
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
 6. **"What If?" Challenge** — generate 5-10 "what if" questions about the design and present to the user (see below)
@@ -32,25 +32,69 @@ You MUST create a task for each of these items and complete them in order:
 9. **User reviews written spec** — ask user to review the spec file before proceeding
 10. **Transition to implementation** — invoke claude-subteams:writing-plans skill to create implementation plan
 
-## The Process
+## Interview Process
 
-**Understanding the idea:**
+Brainstorming is a structured interview, not a questionnaire dump. Each phase builds on the previous one. New questions naturally arise from answers — this is expected and valuable.
 
-- Check out the current project state first (files, docs, recent commits)
-- Before asking detailed questions, assess scope: if the request describes multiple independent subsystems, flag this immediately. Do not spend questions refining details of a project that needs to be decomposed first.
-- If the project is too large for a single spec, help the user decompose into sub-projects. Then brainstorm the first sub-project through the normal design flow. Each sub-project gets its own spec, plan, and implementation cycle.
-- For appropriately-scoped projects, ask all questions in one message (batch them). After the user answers, if new questions arise — send another batch. Never drip-feed questions one at a time.
-- Prefer multiple choice questions when possible, but open-ended is fine too
-- Maximum 3 rounds of questions total
-- Focus on understanding: purpose, constraints, success criteria
+### Phase 1: Purpose & Vision (2-3 questions)
 
-**Exploring approaches:**
+Understand the WHY before the WHAT.
+
+- What problem does this solve? Who is it for?
+- What does success look like? How will you know it works?
+- What triggered this — a pain point, an opportunity, a request?
+
+### Phase 2: Context & Constraints (3-4 questions)
+
+Now that you understand the goal, explore the boundaries.
+
+- Technical constraints: stack, integrations, existing code to work with
+- Scale expectations: users, data volume, frequency
+- Timeline and priority: urgent fix or strategic investment?
+- Dependencies: what does this depend on, what depends on it?
+
+Questions in this phase are shaped by Phase 1 answers. If the user said "this is for internal use by 2 people," don't ask about scaling to millions.
+
+### Phase 3+: Deepening (as many rounds as needed)
+
+Each round of answers reveals new dimensions. Follow them.
+
+- Clarify ambiguities from previous answers
+- Explore edge cases that became apparent
+- Dig into technical details relevant to the emerging design
+- Challenge assumptions you're forming ("You mentioned X — does that mean Y?")
+
+**There is no artificial limit on rounds.** Continue until you can confidently describe the task, its constraints, and success criteria. The stop criterion is quality of understanding, not number of questions asked.
+
+### Interview Rules
+
+1. **2-4 questions per round.** Enough to make progress, not so many that the user faces a wall of text.
+2. **Multiple choice where possible.** "Do you want A, B, or C?" is easier to answer than "What approach do you prefer?" But use open-ended questions when you need depth.
+3. **Build on answers.** Each round must reference what the user said previously. Never ask something you could infer from their prior answers.
+4. **Read the codebase first.** NEVER ask questions you can answer by reading existing code, docs, or config. Research first, ask second.
+5. **Flag scope issues early.** If the request describes multiple independent subsystems, flag this before diving into details. Decompose first, then interview per sub-project.
+6. **Summarize understanding between phases.** After Phase 2 (and after Phase 3 if it goes multiple rounds), briefly state your current understanding: "So far I understand: [summary]. Is this right?" This prevents drift.
+
+### When to Stop Interviewing
+
+You are ready to move to approaches when you can answer ALL of these:
+
+- [ ] What exactly are we building? (clear, specific, not vague)
+- [ ] Why? What problem does it solve?
+- [ ] For whom? Who uses this?
+- [ ] What are the hard constraints? (tech stack, integrations, performance)
+- [ ] What does "done" look like? (acceptance criteria)
+- [ ] What is explicitly NOT in scope?
+
+If you cannot confidently check all boxes — ask more questions. If you can — move to approaches.
+
+## Exploring Approaches
 
 - Propose 2-3 different approaches with trade-offs
 - Present options conversationally with your recommendation and reasoning
 - Lead with your recommended option and explain why
 
-**Presenting the design:**
+## Presenting the Design
 
 - Once you believe you understand what you are building, present the design
 - Scale each section to its complexity: a few sentences if straightforward, up to 200-300 words if nuanced
@@ -58,7 +102,7 @@ You MUST create a task for each of these items and complete them in order:
 - Cover: architecture, components, data flow, error handling, testing
 - Be ready to go back and clarify if something does not make sense
 
-**"What If?" Challenge:**
+## "What If?" Challenge
 
 After presenting the design and getting user approval on the sections, but BEFORE writing the spec, run a "What If?" challenge. Generate 5-10 probing questions about the design covering:
 
@@ -75,13 +119,13 @@ After presenting the design and getting user approval on the sections, but BEFOR
 
 Present these questions to the user. Discuss any that surface real concerns. Adjust the design if needed before writing the spec. This catches assumptions early and is cheaper than discovering them during implementation.
 
-**Design for isolation and clarity:**
+## Design for Isolation and Clarity
 
 - Break the system into smaller units that each have one clear purpose, communicate through well-defined interfaces, and can be understood and tested independently
 - For each unit, you should be able to answer: what does it do, how do you use it, and what does it depend on?
 - Smaller, well-bounded units are easier to work with — you reason better about code you can hold in context at once
 
-**Working in existing codebases:**
+## Working in Existing Codebases
 
 - Explore the current structure before proposing changes. Follow existing patterns.
 - Where existing code has problems that affect the work, include targeted improvements as part of the design
@@ -119,12 +163,14 @@ Wait for the user's response. Only proceed once the user approves.
 
 ## Key Principles
 
-- **One question at a time** - Do not overwhelm with multiple questions
-- **Multiple choice preferred** - Easier to answer than open-ended when possible
-- **YAGNI ruthlessly** - Remove unnecessary features from all designs
-- **Explore alternatives** - Always propose 2-3 approaches before settling
-- **Incremental validation** - Present design, get approval before moving on
-- **Be flexible** - Go back and clarify when something does not make sense
+- **Interview, don't interrogate** — Build understanding through phased dialogue, not a question dump
+- **Multiple choice preferred** — Easier to answer than open-ended when possible
+- **No artificial limits** — Ask as many questions as needed for full understanding, but keep rounds focused (2-4 questions each)
+- **YAGNI ruthlessly** — Remove unnecessary features from all designs
+- **Explore alternatives** — Always propose 2-3 approaches before settling
+- **Incremental validation** — Present design, get approval before moving on
+- **Be flexible** — Go back and clarify when something does not make sense
+- **Summarize often** — Reflect understanding back to the user to catch drift early
 
 ## Visual Content
 

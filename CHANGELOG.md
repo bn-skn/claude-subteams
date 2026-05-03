@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0] - 2026-05-03
+
+### Added
+- **Interview-based brainstorming** — phased dialogue (Purpose → Context → Deepening) replaces old question-dump approach. No artificial limit on rounds; stop criterion is quality of understanding.
+- **Orchestrator self-escalation** (Section 9) — orchestrator must escalate to user when facing blockers, impossible constraints, or decisions outside authority. Not just subagents.
+- **Silent substitution prevention** — new Red Flag + Critical Rules #19-#20: never silently switch from an agreed approach. Present obstacle and options, let user decide.
+
+### Changed
+- Brainstorming skill rewritten: interview process with phases, per-round summaries, readiness checklist
+- Section 7 (Dynamic User Interviewing): removed artificial "max 3 rounds" limit, aligned with brainstorming interview philosophy
+- Section 9 renamed from "Subagent Escalation to User" → "Escalation to User (Subagents AND Orchestrator)"
+- Red Flags Table: +2 new entries (silent substitution, autonomous handling)
+- Critical Rules: +2 new rules (#19 silent substitution, #20 escalation duty)
+
+
 ## [1.3.0] - 2026-05-03
 
 ### Added
