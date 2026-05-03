@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.2] - 2026-05-03
+
+### Fixed
+- writing-plans: removed phantom "worktree created by brainstorming" reference
+- finishing-branch: cleanup scope now correctly includes Options 1, 2, and 4
+- brainstorming HARD-GATE: scoped to brainstorming phase only (no longer conflicts with pipeline skip)
+- executing-plans + subagent-driven-dev: worktrees changed from REQUIRED to recommended
+- brainstorming + writing-plans: directories created if they do not exist
+
+
 ## [1.4.1] - 2026-05-03
 
 ### Added

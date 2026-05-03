@@ -117,6 +117,6 @@ After all tasks complete and all gates pass:
 ## Integration
 
 **Required workflow skills:**
-- **claude-subteams:using-git-worktrees** - REQUIRED: Set up isolated workspace before starting
+- **claude-subteams:using-git-worktrees** - Recommended for Full pipeline and parallel work. For Standard pipeline, a feature branch is sufficient.
 - **claude-subteams:writing-plans** - Creates the plan this skill executes
 - **claude-subteams:finishing-branch** - Complete development after all tasks

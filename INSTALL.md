@@ -20,7 +20,7 @@ Add to `~/.claude/plugins/installed_plugins.json` (create if missing):
       {
         "scope": "user",
         "installPath": "/YOUR/HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams",
-        "version": "1.2.0",
+        "version": "1.4.1",
         "installedAt": "2026-01-01T00:00:00.000Z",
         "lastUpdated": "2026-01-01T00:00:00.000Z"
       }
@@ -52,17 +52,17 @@ Add this to your project's `CLAUDE.md`:
 ```markdown
 ## Development Methodology
 
-For development tasks use the claude-subteams plugin (orchestrator + 9 specialized agents).
+For development tasks use the claude-subteams plugin (orchestrator + 10 specialized agents).
 Invoke skill "claude-subteams:using-subteams" before significant development work.
 For small fixes — act directly, invoke code-review after if logic changed.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer.
 ```
 
 ## Step 5: Verify
 
 Restart Claude Code (new session or `/reload-plugins`), then check:
 - `/skills` should list `claude-subteams:using-subteams` and ~45 other skills
-- `/agents` should list `claude-subteams:code-reviewer` and 8 other agents
+- `/agents` should list `claude-subteams:code-reviewer` and 9 other agents
 
 ## Troubleshooting
 

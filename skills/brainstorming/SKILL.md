@@ -10,7 +10,8 @@ Help turn ideas into fully formed designs and specs through structured interview
 The orchestrator conducts the interview directly (NOT a subagent). You are already in the conversation context with the user. A subagent with a clean context would waste time re-asking what you already know.
 
 <HARD-GATE>
-Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
+When the brainstorming skill is active: do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. The design can be brief for simple projects.
+Note: This gate applies when brainstorming is invoked. The orchestrator (using-subteams) decides WHETHER to invoke brainstorming based on pipeline selection. Lightweight and Standard pipelines skip brainstorming entirely.
 </HARD-GATE>
 
 ## Anti-Pattern: "This Is Too Simple To Need A Design"
@@ -137,7 +138,7 @@ Present these questions to the user. Discuss any that surface real concerns. Adj
 
 **Documentation:**
 
-- Write the validated design (spec) to `docs/specs/YYYY-MM-DD-<topic>-design.md`
+- Write the validated design (spec) to `docs/specs/YYYY-MM-DD-<topic>-design.md` (create directory if it does not exist)
   - (User preferences for spec location override this default)
 - Commit the design document to git
 

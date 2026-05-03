@@ -25,3 +25,6 @@
 - [x] Full audit by fresh-eyes reviewer — 2026-04-11
 - [x] Audit fixes (visual-companion, conventions, README activation) — 2026-04-11
 - [x] Published to GitHub: github.com/bn-skn/claude-subteams — 2026-04-10
+
+## Recurring
+- [ ] On version bump: verify README.md, INSTALL.md, templates/claudemd-snippet.md reflect current agent count, version, and features
