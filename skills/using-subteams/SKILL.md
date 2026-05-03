@@ -110,7 +110,7 @@ Every development task follows one of three pipelines. Choose based on scope and
 ```
 1. BRAINSTORM     → Understand task (brainstorming skill)
 2. PLAN           → Write implementation plan (writing-plans skill)
-3. DEFEND PLAN    → Devils-advocate reviews the plan (catches bad assumptions early)
+3. DEFEND PLAN    → Devils-advocate + architecture-guard review the plan in parallel
 4. BACKUP         → git tag backup/pre-<feature>-$(date +%s)
 5. IMPLEMENT      → Developer agent writes code (dispatched via executing-plans or subagent-driven-dev)
    └── Per task:  developer implements → tsc check → (orchestrator reviews before commit)
@@ -128,11 +128,11 @@ Every development task follows one of three pipelines. Choose based on scope and
 
 **Steps 1-3** can be compressed for well-understood tasks. If the user says "just implement X" and X is clear — skip brainstorming, write a brief plan, and proceed.
 
-**Step 3 (Plan Defense)** is where devils-advocate reviews the PLAN, not the code. This catches:
-- Over-engineering ("do we really need this?")
-- Missing edge cases in the design
-- Dependency risks
-- Scale assumptions
+**Step 3 (Plan Defense)** runs two agents IN PARALLEL on the plan (not code):
+- **devils-advocate**: challenges necessity, assumptions, scale, edge cases ("do we really need this?", "what if X is wrong?")
+- **architecture-guard**: checks structural decisions, dependency direction, naming, fit with existing architecture ("this violates the dependency graph", "this pattern doesn't match the project")
+
+Dispatch both in a single message. Collect findings, address critical ones before proceeding to implementation.
 
 **Step 6 (Triple Review)** runs three agents IN PARALLEL after implementation:
 - Dispatch all three in a single message (one Agent call per reviewer)
