@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.1] - 2026-05-03
+
+### Added
+- **Standard pipeline** between Lightweight and Full: Plan → Branch → Implement → Single Review → Test → Commit → Merge. For moderate tasks (3-8 files, single-module).
+- **Branch rule**: main = production, all development in feature branches. Worktrees for parallel subagent work.
+- **Triple Review conflict resolution**: project conventions > general practices, structural > tactical, approach-level challenges escalate to user.
+- **Brainstorming degradation clause**: after 3 non-converging rounds, summarize and offer to move forward.
+
+### Changed
+- "Maximum 3 skills" clarified to mean specialist skills on top of pipeline core.
+
+
 ## [1.4.0] - 2026-05-03
 
 ### Added

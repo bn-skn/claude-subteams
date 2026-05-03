@@ -84,7 +84,7 @@ If you are uncertain about a technology, API, library, framework version, or app
 Before starting any task, scan available skills for relevance.
 
 1. **If there is even a 1% chance a skill applies — invoke it.** Skills encode hard-won methodology. Skipping them because "this seems simple" is how quality degrades.
-2. **Maximum 3 skills per task.** More than 3 creates process overhead that outweighs the benefit. Pick the most impactful.
+2. **Maximum 3 specialist skills per task** (on top of pipeline core skills like using-subteams, writing-plans, executing-plans). More than 3 specialist skills creates process overhead that outweighs the benefit. Pick the most impactful.
 3. **How to choose which 3:**
    - Always include using-subteams (this skill) for development tasks
    - Prioritize quality gates (code-review, verification-gate, test-driven-development)
@@ -98,7 +98,8 @@ Every development task follows one of three pipelines. Choose based on scope and
 | Pipeline | Criteria | Steps |
 |----------|----------|-------|
 | **Lightweight** | < 3 files, no business logic, mechanical changes | Implement → tsc/lint → done |
-| **Full** | Business logic, 3+ files, cross-module, user-facing | See Full Pipeline below |
+| **Standard** | 3-8 files, moderate logic, single-module | Plan (brief) → Branch → Implement → Single Review (code-reviewer) → Test → Commit → Merge |
+| **Full** | Cross-module, user-facing, complex business logic | See Full Pipeline below |
 | **Full + Architecture** | New module, structural change, dependency changes | Full Pipeline + architecture-guard + doc-agent |
 
 **Pipeline escalation:** If you start lightweight and discover the change is more complex than expected — STOP and escalate to full. Do not continue lightweight "because you already started."
@@ -138,6 +139,7 @@ Dispatch both in a single message. Collect findings, address critical ones befor
 - Dispatch all three in a single message (one Agent call per reviewer)
 - Collect findings, deduplicate, prioritize
 - Fix critical findings before testing
+- **Conflict resolution:** When reviewers contradict each other: (1) project conventions win over general best practices, (2) architecture-guard structural findings outrank code-reviewer tactical suggestions, (3) if devils-advocate challenges the entire approach — escalate to user, don't resolve yourself
 
 **Step 10 (Risks & Docs)** is mandatory for Full pipeline:
 - Every plan must have a "Risks & Nuances" section
@@ -157,6 +159,24 @@ For lightweight tasks (< 3 files, no logic), the pipeline is:
 3. Commit
 
 No review, no plan, no backup. If you discover it is more complex — escalate to Full.
+
+### Standard Pipeline
+
+For moderate tasks (3-8 files, business logic, but single-module scope):
+1. Write a brief plan (3-10 bullet points, no spec file needed)
+2. Create feature branch (`git checkout -b feat/xxx`)
+3. Implement (you or developer agent)
+4. tsc/lint check
+5. Single review (code-reviewer)
+6. Fix critical findings
+7. Run tests
+8. Commit and merge to main
+
+No brainstorming, no plan defense, no triple review, no backup tag. If you discover it is more complex — escalate to Full.
+
+### Branch Rule
+
+**main = production. Always deployable.** All development happens in feature branches. Merge to main only after pipeline passes. For parallel subagent work, use git worktrees.
 
 ## 7. Dynamic User Interviewing
 

@@ -66,6 +66,8 @@ Each round of answers reveals new dimensions. Follow them.
 
 **There is no artificial limit on rounds.** Continue until you can confidently describe the task, its constraints, and success criteria. The stop criterion is quality of understanding, not number of questions asked.
 
+**Degradation clause:** If after 3 rounds the interview is not converging (user gives vague answers, scope keeps shifting), summarize what you DO know, state your assumptions explicitly, present a best-effort design, and ask: "Should we continue refining or move forward with this?" The user can say "keep asking" — but the default is forward motion, not infinite loops.
+
 ### Interview Rules
 
 1. **2-4 questions per round.** Enough to make progress, not so many that the user faces a wall of text.
