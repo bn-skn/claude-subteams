@@ -57,10 +57,10 @@ After install, add this snippet to your project's `CLAUDE.md` (or global `~/.cla
 ```markdown
 ## Development Methodology
 
-For development tasks use the claude-subteams plugin (orchestrator + 10 specialized agents).
+For development tasks use the claude-subteams plugin (orchestrator + 12 specialized agents).
 Invoke skill "claude-subteams:using-subteams" before significant development work.
 For small fixes — act directly, invoke code-review after if logic changed.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent.
 ```
 
 This is also available as a file: `templates/claudemd-snippet.md`.
@@ -82,6 +82,8 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | process | `brainstorming` | Explores intent and requirements before any implementation. Use before creative work. |
 | quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID principles. |
 | quality | `adversarial-testing` | Writes tests designed to break the code — edge cases, race conditions, boundary violations. |
+| quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |
+| quality | `codebase-improvement` | Proactive codebase analysis. Dispatches improvement-agent for health checks and tech debt discovery. |
 
 ## Agents
 
@@ -97,6 +99,8 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | `security-auditor` | opus | Security-sensitive changes, secrets, and auth flows. Read-only access. |
 | `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline only. |
 | `developer` | sonnet | Implementation specialist: modular code, minimal diffs, style preservation. |
+| `ui-tester` | sonnet | Browser-based UI/E2E testing via Playwright CLI. Screenshots, interactions, visual regression. |
+| `improvement-agent` | sonnet | Proactive codebase analyst. Finds improvement opportunities, returns prioritized proposals (read-only). |
 
 ## Hooks
 

@@ -47,8 +47,10 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 | 8 | security-auditor | opus | Read, Grep, Glob, Bash | Security-sensitive changes, secrets, auth, crypto | Vulnerability report + severity |
 | 9 | developer | sonnet | Read, Write, Edit, Bash, Grep, Glob | Implementation tasks dispatched via executing-plans | Code changes + test results + risks |
 | 10 | devils-advocate | opus | Read, Grep, Glob | Full pipeline: challenges assumptions, edge cases, scale, necessity | Challenge report + rebuttals |
+| 11 | ui-tester | sonnet | Read, Write, Edit, Bash, Grep, Glob | After UI implementation: browser testing, screenshots, E2E | Test files + screenshots + visual findings |
+| 12 | improvement-agent | sonnet | Read, Grep, Glob, Bash | Periodic codebase health checks, tech debt discovery, sprint planning | Prioritized proposals (read-only, no code changes) |
 
-**Model note:** All agents default to opus except doc-agent and developer (sonnet). See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
+**Model note:** All agents default to opus except doc-agent, developer, ui-tester, and improvement-agent (sonnet). See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
 
 ## 3. Scope Detection
 

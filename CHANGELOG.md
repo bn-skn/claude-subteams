@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.0] - 2026-05-11
+
+### Added
+- **ui-tester agent** (sonnet) — browser-based UI/E2E testing via Playwright CLI (not MCP). Takes screenshots, clicks buttons, fills forms, evaluates visual results. Works locally and generates CI-ready `.spec.ts` test files. Two modes: ad-hoc quick checks and standard test suite generation.
+- **improvement-agent** (sonnet) — proactive codebase analyst. Examines 7 dimensions: code health, dependency health, test coverage gaps, architecture drift, performance signals, log/error patterns, developer experience. Returns prioritized proposals (P0-P3) with file:line references. Read-only — never writes code.
+- **ui-testing skill** — dispatch protocol for ui-tester agent with 3 testing levels (quick check, standard, full E2E). Includes CI integration template for GitHub Actions, token budget guidelines, and brief template.
+- **codebase-improvement skill** — dispatch protocol for improvement-agent with 3 analysis modes (quick scan, standard, deep audit). Includes integration patterns with log-analyzer, GitNexus, and developer agent chain.
+- Agent count: 10 → 12. Skill count: 46 → 48.
+
 ## [1.4.2] - 2026-05-03
 
 ### Fixed
