@@ -52,6 +52,7 @@ For each task in the current batch:
    - [ ] **Code review** — dispatch reviewer subagent for spec compliance
    - [ ] **Devils-advocate challenge** (full pipeline only) — dispatch devils-advocate to challenge assumptions, edge cases, scale, necessity
    - [ ] **Test verification** — run tests, verify new + existing pass
+   - [ ] **UI verification** (if UI changed) — dispatch ui-tester for screenshot comparison and interaction testing
    - [ ] Gate passes: proceed to next task
    - [ ] Gate fails: retry with feedback (max 3 retries)
 
@@ -97,6 +98,8 @@ After all tasks complete and all gates pass:
 | Complex implementation | opus | Multi-file, integration, architecture |
 | Code review | opus | Needs broad codebase understanding |
 | Test writing | sonnet | Focused scope, clear assertions |
+| UI/E2E testing | sonnet | Playwright tests, screenshots, visual regression |
+| Codebase analysis | opus | Health check, tech debt discovery, improvement proposals |
 
 ## Red Flags
 

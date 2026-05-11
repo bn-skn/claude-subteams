@@ -100,7 +100,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline only. |
 | `developer` | sonnet | Implementation specialist: modular code, minimal diffs, style preservation. |
 | `ui-tester` | sonnet | Browser-based UI/E2E testing via Playwright CLI. Screenshots, interactions, visual regression. |
-| `improvement-agent` | sonnet | Proactive codebase analyst. Finds improvement opportunities, returns prioritized proposals (read-only). |
+| `improvement-agent` | opus | Proactive codebase analyst. Finds improvement opportunities, returns prioritized proposals (read-only). |
 
 ## Hooks
 

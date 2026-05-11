@@ -8,7 +8,7 @@ description: "Proactive codebase analysis and improvement proposal generation. D
 ## 1. Dispatch Protocol
 
 1. This skill dispatches to the **improvement-agent** for read-only analysis.
-2. Agent model: sonnet.
+2. Agent model: opus.
 3. Agent tools: Read, Grep, Glob, Bash (read-only commands only).
 4. ALWAYS provide: target directory, focus areas, depth level.
 5. Agent returns proposals — never writes code or makes changes.
@@ -101,10 +101,11 @@ After receiving proposals from improvement-agent:
 ## 7. Automation Opportunities
 
 ### Scheduled Analysis (cron)
-Run weekly via persistent agent or cron task:
+Run weekly via your project's task scheduler or cron:
 ```bash
-# Sunday 04:00 — after log-analyzer (21:00 Sat) and memory-manager (03:00 Sun)
-node dist/schedule-cli.js create "Run improvement-agent on claudebot codebase, depth: standard" "0 4 * * 0" CHAT_ID
+# Sunday 04:00 — schedule periodic codebase health check
+# Use your project's scheduling mechanism (cron, systemd timer, CI schedule)
+# Example: dispatch improvement-agent with depth: standard, focus: all
 ```
 
 ### Post-Deploy Check

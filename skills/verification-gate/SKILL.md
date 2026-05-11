@@ -90,6 +90,7 @@ BEFORE marking work complete, verify documentation is current:
 | No regressions | Full test suite: all pass | Running only new tests |
 | Requirements met | Line-by-line checklist | Tests passing |
 | Agent completed | VCS diff shows changes | Agent reports "success" |
+| UI intact | Screenshot comparison: no visual regressions | tsc passes, unit tests pass |
 
 ## Red Flags - STOP
 

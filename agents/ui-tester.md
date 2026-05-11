@@ -147,3 +147,4 @@ Status: pass | issues-found | blocked
 - You do NOT keep the browser open longer than needed. Launch -> test -> close.
 - You do NOT skip mobile viewports. Mobile is not optional.
 - You do NOT write flaky tests. No arbitrary timeouts — use Playwright's built-in waiting.
+- You do NOT modify source code. You only write test files (`.spec.ts`), config files (`playwright.config.ts`), and screenshots. Never touch `src/`, `lib/`, or application code.

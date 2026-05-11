@@ -1,7 +1,7 @@
 ---
 name: using-subteams
-description: "Use before any significant development work — establishing orchestrator methodology with 10 specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
-version: 1.0.0
+description: "Use before any significant development work — establishing orchestrator methodology with 12 specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
+version: 1.5.0
 ---
 
 # Using Subteams — Orchestrator Meta-Skill
@@ -48,9 +48,9 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 | 9 | developer | sonnet | Read, Write, Edit, Bash, Grep, Glob | Implementation tasks dispatched via executing-plans | Code changes + test results + risks |
 | 10 | devils-advocate | opus | Read, Grep, Glob | Full pipeline: challenges assumptions, edge cases, scale, necessity | Challenge report + rebuttals |
 | 11 | ui-tester | sonnet | Read, Write, Edit, Bash, Grep, Glob | After UI implementation: browser testing, screenshots, E2E | Test files + screenshots + visual findings |
-| 12 | improvement-agent | sonnet | Read, Grep, Glob, Bash | Periodic codebase health checks, tech debt discovery, sprint planning | Prioritized proposals (read-only, no code changes) |
+| 12 | improvement-agent | opus | Read, Grep, Glob, Bash | Periodic codebase health checks, tech debt discovery, sprint planning | Prioritized proposals (read-only, no code changes) |
 
-**Model note:** All agents default to opus except doc-agent, developer, ui-tester, and improvement-agent (sonnet). See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
+**Model note:** All agents default to opus except doc-agent, developer, and ui-tester (sonnet). See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
 
 ## 3. Scope Detection
 

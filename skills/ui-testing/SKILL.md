@@ -102,7 +102,7 @@ UI testing can be expensive. Control costs:
 | Test file writing | Low | Write once, run many times |
 | Test execution | Low | Playwright runs in Bash, minimal output |
 
-**Target:** ui-tester session should use < 50k tokens for standard testing of 5-10 pages.
+**Target:** Aim for < 50k tokens for standard testing of 5-10 pages. Actual usage depends on failure count and diagnosis complexity.
 
 ## 7. Critical Rules
 
