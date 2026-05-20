@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.6.0] - 2026-05-20
+
+### Added
+- **decision-context skill** — mandatory "decision context" block for every non-trivial change documented in `SYSTEM.md`, `CHANGELOG.md`, session journals, or postmortems. Five fixed labels: Decision / Why / Alternatives / Risks / Linked. Lightweight everyday companion to `adr-tracker` (which remains reserved for project-defining choices). Includes good/bad examples, field discipline, workflow, and red flags. Future-self insurance against cargo-cult and lost context six months later.
+- Skill count: 48 → 49.
+
+### Changed
+- **git-workflow** — clarified commit-body rule. Was: "Body explains WHY, not WHAT". Now: for non-trivial commits the body MUST mirror the decision-context block from the project's decisions journal (cross-link to `decision-context` skill). Cosmetic / patch-bump commits still get a one-line body.
+- **plugin.json** — bumped version `1.4.2` → `1.6.0` (was out of sync with CHANGELOG which already documented 1.5.0; resyncing in this release).
+
 ## [1.5.0] - 2026-05-11
 
 ### Added

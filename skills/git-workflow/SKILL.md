@@ -69,7 +69,7 @@ main ─────────────────────────
 1. **Description MUST be lowercase** — `feat: add user auth` not `feat: Add User Auth`
 2. **Description MUST be imperative mood** — "add" not "added" or "adds"
 3. **Scope is optional but encouraged** — `feat(auth): add login endpoint`
-4. **Body explains WHY, not WHAT** — the diff shows what changed
+4. **Body explains WHY, not WHAT** — the diff shows what changed. For non-trivial commits, the body MUST mirror the decision-context block from your project's decisions journal (see `decision-context` skill). For cosmetic / patch-bump commits, a one-line body is fine.
 5. **Keep subject line under 72 characters**
 6. **One logical change per commit** — do not bundle unrelated work
 

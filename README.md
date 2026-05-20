@@ -80,6 +80,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | design | `design-qa` | Compares implementation against design spec; heuristic evaluation and visual consistency. |
 | ops | `ci-cd-pipeline` | Sets up and modifies CI/CD pipelines and environment promotion strategies. |
 | process | `brainstorming` | Explores intent and requirements before any implementation. Use before creative work. |
+| process | `decision-context` | Mandatory block (Decision / Why / Alternatives / Risks / Linked) in the decisions journal for every non-trivial commit. Everyday companion to `adr-tracker`. |
 | quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID principles. |
 | quality | `adversarial-testing` | Writes tests designed to break the code — edge cases, race conditions, boundary violations. |
 | quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |
