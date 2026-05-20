@@ -113,8 +113,9 @@ Why bad: every field is vacuous. "Messy" is not a problem statement. "N/A" hides
 1. Make the change. Run tests. Verify.
 2. Before committing, draft the block in your head or in scratch.
 3. Add the block as an entry in the project's decisions journal (`SYSTEM.md` or equivalent), under today's session heading.
-4. Mirror the same content in the **commit body** — the block IS your commit body for non-trivial commits. (See `git-workflow` skill.)
-5. Commit and push.
+4. **If the change touched something described in the descriptive part of the docs** (top of `SYSTEM.md` or equivalent — stack, architecture, "how X works"), update that section by **overwriting it**, not appending. Stale descriptive docs are worse than missing ones.
+5. Mirror the same content in the **commit body** — the block IS your commit body for non-trivial commits. (See `git-workflow` skill.) When a commit is not happening (research, planning, scratch work), steps 3–4 are still required at end of work.
+6. Commit and push.
 
 ### When also creating an ADR
 
@@ -122,6 +123,23 @@ If the decision is project-defining (new dependency, framework choice, data-stor
 
 - Block in journal → quick context, scrollable in the session timeline
 - ADR in `docs/adr/NNN-title.md` → discoverable as a standalone document, linked to from PRs and onboarding
+
+## End-of-Work Cycle (Regardless of Commits)
+
+Documentation discipline triggers at **end of work**, not only at commits. Many real sessions never produce a commit (research, planning, debugging, dependency exploration) yet still change the project's understanding and may leave files modified.
+
+Cycle:
+
+1. **Start of work** — read the descriptive part of the project's primary doc (`SYSTEM.md` or equivalent) to refresh context. Skim the most recent journal entries to know what was decided lately.
+2. **During work** — keep mental notes on non-trivial decisions. Do not defer the block to "later" — context decays in hours.
+3. **End of work — always do these before stopping:**
+   - If a non-trivial decision was made → write the Decision-context block in the journal.
+   - If the change affected the descriptive part → update that section by overwriting.
+   - If a commit is happening → mirror the block in the commit body.
+   - If a commit is not happening → the journal entry alone is the durable record.
+4. **Light cases that legitimately skip docs** — cosmetics, typos, whitespace, patch-version bumps with no behavior change, scratch experiments deliberately deferred. State this in your stop message so it is auditable.
+
+The plugin's `session-end-reminder` hook enforces this cycle: at every Stop event, it checks whether non-doc files were modified without any `.md` updates and blocks the stop with instructions to address the gap. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See `README.md` for full hook behavior.
 
 ## Cross-References
 
@@ -138,6 +156,8 @@ If the decision is project-defining (new dependency, framework choice, data-stor
 - Block exists only in commit body, not in the journal → future-self will never find it without `git log` archaeology
 - Block exists only in the journal, not in commit body → reverse problem, harder to find when reading code
 - Block is longer than ~12 lines → either too detailed (compress) or actually an ADR (escalate)
+- Descriptive docs (top of `SYSTEM.md`) say one thing, code does another → describe what is, not what was; update the section by overwriting
+- Stop hook blocked twice in a row → either docs are genuinely deferred (set `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1` and document why) or you skipped the cycle and should fix it now
 
 ## Anti-Patterns
 

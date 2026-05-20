@@ -1,8 +1,158 @@
 #!/bin/bash
-# Stop hook — reminds to update documentation before session ends
+# Stop hook — enforces documentation discipline at end of work
+#
+# Behavior:
+#   - Detects unstaged/uncommitted changes in working tree
+#   - If non-doc files changed but no .md files were updated → blocks Stop (exit 2)
+#     and instructs the model to update the decisions journal / descriptive docs
+#   - After 2 blocked attempts in the same HEAD state, lets the session stop with
+#     a warning (prevents infinite loops when the model genuinely cannot comply)
+#   - Counter resets on every new commit (HEAD change)
+#
+# Soft (no enforcement) when:
+#   - Not in a git repo
+#   - No changes in working tree
+#   - Only neutral / lock / config files changed
+#   - Both .md and non-.md files changed (treated as "you remembered docs")
+#
+# Escape hatch:
+#   - Set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 to disable enforcement entirely.
+#     Use for scratch / experimental work where doc updates are deliberately deferred.
+#
+# Required: jq (graceful skip if missing), git.
 
-echo "[subteams] Session ending. Quick checklist:"
-echo "  - BACKLOG.md updated? (completed tasks marked done)"
-echo "  - CHANGELOG.md updated? (if features/fixes shipped)"
-echo "  - Active plan moved to completed/? (if feature finished)"
-echo "  - ADR created? (if architectural decisions were made)"
+# ---- Escape hatch ----
+if [ "${CLAUDE_SUBTEAMS_SKIP_DOC_CHECK:-0}" = "1" ]; then
+  printf '[subteams] Session ending. Doc enforcement skipped (CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1).\n'
+  exit 0
+fi
+
+# ---- Read Stop event input ----
+INPUT=$(cat 2>/dev/null || printf '{}')
+
+# Parse session_id for per-session counter (graceful fallback if jq absent)
+SESSION_ID=""
+if command -v jq &>/dev/null; then
+  SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+fi
+if [ -z "$SESSION_ID" ]; then
+  SESSION_ID=$(printf '%s' "$PWD" | md5sum 2>/dev/null | cut -c1-12 || printf 'default')
+fi
+
+# ---- Not in a git repo → soft reminder only ----
+if ! git rev-parse --git-dir &>/dev/null; then
+  printf '[subteams] Session ending. Quick checklist:\n'
+  printf '  - BACKLOG.md updated? (completed tasks marked done)\n'
+  printf '  - CHANGELOG.md updated? (if features/fixes shipped)\n'
+  printf '  - SYSTEM.md / decisions journal entry added? (for non-trivial changes)\n'
+  printf '  - Descriptive docs still accurate? (top of SYSTEM.md or equivalent)\n'
+  printf '  - Active plan moved to completed/? (if feature finished)\n'
+  exit 0
+fi
+
+# ---- Get changed files in working tree (tracked + untracked) ----
+CHANGED_FILES=$(git status --porcelain 2>/dev/null | awk '{
+  if ($1 == "R" || $1 == "RM") { print $NF } else { print $NF }
+}')
+
+# Nothing changed → silent pass
+if [ -z "$CHANGED_FILES" ]; then
+  exit 0
+fi
+
+# ---- Classify files ----
+# Neutral: lock files, gitignore, editor config — don't trigger doc requirement
+NEUTRAL_RE='^(\.gitignore|\.editorconfig|\.gitattributes|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|composer\.lock)$|(^|/)\.DS_Store$'
+
+DOC_COUNT=0
+CODE_COUNT=0
+CODE_LIST=""
+
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  # Strip the "->" rename arrow if present (git status porcelain for renames)
+  f=${f##*-> }
+  # Skip neutral files
+  if printf '%s\n' "$f" | grep -qE "$NEUTRAL_RE"; then
+    continue
+  fi
+  # Classify
+  if printf '%s\n' "$f" | grep -qE '\.md$'; then
+    DOC_COUNT=$((DOC_COUNT + 1))
+  else
+    CODE_COUNT=$((CODE_COUNT + 1))
+    CODE_LIST="${CODE_LIST}  - ${f}
+"
+  fi
+done <<< "$CHANGED_FILES"
+
+# Case A: Only neutral files or nothing left after filtering → silent pass
+if [ "$CODE_COUNT" -eq 0 ] && [ "$DOC_COUNT" -eq 0 ]; then
+  exit 0
+fi
+
+# Case B: Only docs changed → silent pass (this is the expected state at end of work)
+if [ "$CODE_COUNT" -eq 0 ]; then
+  exit 0
+fi
+
+# Case C: Code + docs both changed → soft reminder, no block
+if [ "$DOC_COUNT" -gt 0 ]; then
+  printf '[subteams] Session ending. Code + docs both changed — good.\n'
+  printf 'Reminder: ensure non-trivial decisions have a Decision context block in the journal.\n'
+  printf '(See decision-context skill for format.)\n'
+  exit 0
+fi
+
+# Case D: Code changed WITHOUT any doc updates → ENFORCE
+HEAD_HASH=$(git rev-parse HEAD 2>/dev/null || printf 'no-head')
+HEAD_FILE="/tmp/claude-subteams-head-${SESSION_ID}"
+COUNTER_FILE="/tmp/claude-subteams-stop-attempts-${SESSION_ID}"
+
+# Reset counter on new commit
+if [ -f "$HEAD_FILE" ]; then
+  LAST_HEAD=$(cat "$HEAD_FILE" 2>/dev/null || printf '')
+  if [ "$LAST_HEAD" != "$HEAD_HASH" ]; then
+    rm -f "$COUNTER_FILE"
+  fi
+fi
+printf '%s' "$HEAD_HASH" > "$HEAD_FILE"
+
+ATTEMPTS=0
+if [ -f "$COUNTER_FILE" ]; then
+  ATTEMPTS=$(cat "$COUNTER_FILE" 2>/dev/null || printf '0')
+fi
+
+if [ "$ATTEMPTS" -ge 2 ]; then
+  # Already enforced twice for this HEAD — let through with audit warning
+  printf '[subteams] Doc check enforced %s× this session — allowing stop with warning.\n' "$ATTEMPTS" >&2
+  printf 'Files changed without doc updates:\n' >&2
+  printf '%s' "$CODE_LIST" >&2
+  printf 'If this was intentional, set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 next time.\n' >&2
+  rm -f "$COUNTER_FILE" "$HEAD_FILE"
+  exit 0
+fi
+
+# Block stop, force the model to address
+ATTEMPTS=$((ATTEMPTS + 1))
+printf '%s' "$ATTEMPTS" > "$COUNTER_FILE"
+
+{
+  printf '[subteams:session-end-reminder] Cannot end session yet — code changed without documentation updates.\n\n'
+  printf 'Files changed (no .md files updated):\n'
+  printf '%s\n' "$CODE_LIST"
+  printf 'Required before stopping (attempt %s/2):\n' "$ATTEMPTS"
+  printf '  1. Add a "Decision context" block to the project decisions journal\n'
+  printf '     (docs/SYSTEM.md or equivalent) for any non-trivial change.\n'
+  printf '     Format: Decision / Why / Alternatives / Risks / Linked.\n'
+  printf '     See the decision-context skill for full format and examples.\n'
+  printf '  2. If the change affected the descriptive part of the docs (top of\n'
+  printf '     SYSTEM.md or equivalent), update that section by overwriting it —\n'
+  printf '     stale descriptive docs are worse than missing ones.\n'
+  printf '  3. For cosmetic-only changes (whitespace, typos, patch bumps) — explain\n'
+  printf '     in your stop message why docs are not needed for these specific files.\n\n'
+  printf 'Escape hatch: set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 if enforcement is wrong for this session.\n'
+  printf 'After 2 enforcement attempts the hook lets the session stop with a warning.\n'
+} >&2
+
+exit 2

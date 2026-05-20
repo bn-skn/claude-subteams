@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.7.0] - 2026-05-20
+
+### Added
+- **session-end-reminder hook — now enforcing.** Smart Stop hook that detects unstaged code changes in the working tree and blocks `Stop` (exit 2) when non-doc files changed without any `*.md` updates. Behavior:
+  - No changes / only docs / lock files → silent pass.
+  - Code + docs both changed → soft reminder to confirm Decision-context block.
+  - Code without doc updates → block with explicit instructions referencing the `decision-context` skill.
+  - Counter resets on each new commit (HEAD change). After 2 enforcement attempts in the same HEAD state, allows stop with audit warning (prevents infinite loops if model cannot comply).
+  - Not a git repo → soft checklist only.
+- **CLAUDE_SUBTEAMS_SKIP_DOC_CHECK env var** — escape hatch to disable doc-enforcement for scratch / experimental work, CI contexts, or legitimate skip cases. Documented in `README.md` under "Configuration".
+- **decision-context skill — new "End-of-Work Cycle" section.** Explains the start-of-work / during / end-of-work cycle for cases when no commit is happening (research, planning, debugging). Documents the Stop hook backstop and escape hatch. Adds two new Red Flags: stale descriptive docs, repeated Stop hook blocks.
+- **decision-context skill — checklist for descriptive docs.** Step 4 of Workflow now mandates updating the descriptive part of the docs (top of `SYSTEM.md` or equivalent) by overwriting when affected, not just appending to the journal. "Stale descriptive docs are worse than missing ones."
+
+### Changed
+- **README.md** — Stop hook row in the Hooks table now describes enforcement behavior. New "Configuration" section documents `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK` and the full Stop-hook decision tree (no changes / docs only / code + docs / code only / not a repo / escape hatch active). Lists neutral files that never trigger enforcement.
+
 ## [1.6.0] - 2026-05-20
 
 ### Added

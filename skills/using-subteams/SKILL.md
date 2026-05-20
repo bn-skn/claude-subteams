@@ -147,6 +147,7 @@ Dispatch both in a single message. Collect findings, address critical ones befor
 - Every plan must have a "Risks & Nuances" section
 - Every implementation output must document risks
 - doc-agent updates affected documentation
+- A Decision-context block is added to the project's decisions journal (`SYSTEM.md` or equivalent) — see `decision-context` skill for format. The `session-end-reminder` Stop hook enforces this at end of session for Light/Standard pipelines that lack an explicit Step 10.
 
 **Step 12 (Cleanup):**
 - `git tag -l 'backup/pre-<feature>-*' | xargs git tag -d` after successful merge

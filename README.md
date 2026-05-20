@@ -111,8 +111,29 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | `PreToolUse` (Bash) | `pre-commit-gate` | Runs tsc / mypy / go build before any git commit; warns on files over 200 lines. |
 | `PreToolUse` (Bash) | `pre-push-check` | Safety check before git push. |
 | `PostToolUse` (Edit/Write) | `post-edit-check` | Async check after file edits. |
-| `Stop` | `session-end-reminder` | Reminds to update BACKLOG.md, CHANGELOG.md, and ADRs before ending session. |
+| `Stop` | `session-end-reminder` | **Enforces** documentation discipline at end of work. Detects unstaged code changes; if any non-doc files changed without `*.md` updates, blocks Stop with instructions to update the decisions journal. Counter resets on each new commit; after 2 enforcement attempts per HEAD, allows stop with audit warning. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See "Configuration" below. |
 | `UserPromptSubmit` | `user-prompt-check` | Async prompt validation. |
+
+## Configuration
+
+### Environment variables
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK` | Set to `1` to disable the Stop hook's documentation enforcement. Use for scratch / experimental work where doc updates are deliberately deferred, or in CI / batch contexts where the cycle does not apply. | unset (enforcement active) |
+
+### Doc-enforcement details
+
+The `session-end-reminder` hook enforces the doc cycle described in the `decision-context` skill. Logic:
+
+- **No changes in working tree** → silent pass.
+- **Only `*.md` files changed** → silent pass (docs are what changed).
+- **Code + docs both changed** → soft reminder to confirm the Decision-context block is in the journal.
+- **Code changed without any `*.md` updates** → block Stop (`exit 2`) with instructions. After 2 attempts in the same HEAD state, allows stop with audit warning. Counter resets on each new commit.
+- **Not in a git repo** → soft checklist only, no enforcement.
+- **`CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`** → all enforcement bypassed.
+
+Neutral files that never trigger enforcement: `.gitignore`, `.gitattributes`, `.editorconfig`, lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`, `go.sum`, `poetry.lock`, `uv.lock`, `composer.lock`), `.DS_Store`.
 
 ## Templates
 
