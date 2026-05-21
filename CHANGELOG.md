@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.7.1] - 2026-05-21
+
+### Fixed
+- **install.sh**: marketplace description created by the install script said "9 specialized sub-team agents" — stale since v1.3.0 (developer) and v1.5.0 (ui-tester, improvement-agent). Now reads "12 specialized sub-team agents", matching reality. Cosmetic — does not affect install behavior, only the description text written to the user's local `marketplace.json`.
+
 ## [1.7.0] - 2026-05-20
 
 ### Added

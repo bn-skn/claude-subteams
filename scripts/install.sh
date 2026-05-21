@@ -95,7 +95,7 @@ if [ ! -f "$MARKETPLACE_JSON" ]; then
   "plugins": [
     {
       "name": "$PLUGIN_NAME",
-      "description": "Orchestrator + 9 specialized sub-team agents with quality pipeline and SDLC hooks",
+      "description": "Orchestrator + 12 specialized sub-team agents with quality pipeline and SDLC hooks",
       "category": "development",
       "source": "./plugins/$PLUGIN_NAME",
       "homepage": "https://github.com/bn-skn/claude-subteams"
