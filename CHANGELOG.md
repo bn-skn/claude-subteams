@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.13.0] - 2026-06-01
+
+### Changed
+- **cross-review — native default model.** GPT critics no longer hardcode `gpt-5.5`. By default they pass NO `-m` flag, so Codex uses whatever model the Codex CLI is configured to use (`~/.codex/config.toml`) — upgrade the model natively in Codex and the critics inherit it with zero plugin edits. `CROSS_REVIEW_MODEL` optionally pins a specific model. Reasoning effort still defaults to `high` (Codex's own default is "none", which yields shallow reviews).
+
+### Added
+- **cross-review — run any agent through GPT (opt-in).** Beyond the two standing GPT critics, any specialist role (security-auditor, test-engineer, architecture-guard, design-critic, …) can be cross-checked on Codex/GPT via the same generic invocation pattern, on explicit request.
+- **using-subteams — cross-model review wired into the pipeline.** Full-pipeline Step 6 now also dispatches `gpt-code-reviewer` + `gpt-devils-advocate` alongside the Claude reviewers when Codex is available (4 critics: 2 Claude + 2 GPT); falls back to Claude-only when Codex is down. Standard-pipeline review can optionally add the GPT reviewer. Never blocks the pipeline.
+
 ## [1.12.1] - 2026-06-01
 
 ### Changed
