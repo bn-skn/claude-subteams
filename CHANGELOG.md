@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.0] - 2026-06-01
+
+### Added
+- **project-scaffold skill** — interactive wizard that bootstraps a brand-new project's documentation/config skeleton from one command. Gathers project parameters (name, goal, stack, frameworks, persistence, external APIs, build/test/lint/run/dev/install commands, repo URL, license) and assembles `CLAUDE.md`, `README.md`, `.gitignore`, `docs/SYSTEM.md`, plus `docs/plans/{active,completed}/` and `docs/adr/` seeds — reusing the existing `templates/*` for CONVENTIONS/ARCHITECTURE/BACKLOG/CHANGELOG/ADR. Safety: `ls -A` empty-directory check with a benign-file allowlist (`.git`, `.gitignore`, `LICENSE`, `README.md`, `.github`, `.DS_Store`) that never clobbers existing files, and a hard abort on real source/config (`package.json`, `pyproject.toml`, `go.mod`, `src/`, source files). Complements — does not overlap — the `scaffolding` skill: project-scaffold bootstraps a whole new project once; `scaffolding` adds components repeatedly. First of the v1.8 line, shipped incrementally.
+- **templates/project-init/** — new bootstrap templates: two-layer `SYSTEM.md` (living system description + append-only decisions journal in the `decision-context` block format), a full project `CLAUDE.md`, a `README.md`, and a stack-agnostic `dot-gitignore` covering Node/TypeScript, Python, Go, OS, and editor artifacts.
+
+### Changed
+- **scaffolding** — "Project docs" Quick Reference row now points to the `project-scaffold` skill (single source of truth for initial project docs); added a "use project-scaffold first" note to When-to-Use to prevent trigger collision.
+- **templates/ARCHITECTURE.md** — fixed the Related ADRs link from `docs/adrs/001-title.md` (plural, nonexistent) to `docs/adr/000-adr-template.md`, matching the directory the scaffold creates.
+
 ## [1.7.1] - 2026-05-21
 
 ### Fixed

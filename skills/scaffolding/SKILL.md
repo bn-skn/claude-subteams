@@ -18,6 +18,7 @@ Consistent project structure reduces onboarding time and eliminates configuratio
 - Building a new API endpoint
 - Creating a new skill for this plugin
 - Creating a new agent definition
+- If the target directory has no source files yet, use `project-scaffold` first to create the skeleton.
 
 ## Service/Bot Template
 
@@ -157,4 +158,4 @@ description: Brief description of agent's role
 | Endpoint | This skill (section above) | routes.ts, handler.ts, schema.ts |
 | Skill | This skill (section above) | SKILL.md |
 | Agent | This skill (section above) | agent-name.md |
-| Project docs | Plugin `templates/` dir | CONVENTIONS.md, BACKLOG.md, ARCHITECTURE.md, CHANGELOG.md, adr-template.md |
+| Project docs | `project-scaffold` skill | Full skeleton: CLAUDE.md, SYSTEM.md, CONVENTIONS.md, ARCHITECTURE.md, BACKLOG.md, CHANGELOG.md, adr dir, plans dir |
