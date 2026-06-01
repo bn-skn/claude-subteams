@@ -253,4 +253,44 @@ After steps 1–3 pass, compile and deliver this report.
 
 4. **superpowers conflict** — if detected in step 1f and not disabled, remove `"superpowers@claude-plugins-official": true` from `~/.claude/settings.json` manually.
 
+---
+
+## Appendix (optional) — Repair a legacy / broken install
+
+**Not part of the normal install — apply ONLY if you detect one of these:**
+- `claude plugin marketplace list` (or the user's `/plugins`) fails with *"Marketplace configuration file is corrupted"*.
+- A pre-v1.14 install left a fabricated **local** marketplace named `bn-skn` (the old `install.sh` hand-edited Claude Code's global JSON and registered `source: "local"`, which newer Claude Code rejects — corrupting the whole marketplace list).
+
+The fix removes the stale `bn-skn` registration, then installs cleanly via the marketplace flow (steps 1-2 above). Pick the branch that matches the machine state.
+
+### Branch A — the `claude plugin` CLI still works
+
+```bash
+claude plugin marketplace remove bn-skn 2>/dev/null || true   # drop stale local registration
+rm -rf "$HOME/.claude/plugins/marketplaces/bn-skn"            # delete old clone
+```
+Then run the normal install (step 2): `marketplace add bn-skn/claude-subteams` → `install claude-subteams@articortex`.
+
+### Branch B — `/plugins` / `marketplace list` is dead (CLI chokes on the bad entry)
+
+Edit the state files directly. **Back up first**, and touch ONLY the `bn-skn` / `claude-subteams@bn-skn` entries — never blanket-delete `~/.claude/plugins/` (that wipes ALL the user's plugins).
+
+```bash
+cd "$HOME/.claude/plugins"
+cp known_marketplaces.json{,.bak}
+cp installed_plugins.json{,.bak}
+cp "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.bak"
+
+jq 'del(.["bn-skn"])' known_marketplaces.json > t && mv t known_marketplaces.json
+jq 'del(.plugins["claude-subteams@bn-skn"])' installed_plugins.json > t && mv t installed_plugins.json
+jq 'if .enabledPlugins then .enabledPlugins |= del(.["claude-subteams@bn-skn"]) else . end' \
+   "$HOME/.claude/settings.json" > t && mv t "$HOME/.claude/settings.json"
+
+rm -rf "$HOME/.claude/plugins/marketplaces/bn-skn"
+```
+
+`/plugins` revives immediately. Then run the normal install (step 2) after ensuring git/gh auth (step 1d).
+
+**Report to the user** what you repaired (which entry was stale, that backups were made at `*.bak`), then proceed with the fresh install and the usual reload + smoke test.
+
 **Future:** cross-model review capabilities require separate Codex CLI authentication — not part of this installation.

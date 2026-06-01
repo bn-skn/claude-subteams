@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.16.1] - 2026-06-01
+
+### Added
+- **llms-install.md: optional repair appendix.** A non-mandatory section so an AI agent handed the install protocol can also REPAIR a legacy/broken install — detect a corrupted marketplace list or a stale pre-v1.14 `bn-skn` local registration, remove it (CLI branch when `/plugins` works; manual JSON-edit branch with backups when it's dead), then install cleanly. Mirrors `docs/CHEATSHEET.md` but inline in the agent protocol, with explicit "touch only the bn-skn entries, never blanket-delete" safety.
+
 ## [1.16.0] - 2026-06-01
 
 ### Added
