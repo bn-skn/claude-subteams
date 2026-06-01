@@ -12,9 +12,7 @@ description: "Orchestrates parallel GPT-5.5 + Claude critics to break model-mono
 3. Security-critical change (auth, crypto, key handling, injection surface).
 4. Breaking change (Class 4 per `doc-quality-gate` skill) — optional but recommended.
 5. New service bootstrap — first review of a net-new system.
-6. NEVER run cross-review as a default gate on every commit — it is slower and consumes ChatGPT Plus quota.
-
-**Validate before expanding:** Before widening the trigger list, measure the genuine-miss rate on 3-5 past reviews (GPT-only findings that were real bugs Claude missed). Keep triggers narrow until validated — this is a specialist tool, not a default capability.
+6. Cross-review is for meaningful reviews (the triggers above), not an automatic hook on every trivial commit — invoke it when you are actually reviewing, not on every save. This is about relevance, not rationing: when cross-review runs, run the full critic set.
 
 ## 2. Model and Effort Policy — Read This First
 
@@ -53,17 +51,12 @@ Confirm the response header shows the new model at high effort. No agent file ed
 
 ### 3.1 Dispatch (parallel)
 
-**Default mode (one GPT call — preserves quota for most reviews):**
-1. Dispatch Claude critics in parallel: `code-reviewer` + `devils-advocate`.
-2. Simultaneously dispatch `gpt-code-reviewer` (highest-value GPT critic).
-3. All three receive the same diff/file context. Write sets are empty — read-only.
+Dispatch the FULL critic set in parallel — both model families together — for complete cross-model coverage:
+1. Claude critics: `code-reviewer` + `devils-advocate`.
+2. GPT critics: `gpt-code-reviewer` + `gpt-devils-advocate`.
+3. All four receive the same diff/file context. Write sets are empty — all read-only.
 
-**Deep mode (two GPT calls — reserve for security-critical, breaking, or new-service reviews):**
-1. Dispatch Claude critics in parallel: `code-reviewer` + `devils-advocate`.
-2. Simultaneously dispatch both GPT critics in parallel: `gpt-code-reviewer` + `gpt-devils-advocate`.
-3. All four receive the same diff/file context. Write sets are empty — read-only.
-
-Trigger deep mode when: the change touches auth/crypto, is Class 4 Breaking, or bootstraps a new service.
+Run all four by default. Do NOT drop GPT critics to conserve quota — full coverage is the point of cross-review; the user has opted into it.
 
 ### 3.2 Merge Results
 
@@ -91,11 +84,11 @@ Trigger deep mode when: the change touches auth/crypto, is Class 4 Breaking, or 
 
 ## 4. Trigger: `/rescue`
 
-Use when Claude has been debugging a problem across multiple turns without resolution. `/rescue` counts against the same 5-hour shared quota as reviews — use it deliberately, and cap at ONE attempt per debugging session.
+Use when Claude has been debugging a problem across multiple turns without resolution.
 
 1. Run availability check first: `command -v codex` and `codex login status`. If either fails, skip to step 5.
 2. Gather all relevant files and the symptom description.
-3. Invoke Codex once — no retries:
+3. Invoke Codex. Do not auto-retry the same call on a non-zero exit (that just burns a failed call) — but you may run `/rescue` again with refined context if the first diagnosis missed:
 
 ```bash
 MODEL="${CROSS_REVIEW_MODEL:-gpt-5.5}"
@@ -111,21 +104,21 @@ codex exec \
 4. Present Codex's diagnosis to the human. Implement the proposed fix yourself after human confirmation — do not let Codex write to the repo directly.
 5. If Codex is unavailable or the one attempt fails: acknowledge, explain, ask the human for additional context to try a different approach. Do not retry.
 
-## 5. Fallback and Quota
+## 5. Fallback and Reliability
 
 1. If `codex` is not on PATH, not authenticated, or exits non-zero: skip GPT critics, log the reason, run Claude critics only. NEVER block the main pipeline — Claude critics are always sufficient to proceed.
-2. NEVER retry Codex automatically — one attempt per review, one attempt per `/rescue` session.
-3. ChatGPT Plus has a 5-hour shared bucket (CLI + web). Heavy CLI use degrades interactive ChatGPT — trigger cross-review deliberately, not automatically.
-4. If the human reports ChatGPT being slow or rate-limited: stop all Codex calls immediately and notify.
+2. Do NOT auto-retry a failed Codex call — a non-zero exit means skip and report, not loop on the same call.
+3. For awareness, not as a limit: ChatGPT Plus uses a 5-hour shared bucket across CLI and web. Run the full critic set whenever cross-review fires — do not ration GPT calls. If the human reports ChatGPT being throttled, pause Codex calls and notify; that is a reaction to a real signal, never a pre-emptive cap.
 
 ## 6. Red Flags
 
 | Pattern | Why It Is Wrong | Correct Action |
 |---------|-----------------|----------------|
-| Running cross-review on every commit | Drains ChatGPT Plus quota; adds latency to normal flow | Reserve for explicit triggers and high-risk changes only |
+| Running cross-review automatically on every trivial commit | Adds latency and noise to changes that don't need a second model | Invoke when actually reviewing — explicit triggers and high-risk changes |
+| Dropping a GPT critic to "save quota" | Defeats cross-model coverage — the user opted into the full set | Run all four critics whenever cross-review fires |
 | Editing model/effort hardcoded in agent files | Creates drift; a missed file silently runs default (shallow) effort | Set `CROSS_REVIEW_MODEL` / `CROSS_REVIEW_EFFORT` env vars — agents pick them up automatically |
 | Auto-resolving a critical disagreement between model families | Two models disagreeing on critical/security = genuine ambiguity | Escalate to human; do not merge until addressed |
-| Retrying Codex after a quota failure | Quota errors worsen under retries | Log unavailable, proceed with Claude critics, notify human |
+| Auto-retrying Codex after a non-zero exit | Looping on a failed call wastes it and can cascade errors | Log unavailable, proceed with Claude critics, notify human |
 | Treating GPT findings as a superset of Claude findings | Different models miss different things; neither is complete | Use intersection for confidence, union for coverage |
 | Skipping availability check before Codex call | Network or auth failure will produce a cryptic error mid-review | Always run `command -v codex && codex login status` first |
 | Letting Codex write to the repo during /rescue | Codex operates in read-only sandbox; changes must be reviewed | Always use `-s read-only`; implement fixes yourself after human confirmation |
