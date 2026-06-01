@@ -49,8 +49,12 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 | 10 | devils-advocate | opus | Read, Grep, Glob | Full pipeline: challenges assumptions, edge cases, scale, necessity | Challenge report + rebuttals |
 | 11 | ui-tester | sonnet | Read, Write, Edit, Bash, Grep, Glob | After UI implementation: browser testing, screenshots, E2E | Test files + screenshots + visual findings |
 | 12 | improvement-agent | opus | Read, Grep, Glob, Bash | Periodic codebase health checks, tech debt discovery, sprint planning | Prioritized proposals (read-only, no code changes) |
+| 13 | gpt-code-reviewer | sonnet (+Codex/GPT) | Read, Grep, Glob, Bash | Cross-model review (`/cross-review`, breaking/security changes) — shells out to Codex for bug classes Claude under-weights | Structured cross-model findings |
+| 14 | gpt-devils-advocate | sonnet (+Codex/GPT) | Read, Grep, Glob, Bash | Cross-model architectural challenge alongside `devils-advocate` | Cross-model challenge report |
 
-**Model note:** All agents default to opus except doc-agent, developer, and ui-tester (sonnet). See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
+**Model note:** All agents default to opus except doc-agent, developer, and ui-tester (sonnet). The two GPT critics (#13-14) run as sonnet harnesses that shell out to the Codex CLI (GPT) at high reasoning effort — see the `cross-review` skill for model/effort policy. See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
+
+**Cross-model note:** the two GPT critics are OPTIONAL — they augment the Claude critics when Codex is available (see Full Pipeline Step 6 and the `cross-review` skill). If Codex is down, the pipeline runs Claude-only and never blocks.
 
 ## 3. Scope Detection
 

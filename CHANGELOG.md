@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.14.2] - 2026-06-01
+
+### Fixed
+- **using-subteams agent roster** — the two GPT critics (`gpt-code-reviewer`, `gpt-devils-advocate`) were wired into the pipeline (Full Pipeline Step 6 cross-model layer, Standard review) but were MISSING from the Section 2 "Default Agents Quick Reference" table. Added them as #13-14 (model/tools/when-to-spawn/output) plus a cross-model note clarifying they are optional and Codex-gated. The roster now matches reality (14 agents) and the README agents table — orchestrators reading the methodology see the full team.
+
 ## [1.14.1] - 2026-06-01
 
 ### Changed
