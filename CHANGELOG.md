@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.14.1] - 2026-06-01
+
+### Changed
+- **Docs freshness pass.** Removed the stale hardcoded "12 specialized agents" count from the activation snippet (source `templates/claudemd-snippet.md` + its copies in README / INSTALL / llms-install, and the `using-subteams` description) — now reads "specialized sub-team agents", and the agent enumeration is extended to all 14 (added `gpt-code-reviewer`, `gpt-devils-advocate`). Actualized `docs/plans/active/2026-05-02-full-audit-overhaul.md` (counts 9/46 → 14/53; C1-C3 marked resolved by the v1.14.0 marketplace migration; C4/I1-I6/A1-A6 remain open backlog). Historical snapshots (`docs/DONE.md`, CHANGELOG history) intentionally left intact.
+
 ## [1.14.0] - 2026-06-01
 
 ### Changed

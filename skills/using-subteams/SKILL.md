@@ -1,6 +1,6 @@
 ---
 name: using-subteams
-description: "Use before any significant development work — establishing orchestrator methodology with 12 specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
+description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
 version: 1.5.0
 ---
 

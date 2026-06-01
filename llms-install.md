@@ -243,10 +243,10 @@ After steps 1–3 pass, compile and deliver this report.
    ```markdown
    ## Development Methodology
 
-   For development tasks use the claude-subteams plugin (orchestrator + 12 specialized agents).
+   For development tasks use the claude-subteams plugin (orchestrator + specialized sub-team agents).
    Invoke skill "claude-subteams:using-subteams" before significant development work.
    For small fixes — act directly, invoke code-review after if logic changed.
-   Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent.
+   Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate.
    ```
 
    Also available at: `templates/claudemd-snippet.md` inside the plugin's installed directory (locate with `find "$HOME/.claude/plugins" -name "claudemd-snippet.md" 2>/dev/null`).

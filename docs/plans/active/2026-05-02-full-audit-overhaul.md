@@ -6,24 +6,24 @@
 
 ## Context
 
-Plugin claude-subteams (9 agents, 46 skills, 6 hooks) has critical bugs preventing clean install/uninstall/update on fresh Claude Code instances. Issues discovered through code audit + production experience.
+Plugin claude-subteams (14 agents, 53 skills, 6 hooks) has critical bugs preventing clean install/uninstall/update on fresh Claude Code instances. Issues discovered through code audit + production experience.
 
 ## Critical Fixes (C1-C4)
 
-### C1. uninstall.sh path mismatch
+### C1. uninstall.sh path mismatch — RESOLVED
 - **File:** `scripts/uninstall.sh:6`
 - **Bug:** Uses `$HOME/.claude/plugins/claude-subteams` but install.sh puts plugin at `$HOME/.claude/plugins/marketplaces/claude-subteams/plugins/claude-subteams`
-- **Fix:** Sync PLUGIN_DIR with install.sh path
+- **Resolution:** Resolved by the v1.14.0 marketplace migration — install.sh/update.sh/uninstall.sh were rewritten as thin CLI wrappers; the old path/key mismatches no longer exist.
 
-### C2. update.sh same path mismatch
+### C2. update.sh same path mismatch — RESOLVED
 - **File:** `scripts/update.sh:6`
 - **Bug:** Same wrong path, update always fails
-- **Fix:** Sync PLUGIN_DIR with install.sh path
+- **Resolution:** Resolved by the v1.14.0 marketplace migration — install.sh/update.sh/uninstall.sh were rewritten as thin CLI wrappers; the old path/key mismatches no longer exist.
 
-### C3. uninstall.sh enabledPlugins key mismatch
+### C3. uninstall.sh enabledPlugins key mismatch — RESOLVED
 - **File:** `scripts/uninstall.sh:14-19`
 - **Bug:** install.sh writes key `claude-subteams@claude-subteams`, uninstall tries to delete `claude-subteams`
-- **Fix:** Use PLUGIN_KEY variable matching install.sh
+- **Resolution:** Resolved by the v1.14.0 marketplace migration — install.sh/update.sh/uninstall.sh were rewritten as thin CLI wrappers; the old path/key mismatches no longer exist.
 
 ### C4. pre-commit-gate: npx not found without nvm
 - **File:** `hooks/pre-commit-gate:17`
