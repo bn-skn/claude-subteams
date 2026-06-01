@@ -98,6 +98,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |
 | quality | `codebase-improvement` | Proactive codebase analysis. Dispatches improvement-agent for health checks and tech debt discovery. |
 | research | `live-research` | Fetches current library/API docs before coding against fast-moving SDKs (`/research`, `/whatsnew`). Orchestrator fetches via Context7/web; researcher synthesizes. |
+| cross-model | `cross-review` | Runs GPT-5.5 (Codex) critics alongside Claude critics to break model-monoculture blind spots (`/cross-review`, `/rescue`). Default 1 GPT call; deep mode 2. Strongest model at high reasoning effort. |
 
 ## Agents
 
@@ -115,6 +116,8 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | `developer` | sonnet | Implementation specialist: modular code, minimal diffs, style preservation. |
 | `ui-tester` | sonnet | Browser-based UI/E2E testing via Playwright CLI. Screenshots, interactions, visual regression. |
 | `improvement-agent` | opus | Proactive codebase analyst. Finds improvement opportunities, returns prioritized proposals (read-only). |
+| `gpt-code-reviewer` | sonnet (+Codex/GPT-5.5) | Cross-model code review via `codex exec`. Finds bug classes Claude-family models under-weight. Read-only; graceful-skips if Codex unavailable. |
+| `gpt-devils-advocate` | sonnet (+Codex/GPT-5.5) | Cross-model architectural challenge via `codex exec`. Different training distribution than Claude. Read-only; graceful-skip. |
 
 ## Hooks
 

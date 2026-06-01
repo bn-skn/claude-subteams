@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.12.0] - 2026-06-01
+
+### Added
+- **cross-model review** — a second critic on a DIFFERENT model (OpenAI Codex / GPT-5.5) to break Claude's model-monoculture blind spots.
+  - **gpt-code-reviewer** + **gpt-devils-advocate** agents — shell out to `codex exec` (read-only sandbox) for cross-model code review and architectural challenge. Paired with the Claude critics but with deliberately ORTHOGONAL prompts (concurrency / numeric / platform / spec-drift bugs; abstraction / contract / failure-model challenges) so the second model adds coverage instead of echoing Claude. Prompts are open-ended ("report anything material," not a closed checklist) with an `other_findings` channel for independent discoveries.
+  - **cross-review skill** — `/cross-review` (Claude + GPT critics in parallel, merged by a deterministic escalation rule + an intersection heuristic with severity normalization) and `/rescue` (Codex diagnoses a stuck bug, read-only, human implements). Default mode = ONE GPT call to preserve ChatGPT Plus quota; deep mode = two, reserved for security-critical / breaking / new-service reviews.
+  - **Model/effort policy:** strongest model at high reasoning effort (`gpt-5.5` + `model_reasoning_effort=high`), configurable via `CROSS_REVIEW_MODEL` / `CROSS_REVIEW_EFFORT` env vars — a single override point for both agents. This is deliberate: Codex defaults to NO reasoning effort, which yields shallow quick-scan reviews.
+  - Graceful and safe: availability-checked before every call, never blocks the main pipeline when Codex is down, one attempt per call (shared quota), read-only sandbox always. Verified working from the dev environment (Codex CLI 0.135.0, gpt-5.5 at high effort).
+
 ## [1.11.0] - 2026-06-01
 
 ### Added
