@@ -68,6 +68,7 @@ You MUST complete each phase before proceeding to the next.
    - Git diff, recent commits
    - New dependencies, config changes
    - Environmental differences
+   - If the failure crosses a library/SDK/external-API boundary: ALSO verify your API model is current — run `claude-subteams:live-research` now, regardless of how many fixes you've tried. A stale API model looks exactly like a bug.
 
 4. **Gather Evidence in Multi-Component Systems**
 
@@ -141,6 +142,7 @@ You MUST complete each phase before proceeding to the next.
    - Don't pretend to know
    - Ask for help
    - Research more
+   - If the unknown involves a library or framework API — run `claude-subteams:live-research` to refresh your understanding before forming the next hypothesis. A stale mental model of an API looks exactly like an unsolvable bug.
 
 ### Phase 4: Implementation
 
@@ -168,8 +170,9 @@ You MUST complete each phase before proceeding to the next.
    - STOP
    - Count: How many fixes have you tried?
    - If less than 3: Return to Phase 1, re-analyze with new information
-   - **If 3 or more: STOP and question the architecture (step 5 below)**
-   - DON'T attempt another fix without architectural discussion
+   - **If 3 or more AND failure crosses a library/SDK/external-API boundary:** you should already have run `claude-subteams:live-research` at Phase 1 step 3; if not, run it now before questioning architecture.
+   - **If 3 or more AND failure is internal logic (null, type error, control flow, race condition):** skip live-research — proceed directly to question the architecture (step 5 below).
+   - DON'T attempt another fix without either live-research results (for API failures) or architectural discussion (for internal failures)
 
 5. **If 3+ Fixes Failed: Question Architecture**
 
@@ -240,3 +243,4 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 
 - **claude-subteams:incident-management** -- For production incidents requiring immediate response
 - **claude-subteams:monitoring-logging** -- For adding observability after finding root cause
+- **claude-subteams:live-research** -- API-currency check for library/external-API failures; systematic-debugging is the outer process, live-research is a step inside it

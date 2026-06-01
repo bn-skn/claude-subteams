@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.9.0] - 2026-06-01
+
+### Added
+- **live-research skill** — keeps the orchestrator and agents from coding against stale training-data knowledge of fast-moving APIs. Two command surfaces (`/research <question>`, `/whatsnew <library> [N months]`) plus a source-priority ladder (Context7 → Firecrawl → WebSearch → Serper) with graceful degradation. Architecture: the ORCHESTRATOR (main window, which holds MCP tools) fetches Context7/web docs and injects them into the researcher's brief as a `[Live Docs]` block — the dispatched researcher agent synthesizes them (it cannot call MCP tools directly, by tool-allowlist design). Portable: never hardcodes a Context7 MCP prefix; degrades to web sources when Context7 is absent.
+
+### Changed
+- **researcher agent** — Process step 3 now consumes Context7 docs injected via its brief (orchestrator-fetched) before generic web search, instead of attempting MCP calls it cannot make.
+- **systematic-debugging** — added a category-gated live-research trigger: failures crossing a library/SDK/external-API boundary run live-research at Phase 1 (verify the API model is current before forming more hypotheses); internal-logic bugs (null, type, control flow, race) skip it and proceed straight to architecture questioning. Prevents wasting an opus research pass on bugs that were never API-knowledge issues.
+
 ## [1.8.0] - 2026-06-01
 
 ### Added

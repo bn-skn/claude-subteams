@@ -86,6 +86,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | quality | `adversarial-testing` | Writes tests designed to break the code — edge cases, race conditions, boundary violations. |
 | quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |
 | quality | `codebase-improvement` | Proactive codebase analysis. Dispatches improvement-agent for health checks and tech debt discovery. |
+| research | `live-research` | Fetches current library/API docs before coding against fast-moving SDKs (`/research`, `/whatsnew`). Orchestrator fetches via Context7/web; researcher synthesizes. |
 
 ## Agents
 
