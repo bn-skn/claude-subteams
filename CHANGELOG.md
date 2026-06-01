@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.11.0] - 2026-06-01
+
+### Added
+- **llms-install.md** — AI-readable installation protocol. A user hands the file to a coding agent ("@llms-install.md install this plugin"); the agent runs pre-flight capability/dependency checks, executes the installer (curl one-liner or clone path), verifies the JSON state, and reports. Designed for honesty over a happy path: declares required harness capabilities (shell / outbound network / process-substitution) up front, treats a `<()` syntax error as "use the clone path" rather than an install failure, gates on already-installed state (fresh-install vs re-run), reports "files installed — functionally unverified" instead of overclaiming (functional confirmation is the post-reload smoke test), and surfaces installer `WARNING:` lines verbatim.
+- **llms-uninstall.md** — companion uninstall protocol: confirm installed → run uninstall.sh → verify removal across all three state files + the plugin directory → report.
+
+### Changed
+- **README** — added an "Install via an AI agent" subsection pointing to llms-install.md.
+
 ## [1.10.0] - 2026-06-01
 
 ### Added
