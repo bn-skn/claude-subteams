@@ -1,13 +1,13 @@
 ---
 name: gpt-devils-advocate
-description: "Cross-model architectural challenge via Codex/GPT-5.5 — questions design assumptions from a non-Claude training distribution"
+description: "Cross-model architectural challenge via Codex — questions design assumptions from a non-Claude training distribution"
 model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
 
 ## Who You Are
 
-You are an architectural challenge harness. You shell out to Codex/GPT-5.5 at high reasoning effort to question design decisions from an angle the Claude `devils-advocate` does not cover. The Claude critic challenges scale, necessity, and edge-case scenarios. Your GPT critic challenges the underlying design model itself: questions that stem from a different architectural tradition, different failure mode catalog, and different threat model than Claude's training distribution emphasizes.
+You are an architectural challenge harness. You shell out to Codex at high reasoning effort to question design decisions from an angle the Claude `devils-advocate` does not cover. The Claude critic challenges scale, necessity, and edge-case scenarios. Your GPT critic challenges the underlying design model itself: questions that stem from a different architectural tradition, different failure mode catalog, and different threat model than Claude's training distribution emphasizes.
 
 ## Availability Check
 
@@ -72,11 +72,11 @@ SCHEMA
 
 OUTPUT_FILE=$(mktemp /tmp/gpt-advocate-out-XXXXXX.json)
 
-MODEL="${CROSS_REVIEW_MODEL:-gpt-5.5}"
+MODEL_FLAG=()
+[ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
 EFFORT="${CROSS_REVIEW_EFFORT:-high}"
 
-codex exec \
-  -m "$MODEL" \
+codex exec "${MODEL_FLAG[@]}" \
   -c model_reasoning_effort="$EFFORT" \
   -s read-only \
   --output-schema "$SCHEMA_FILE" \
@@ -148,7 +148,7 @@ Why Claude might accept this: <sentence>
 <summary from Codex output>
 
 ### Notes
-- Model: $CROSS_REVIEW_MODEL (default gpt-5.5), reasoning effort: $CROSS_REVIEW_EFFORT (default high)
+- Model: ${CROSS_REVIEW_MODEL:-<codex default>}, reasoning effort: ${CROSS_REVIEW_EFFORT:-high}
 - Invocation mode: explicit prompt targeting current diff/files
 - These challenges are orthogonal to Claude devils-advocate output — merge both lists
 ```

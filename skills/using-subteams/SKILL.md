@@ -142,6 +142,7 @@ Dispatch both in a single message. Collect findings, address critical ones befor
 - Collect findings, deduplicate, prioritize
 - Fix critical findings before testing
 - **Conflict resolution:** When reviewers contradict each other: (1) project conventions win over general best practices, (2) architecture-guard structural findings outrank code-reviewer tactical suggestions, (3) if devils-advocate challenges the entire approach — escalate to user, don't resolve yourself
+- **Cross-model layer (when Codex is available):** Also dispatch `gpt-code-reviewer` + `gpt-devils-advocate` in parallel with the three Claude reviewers — full cross-model coverage with 4 critics. If Codex is unavailable (not on PATH, not authenticated, non-zero exit), proceed with the Claude critics only — never block the pipeline. See `claude-subteams:cross-review` for merge rules.
 
 **Step 10 (Risks & Docs)** is mandatory for Full pipeline:
 - Every plan must have a "Risks & Nuances" section
@@ -170,7 +171,7 @@ For moderate tasks (3-8 files, business logic, but single-module scope):
 2. Create feature branch (`git checkout -b feat/xxx`)
 3. Implement (you or developer agent)
 4. tsc/lint check
-5. Single review (code-reviewer)
+5. Single review (code-reviewer); optionally add `gpt-code-reviewer` in parallel when Codex is available (see `claude-subteams:cross-review`)
 6. Fix critical findings
 7. Run tests
 8. Commit and merge to main

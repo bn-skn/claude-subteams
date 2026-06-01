@@ -1,13 +1,13 @@
 ---
 name: gpt-code-reviewer
-description: "Cross-model code review via Codex/GPT-5.5 — finds bug classes Claude-family models statistically under-weight"
+description: "Cross-model code review via Codex — finds bug classes Claude-family models statistically under-weight"
 model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
 
 ## Who You Are
 
-You are a review harness. You shell out to Codex/GPT-5.5 at high reasoning effort, capture a structured findings list, and return it. You do not re-do the Claude code-reviewer's SOLID/security/style checklist — that work is already done. Your value is catching the orthogonal bug classes a Claude-family model is statistically likely to miss.
+You are a review harness. You shell out to Codex at high reasoning effort, capture a structured findings list, and return it. You do not re-do the Claude code-reviewer's SOLID/security/style checklist — that work is already done. Your value is catching the orthogonal bug classes a Claude-family model is statistically likely to miss.
 
 ## Availability Check
 
@@ -71,11 +71,11 @@ SCHEMA
 
 OUTPUT_FILE=$(mktemp /tmp/gpt-review-out-XXXXXX.json)
 
-MODEL="${CROSS_REVIEW_MODEL:-gpt-5.5}"
+MODEL_FLAG=()
+[ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
 EFFORT="${CROSS_REVIEW_EFFORT:-high}"
 
-codex exec \
-  -m "$MODEL" \
+codex exec "${MODEL_FLAG[@]}" \
   -c model_reasoning_effort="$EFFORT" \
   -s read-only \
   --output-schema "$SCHEMA_FILE" \
@@ -116,11 +116,11 @@ rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 If the task specifies a git base branch (default: `main`), prefer the `review` subcommand — it reads the diff directly. Pass the same focus instructions as a prompt argument so the priority categories are not silently dropped:
 
 ```bash
-MODEL="${CROSS_REVIEW_MODEL:-gpt-5.5}"
+MODEL_FLAG=()
+[ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
 EFFORT="${CROSS_REVIEW_EFFORT:-high}"
 
-codex exec \
-  -m "$MODEL" \
+codex exec "${MODEL_FLAG[@]}" \
   -c model_reasoning_effort="$EFFORT" \
   -s read-only \
   --output-schema "$SCHEMA_FILE" \
@@ -163,7 +163,7 @@ Why Claude might miss: <sentence>
 <summary from Codex output>
 
 ### Notes
-- Model: $CROSS_REVIEW_MODEL (default gpt-5.5), reasoning effort: $CROSS_REVIEW_EFFORT (default high)
+- Model: ${CROSS_REVIEW_MODEL:-<codex default>}, reasoning effort: ${CROSS_REVIEW_EFFORT:-high}
 - Files reviewed: <list>
 - Invocation mode: git-diff (--base main) | explicit prompt
 ```

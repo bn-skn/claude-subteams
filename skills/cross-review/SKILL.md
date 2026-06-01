@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "Orchestrates parallel GPT-5.5 + Claude critics to break model-monoculture blind spots in code and architecture review."
+description: "Orchestrates parallel GPT + Claude critics to break model-monoculture blind spots in code and architecture review."
 ---
 
 # Cross-Review
@@ -16,14 +16,17 @@ description: "Orchestrates parallel GPT-5.5 + Claude critics to break model-mono
 
 ## 2. Model and Effort Policy — Read This First
 
-**Current defaults (env-var override — one place to change):**
+**How the model is selected:**
+
+- **Default:** whatever model the Codex CLI is configured to use (`~/.codex/config.toml`). Both agent files do NOT pass `-m` unless `CROSS_REVIEW_MODEL` is set, so Codex uses its own configured default natively.
+- **Optional pin:** set `CROSS_REVIEW_MODEL=<model>` in the environment to lock a specific model for both agents at once, without any agent file edits.
+- **Effort:** always forced to `high` (`${CROSS_REVIEW_EFFORT:-high}`). Codex defaults to no effort; high effort is what makes cross-review valuable. Override with `CROSS_REVIEW_EFFORT=<level>` if needed.
 
 ```
-CROSS_REVIEW_MODEL=gpt-5.5
-CROSS_REVIEW_EFFORT=high
+# Optional overrides — only set these if you want to deviate from Codex CLI defaults
+CROSS_REVIEW_MODEL=<specific-model>   # pin a model; omit to use Codex CLI default
+CROSS_REVIEW_EFFORT=high              # override effort level; default is already high
 ```
-
-Both agent files read these env vars with fallback: `MODEL="${CROSS_REVIEW_MODEL:-gpt-5.5}"` / `EFFORT="${CROSS_REVIEW_EFFORT:-high}"`. To override both agents at once, export these vars before invoking — no agent file edits required.
 
 **Why this matters:** Codex defaults to no reasoning effort, producing shallow reviews equivalent to a quick scan. High effort enables multi-step reasoning over the diff. Using any weaker configuration defeats the purpose of cross-review.
 
@@ -39,11 +42,10 @@ Both agent files read these env vars with fallback: `MODEL="${CROSS_REVIEW_MODEL
 | — | significant | **high** |
 | — | worth-considering | **medium** |
 
-**Maintenance note:** When OpenAI ships a stronger model, set `CROSS_REVIEW_MODEL=<new-model>` (e.g., in the shell environment or a `.env` file). Verify first:
+**Maintenance note:** To upgrade the model, change the default in your Codex CLI config (`~/.codex/config.toml`) — the critics inherit it automatically; no plugin edit needed. Use `CROSS_REVIEW_MODEL` only to pin a specific model temporarily. Verify the new model works at high effort:
 ```bash
-codex exec -m <new-model> -c model_reasoning_effort=high -s read-only --skip-git-repo-check "Return your model name and reasoning effort level as JSON."
+codex exec -c model_reasoning_effort=high -s read-only --skip-git-repo-check "Return your model name and reasoning effort level as JSON."
 ```
-Confirm the response header shows the new model at high effort. No agent file edits needed — both agents pick up the env var automatically.
 
 **Agents implementing this policy:** `agents/gpt-code-reviewer.md` · `agents/gpt-devils-advocate.md`
 
@@ -91,11 +93,11 @@ Use when Claude has been debugging a problem across multiple turns without resol
 3. Invoke Codex. Do not auto-retry the same call on a non-zero exit (that just burns a failed call) — but you may run `/rescue` again with refined context if the first diagnosis missed:
 
 ```bash
-MODEL="${CROSS_REVIEW_MODEL:-gpt-5.5}"
+MODEL_FLAG=()
+[ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
 EFFORT="${CROSS_REVIEW_EFFORT:-high}"
 
-codex exec \
-  -m "$MODEL" \
+codex exec "${MODEL_FLAG[@]}" \
   -c model_reasoning_effort="$EFFORT" \
   -s read-only \
   "<symptom description> — files: <list>. Diagnose the root cause and propose a concrete fix. You may read files in read-only sandbox."
@@ -104,28 +106,76 @@ codex exec \
 4. Present Codex's diagnosis to the human. Implement the proposed fix yourself after human confirmation — do not let Codex write to the repo directly.
 5. If Codex is unavailable or the one attempt fails: acknowledge, explain, ask the human for additional context to try a different approach. Do not retry.
 
-## 5. Fallback and Reliability
+## 5. Running Any Agent Through GPT (Optional Escape Hatch)
+
+The two named GPT critics (`gpt-code-reviewer`, `gpt-devils-advocate`) are the standing pairs. For any other specialist role — security-auditor, test-engineer, architecture-guard, design-critic, prompt-evaluator — you can cross-check on GPT using the same invocation pattern. This is opt-in: the user asks for it explicitly (e.g., "cross-check the security audit on GPT"), not a default step.
+
+**Generic pattern:**
+
+```bash
+# Run availability check first (same as standing critics)
+command -v codex || { echo "codex not on PATH"; exit 0; }
+codex login status | grep -q "Logged in" || { echo "codex not authenticated"; exit 0; }
+
+SCHEMA_FILE=$(mktemp /tmp/gpt-generic-schema-XXXXXX.json)
+OUTPUT_FILE=$(mktemp /tmp/gpt-generic-out-XXXXXX.json)
+
+# Define a schema appropriate for the specialist role
+cat > "$SCHEMA_FILE" << 'SCHEMA'
+{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","high","medium","low"]},"target":{"type":"string"},"issue":{"type":"string"},"why_claude_might_miss":{"type":"string"}},"required":["severity","target","issue","why_claude_might_miss"]}},"summary":{"type":"string"}},"required":["findings","summary"]}
+SCHEMA
+
+MODEL_FLAG=()
+[ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
+EFFORT="${CROSS_REVIEW_EFFORT:-high}"
+
+codex exec "${MODEL_FLAG[@]}" \
+  -c model_reasoning_effort="$EFFORT" \
+  -s read-only \
+  --output-schema "$SCHEMA_FILE" \
+  -o "$OUTPUT_FILE" \
+  "<Role mandate for this specialist — e.g., 'You are a security auditor...' — plus the files/diff to examine. Ask for findings the Claude specialist is statistically likely to miss from a different training distribution. Return JSON matching the schema.>"
+RC=$?
+
+if [ "$RC" -ne 0 ]; then
+  echo "Status: cross-review-unavailable"
+  echo "Reason: codex exit $RC. Claude specialist findings stand alone."
+  rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
+  exit 0
+fi
+
+cat "$OUTPUT_FILE"
+rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
+```
+
+**Rules for generic invocations:**
+- Do NOT create a new agent file for each specialist role — use this pattern directly.
+- Apply the same availability check, read-only sandbox, one-call-per-review, and no-auto-retry rules as the standing critics.
+- Merge findings using the same escalation and union/intersection rules from Section 3.2.
+- The Claude specialist's output still stands — GPT findings are additive, not a replacement.
+
+## 6. Fallback and Reliability
 
 1. If `codex` is not on PATH, not authenticated, or exits non-zero: skip GPT critics, log the reason, run Claude critics only. NEVER block the main pipeline — Claude critics are always sufficient to proceed.
 2. Do NOT auto-retry a failed Codex call — a non-zero exit means skip and report, not loop on the same call.
 3. For awareness, not as a limit: ChatGPT Plus uses a 5-hour shared bucket across CLI and web. Run the full critic set whenever cross-review fires — do not ration GPT calls. If the human reports ChatGPT being throttled, pause Codex calls and notify; that is a reaction to a real signal, never a pre-emptive cap.
 
-## 6. Red Flags
+## 7. Red Flags
 
 | Pattern | Why It Is Wrong | Correct Action |
 |---------|-----------------|----------------|
 | Running cross-review automatically on every trivial commit | Adds latency and noise to changes that don't need a second model | Invoke when actually reviewing — explicit triggers and high-risk changes |
 | Dropping a GPT critic to "save quota" | Defeats cross-model coverage — the user opted into the full set | Run all four critics whenever cross-review fires |
-| Editing model/effort hardcoded in agent files | Creates drift; a missed file silently runs default (shallow) effort | Set `CROSS_REVIEW_MODEL` / `CROSS_REVIEW_EFFORT` env vars — agents pick them up automatically |
+| Hardcoding a model name in agent files | Creates drift; model name baked into agent files silently persists after a CLI config change | Change the default in `~/.codex/config.toml`; agents inherit it. Use `CROSS_REVIEW_MODEL` to pin temporarily |
 | Auto-resolving a critical disagreement between model families | Two models disagreeing on critical/security = genuine ambiguity | Escalate to human; do not merge until addressed |
 | Auto-retrying Codex after a non-zero exit | Looping on a failed call wastes it and can cascade errors | Log unavailable, proceed with Claude critics, notify human |
 | Treating GPT findings as a superset of Claude findings | Different models miss different things; neither is complete | Use intersection for confidence, union for coverage |
 | Skipping availability check before Codex call | Network or auth failure will produce a cryptic error mid-review | Always run `command -v codex && codex login status` first |
 | Letting Codex write to the repo during /rescue | Codex operates in read-only sandbox; changes must be reviewed | Always use `-s read-only`; implement fixes yourself after human confirmation |
 
-## 7. Critical Rules
+## 8. Critical Rules
 
-1. MUST invoke Codex with `-m "$CROSS_REVIEW_MODEL" -c model_reasoning_effort="$CROSS_REVIEW_EFFORT" -s read-only` — no exceptions, no defaults left implicit.
+1. MUST invoke Codex with `-c model_reasoning_effort="${CROSS_REVIEW_EFFORT:-high}" -s read-only`. Pass `-m "$CROSS_REVIEW_MODEL"` only when `CROSS_REVIEW_MODEL` is set — never hardcode a model name; Codex uses its CLI-configured default when no `-m` flag is present.
 2. NEVER use Codex with default reasoning effort — it produces reviews equivalent to a quick scan.
 3. ALWAYS run availability check before invoking Codex.
 4. NEVER block the main pipeline when Codex is unavailable.
@@ -135,7 +185,7 @@ codex exec \
 8. NEVER allow Codex to write to the repository — read-only sandbox always.
 9. MUST cap review rounds at 1-2 — no Claude↔GPT debate loops.
 
-## 8. Agent Reference
+## 9. Agent Reference
 
 | Agent | Role | Pairs with Claude critic |
 |-------|------|--------------------------|
