@@ -1,80 +1,81 @@
 # claude-subteams — LLM Uninstallation Protocol
 
-You are removing the **claude-subteams** plugin from Claude Code on the user's machine. Follow every step. Stop with a clear report if a gate fails.
+You are removing the **claude-subteams** plugin from Claude Code on the user's machine via the official plugin CLI. Follow every step. Stop with a clear report if a gate fails.
 
 ---
 
 ## 1. Confirm the plugin is installed
 
 ```bash
-grep -F '"claude-subteams@bn-skn"' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null && echo "INSTALLED" || echo "NOT INSTALLED"
+claude plugin list 2>/dev/null | grep -F "claude-subteams" && echo "INSTALLED" || echo "NOT INSTALLED"
 ```
 
-**Pass:** output is `INSTALLED`.
-**If NOT INSTALLED:** the plugin may already be removed or was never installed. Check `settings.json` and the plugin directory for partial state before stopping.
+**Pass:** output contains `INSTALLED`.
+**If NOT INSTALLED:** the plugin may already be removed or was never installed. Check the plugin directory for partial state before stopping.
 
 ```bash
-ls "$HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams" 2>/dev/null && echo "DIR EXISTS" || echo "DIR ABSENT"
+find "$HOME/.claude/plugins" -name "plugin.json" 2>/dev/null | grep "claude-subteams" && echo "DIR EXISTS" || echo "DIR ABSENT"
 ```
 
 If both checks return "not installed" / "absent", there is nothing to remove. Report that to the user and stop.
 
 ---
 
-## 2. Run the uninstall script
+## 2. Uninstall the plugin
 
 ```bash
-bash "$HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams/scripts/uninstall.sh"
+claude plugin uninstall claude-subteams@articortex
 ```
 
-The script runs non-interactively (removes the plugin directory without prompting) when stdin is not a terminal.
-
-**Pass:** script exits 0 and prints `[claude-subteams] Uninstall complete.`
-**Fail:** non-zero exit. Report the full stderr to the user. Proceed to step 3 to check partial state.
+**Pass:** exits 0 and confirms the plugin was removed.
+**Fail:** non-zero exit. Capture the full stderr and report it to the user. Run `claude plugin --help` to verify the exact subcommand if needed.
 
 ---
 
-## 3. Verify removal
+## 3. Remove the marketplace entry (optional)
 
-### 3a. installed_plugins.json — key gone
-
-```bash
-grep -F '"claude-subteams@bn-skn"' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null && echo "STILL PRESENT" || echo "REMOVED"
-```
-
-**Pass:** `REMOVED`.
-
-### 3b. settings.json — key gone
+If the user wants to fully deregister the `articortex` marketplace (not just remove this plugin):
 
 ```bash
-grep -F '"claude-subteams@bn-skn"' "$HOME/.claude/settings.json" 2>/dev/null && echo "STILL PRESENT" || echo "REMOVED"
+claude plugin marketplace remove articortex
 ```
 
-**Pass:** `REMOVED`.
-
-### 3c. known_marketplaces.json — entry gone
-
-```bash
-grep -F '"bn-skn"' "$HOME/.claude/plugins/known_marketplaces.json" 2>/dev/null && echo "STILL PRESENT" || echo "REMOVED"
-```
-
-**Pass:** `REMOVED`.
-
-### 3d. Plugin directory removed
-
-```bash
-ls "$HOME/.claude/plugins/marketplaces/bn-skn" 2>/dev/null && echo "DIR EXISTS" || echo "DIR REMOVED"
-```
-
-**Pass:** `DIR REMOVED`.
-
-If any check shows `STILL PRESENT` or `DIR EXISTS`, the uninstall script did not complete cleanly. Remove the remaining entries manually (delete the JSON keys with any text editor and `rm -rf` the directory), then re-run the checks.
+This is optional. Leaving the marketplace registered has no side effects unless another plugin from it is installed later.
 
 ---
 
-## 4. Report to user
+## 4. Verify removal
 
-**Removed:** `claude-subteams@bn-skn` from `installed_plugins.json`, `settings.json`, and `known_marketplaces.json`. Plugin directory deleted.
+### 4a. Plugin no longer listed
+
+```bash
+claude plugin list 2>/dev/null | grep -F "claude-subteams" && echo "STILL PRESENT" || echo "REMOVED"
+```
+
+**Pass:** `REMOVED`.
+
+### 4b. Plugin directory gone
+
+```bash
+find "$HOME/.claude/plugins" -name "plugin.json" 2>/dev/null | grep "claude-subteams" && echo "STILL PRESENT" || echo "REMOVED"
+```
+
+**Pass:** `REMOVED`.
+
+If any check shows `STILL PRESENT`, the CLI uninstall did not complete cleanly. Remove the marketplace clone root manually (this is safe — `articortex` currently has one plugin and `marketplace remove` is idempotent):
+
+```bash
+claude plugin marketplace remove articortex 2>/dev/null || true
+rm -rf "$HOME/.claude/plugins/marketplaces/articortex"
+```
+
+Then re-run the checks.
+
+---
+
+## 5. Report to user
+
+**Removed:** `claude-subteams@articortex` from the plugin registry. Plugin directory deleted.
 
 **Requires manual action:**
 

@@ -1,8 +1,6 @@
 # claude-subteams — LLM Installation Protocol
 
-> **Note:** This protocol targets the current script-based install. Once the plugin is published as a marketplace package, prefer `/plugin marketplace add bn-skn/claude-subteams` instead.
-
-You are installing the **claude-subteams** plugin into Claude Code on the user's machine. Follow every numbered step exactly. At each gate, run the command, evaluate the output against the pass/fail criteria, and stop with a clear report if the gate fails.
+You are installing the **claude-subteams** plugin into Claude Code on the user's machine via the official plugin marketplace. Follow every numbered step exactly. At each gate, run the command, evaluate the output against the pass/fail criteria, and stop with a clear report if the gate fails.
 
 ---
 
@@ -11,8 +9,8 @@ You are installing the **claude-subteams** plugin into Claude Code on the user's
 This protocol requires three capabilities from your harness:
 
 1. **Shell execution** — you must be able to run arbitrary bash commands. If your harness requires per-command approval, request blanket approval for this session now before proceeding.
-2. **Outbound network** — the curl path fetches from `raw.githubusercontent.com`. If outbound requests are blocked, use the clone path in step 2 instead.
-3. **Bash process substitution `<()`** — the curl one-liner uses `bash <(...)`. If you are running in a restricted shell or `sh` sandbox where `<()` is unavailable, a syntax error will occur when you attempt it. **This is not an install failure — do not trigger rollback.** Switch immediately to the clone path in step 2.
+2. **Claude Code CLI** — the `claude` binary must be on PATH. If it is not, the plugin has nothing to load into.
+3. **Private repo auth** — this repo is private. The user's git credentials must be configured so `git clone git@github.com:bn-skn/claude-subteams` (or the HTTPS equivalent) succeeds without prompting. Claude Code uses the machine's existing git/gh credentials when cloning marketplace repos.
 
 If you cannot satisfy requirement 1, stop and tell the user their harness does not support shell-based installation. They can run the installer manually.
 
@@ -45,9 +43,24 @@ git --version
 ```
 
 **Pass:** exits 0.
-**Fail:** not found. Stop — git is required to clone the plugin repository.
+**Fail:** not found. Stop — git is required for marketplace cloning.
 
-### 1d. jq (hooks dependency)
+### 1d. GitHub auth (private repo)
+
+```bash
+gh auth status 2>&1 | head -5
+```
+
+**Pass:** output includes `Logged in to github.com` (or similar confirmation).
+**Fail / gh not found:** warn the user that git credentials for `github.com/bn-skn` must be configured before the marketplace add will work. Options:
+
+- `gh auth login && gh auth setup-git`
+- Set `GITHUB_TOKEN` in the environment
+- Manually configure `~/.netrc` or SSH key
+
+Do not stop — proceed, but note the auth status for the step-7 report.
+
+### 1e. jq (hooks dependency)
 
 ```bash
 jq --version
@@ -56,15 +69,6 @@ jq --version
 **Pass:** exits 0.
 **Warn (do not stop):** not found. Hooks require jq to parse JSON; install it before working on projects that use the hooks (`apt install jq` / `brew install jq` / `apk add jq`). Continue installation.
 
-### 1e. node or python3 (JSON-edit dependency)
-
-```bash
-node --version 2>/dev/null || python3 --version
-```
-
-**Pass:** at least one exits 0.
-**Fail:** neither found. Stop — the installer needs node or python3 to edit JSON config files.
-
 ### 1f. superpowers conflict check
 
 ```bash
@@ -72,92 +76,76 @@ grep -s '"superpowers@claude-plugins-official": true' "$HOME/.claude/settings.js
 ```
 
 **Pass:** output is `OK` or file does not exist.
-**Note if CONFLICT:** claude-subteams replaces the superpowers methodology; running both causes conflicts. Ask the user whether to disable superpowers, or pass `--non-interactive` to let the installer handle it automatically. Do not abort — proceed to install.
+**Note if CONFLICT:** claude-subteams replaces the superpowers methodology; running both causes conflicts. Ask the user whether to disable superpowers by removing that key from `settings.json`. Do not abort — proceed to install.
 
 ### 1g. Already-installed check
 
 ```bash
-grep -F '"claude-subteams@bn-skn"' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null && echo "ALREADY INSTALLED" || echo "FRESH INSTALL"
+claude plugin list 2>/dev/null | grep -F "claude-subteams" && echo "ALREADY INSTALLED" || echo "FRESH INSTALL"
 ```
 
-**If ALREADY INSTALLED:** tell the user the plugin is already registered. Re-running install.sh will pull the latest git commits and update timestamps, but will not perform a fresh install. Ask the user to confirm before proceeding — they may want to run `update.sh` instead (step 6). Note the outcome for your step-8 report.
+**If ALREADY INSTALLED:** tell the user the plugin is already registered. Ask whether to reinstall or run an update (`claude plugin marketplace update articortex`) instead. Note the outcome for your step-7 report.
 **If FRESH INSTALL:** proceed to step 2 without comment.
 
 ---
 
 ## 2. Install
 
-Two equivalent paths — choose based on your environment.
-
-**Path A — curl (requires outbound network + Bash `<()`):**
+### 2a. Add the marketplace
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/bn-skn/claude-subteams/main/scripts/install.sh)
+claude plugin marketplace add bn-skn/claude-subteams
 ```
 
-This runs a remote script as your user. To inspect it first, use Path B and read `scripts/install.sh` before running.
+This registers the `articortex` marketplace (defined in `.claude-plugin/marketplace.json` at the repo root). Claude Code clones the repo using the machine's git credentials.
 
-**Path B — clone then run (no `<()` required; use when outbound curl is blocked OR when the sandbox refuses process substitution):**
+**Pass:** exits 0. Output should confirm the marketplace was added.
+**If "already added" / non-zero:** check whether the marketplace is already registered:
 
 ```bash
-git clone https://github.com/bn-skn/claude-subteams /tmp/claude-subteams
-bash /tmp/claude-subteams/scripts/install.sh
+claude plugin marketplace list 2>/dev/null | grep -F "articortex"
 ```
 
-If you attempt Path A and get a syntax error on `<(`, that is a shell limitation — switch to Path B. Do not treat it as an install failure or trigger rollback.
+If it is listed, proceed to step 2b — the marketplace add is idempotent.
 
-**Capture the full stdout** from whichever path you run. You will need it for step 8: scan for any lines beginning with `WARNING:` and note them for the user report.
+### 2b. Install the plugin
 
-**Pass:** script exits 0 and prints a line beginning with `[claude-subteams] Done.`
-**Fail:** non-zero exit code. Capture the full stderr, report it to the user, and proceed to rollback (step 7) if the partial install may have left inconsistent state.
+```bash
+claude plugin install claude-subteams@articortex
+```
 
-The install script is non-interactive when stdin is not a terminal. In that mode it:
-- Skips the interactive superpowers-disable prompt (the plugin is still installed).
-- Skips the CLAUDE.md snippet prompt (add it manually — see step 8).
+**Capture the full stdout.** Scan for any lines beginning with `WARNING:` and note them for the step-7 report.
+
+**Pass:** exits 0.
+**Fail:** non-zero exit code. Capture the full stderr and report it to the user. Common causes:
+- Auth failure cloning the private repo (step 1d).
+- `claude plugin` subcommand not recognized — run `claude plugin --help` to confirm available subcommands and adjust accordingly.
 
 ---
 
-## 3. Verification — confirm files landed
+## 3. Verification — confirm install registered
 
-Run all three checks.
-
-### 3a. installed_plugins.json
+### 3a. Plugin listed by the CLI
 
 ```bash
-jq -e '.plugins["claude-subteams@bn-skn"]' "$HOME/.claude/plugins/installed_plugins.json"
+claude plugin list 2>/dev/null | grep -F "claude-subteams@articortex" && echo "OK" || echo "MISSING"
 ```
 
-Or without jq:
+**Pass:** `OK` — the CLI confirms `claude-subteams@articortex` is registered.
+
+This is the authoritative check. The CLI is the source of truth for what is installed, regardless of where on disk Claude Code placed the cloned files.
+
+### 3b. Plugin directory sanity (informational only — do NOT trigger rollback on this alone)
 
 ```bash
-grep -F '"claude-subteams@bn-skn"' "$HOME/.claude/plugins/installed_plugins.json"
+find "$HOME/.claude/plugins" -name "plugin.json" 2>/dev/null | grep "claude-subteams"
 ```
 
-**Pass:** key is present.
+**Pass:** any path containing `claude-subteams` is printed.
 
-### 3b. settings.json enabledPlugins
+Note: with `source: "./"` in the marketplace manifest, Claude Code clones the repo directly into the marketplace root — the directory layout may not contain a `plugins/claude-subteams/` segment. If 3b returns nothing but 3a passed, the install is still good; 3a is definitive.
 
-```bash
-jq -e '.enabledPlugins["claude-subteams@bn-skn"]' "$HOME/.claude/settings.json"
-```
-
-Or without jq:
-
-```bash
-grep -F '"claude-subteams@bn-skn"' "$HOME/.claude/settings.json"
-```
-
-**Pass:** key is present and value is `true`.
-
-### 3c. Plugin directory
-
-```bash
-ls "$HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams/.claude-plugin/plugin.json"
-```
-
-**Pass:** file exists (exits 0).
-
-If any check fails, go to step 7 (rollback), then retry from step 2.
+If **3a** fails (plugin not listed), go to step 6 (rollback), then retry from step 2.
 
 ---
 
@@ -165,7 +153,7 @@ If any check fails, go to step 7 (rollback), then retry from step 2.
 
 **Claude Code must reload before any skills or agents become available.**
 
-The installing agent is running in the same session that existed before installation. Skills and agents registered by this plugin are NOT visible in the current session. All post-install verification of plugin functionality (steps 5 and 6) must happen in a new session after reload.
+The installing agent is running in the same session that existed before installation. Skills and agents registered by this plugin are NOT visible in the current session. All post-install verification of plugin functionality (step 5) must happen in a new session after reload.
 
 Tell the user to:
 
@@ -214,50 +202,35 @@ function add(a, b) { return a + b }
 
 ---
 
-## 6. Update (future use)
+## 6. Rollback
 
-If the plugin is already installed and the user wants to update:
+If installation failed or produced inconsistent state:
 
 ```bash
-bash "$HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams/scripts/update.sh"
+claude plugin uninstall claude-subteams@articortex 2>/dev/null || true
+claude plugin marketplace remove articortex 2>/dev/null || true
 ```
 
-Restart Claude Code after update.
+After rollback, restart Claude Code, then retry from step 2.
 
 ---
 
-## 7. Rollback
+## 7. Report to user
 
-If installation failed or produced inconsistent state, run the uninstall script:
+After steps 1–3 pass, compile and deliver this report.
 
-```bash
-bash "$HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams/scripts/uninstall.sh"
-```
+**Status — choose one:**
 
-If the plugin directory was not fully cloned (step 2 failed before clone completed), curl the uninstall script directly:
+- If step 2b installed freshly: **"Freshly installed."**
+- If already installed (step 1g): **"Already installed; no reinstall performed."**
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/bn-skn/claude-subteams/main/scripts/uninstall.sh)
-```
+**Files installed:** plugin directory confirmed, plugin listed in `claude plugin list`.
 
-The uninstall script removes the plugin from all three JSON files and deletes the plugin directory. After rollback, restart Claude Code, then retry from step 2.
+**Functionally unverified** — the above only confirms files landed. Skills and agents have not been confirmed to load. Functional verification requires the post-reload smoke test (step 5); until then the install is functionally unverified.
 
----
+**Warnings from installer (include verbatim):** scan step 2b stdout for any `WARNING:` lines. If none, write "None."
 
-## 8. Report to user
-
-After steps 1–3 pass, compile and deliver this report. Read install.sh stdout to determine the correct status line.
-
-**Status — choose one based on install.sh output:**
-
-- If stdout contained lines like `Registered in installed_plugins.json` / `Added to enabledPlugins`: report **"Freshly installed."**
-- If stdout contained lines like `Already registered` / `Already enabled` / `Already installed — pulling latest`: report **"Already installed; re-run updated timestamps and pulled any new commits. No fresh install occurred."**
-
-**Files installed:** key `claude-subteams@bn-skn` present in `installed_plugins.json`, enabled in `settings.json`, plugin directory confirmed at `~/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams`.
-
-**Functionally unverified** — the above only confirms files landed and JSON keys exist. Skills and agents have not been confirmed to load. Functional verification requires the post-reload smoke test (step 5); until then the install is functionally unverified.
-
-**Warnings from installer (include verbatim):** scan install.sh stdout for any lines beginning with `WARNING:`. If found, quote them here. Common ones: jq missing, or a low skill-count warning. If none, write "None."
+**Auth status:** report what you found in step 1d. If credentials were absent, remind the user to configure git/gh auth for future updates.
 
 **Requires manual action:**
 
@@ -276,8 +249,8 @@ After steps 1–3 pass, compile and deliver this report. Read install.sh stdout 
    Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent.
    ```
 
-   Also available at: `~/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams/templates/claudemd-snippet.md`
+   Also available at: `templates/claudemd-snippet.md` inside the plugin's installed directory (locate with `find "$HOME/.claude/plugins" -name "claudemd-snippet.md" 2>/dev/null`).
 
-4. **superpowers conflict** — if detected in step 1f and not disabled during install, remove `"superpowers@claude-plugins-official": true` from `~/.claude/settings.json` manually.
+4. **superpowers conflict** — if detected in step 1f and not disabled, remove `"superpowers@claude-plugins-official": true` from `~/.claude/settings.json` manually.
 
-**Future:** cross-model review capabilities (planned) will require separate Codex CLI authentication — not part of this installation.
+**Future:** cross-model review capabilities require separate Codex CLI authentication — not part of this installation.

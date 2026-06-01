@@ -8,28 +8,46 @@ You are the **orchestrator**. You understand the work deeply, set direction, del
 
 ## Quick Install
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/bn-skn/claude-subteams/main/scripts/install.sh)
+Inside Claude Code, run these two commands:
+
+```
+/plugin marketplace add bn-skn/claude-subteams
+/plugin install claude-subteams@articortex
 ```
 
-Or clone and run manually:
+Or with the `claude` CLI:
 
 ```bash
-git clone https://github.com/bn-skn/claude-subteams /tmp/claude-subteams
-bash /tmp/claude-subteams/scripts/install.sh
+claude plugin marketplace add bn-skn/claude-subteams
+claude plugin install claude-subteams@articortex
+```
+
+**Private repo auth required.** This repo is private. Before running either path, ensure your GitHub credentials are configured:
+
+```bash
+gh auth login
+gh auth setup-git
+```
+
+Or set `GITHUB_TOKEN` in your environment for non-interactive / CI use.
+
+A convenience shell wrapper is also available:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/bn-skn/claude-subteams/main/scripts/install.sh)
 ```
 
 If the script doesn't work, see [INSTALL.md](INSTALL.md) for manual steps.
 
 ### Install via an AI agent
 
-You can hand `llms-install.md` to any coding agent (Cursor, Windsurf, Claude Code itself, etc.) and it will run the pre-flight checks, execute the installer, and verify the result — no manual steps required. Example invocation:
+You can hand `llms-install.md` to any coding agent (Cursor, Windsurf, Claude Code itself, etc.) and it will run the pre-flight checks, execute the marketplace install, and verify the result — no manual steps required. Example invocation:
 
 ```
 @llms-install.md install this plugin
 ```
 
-The protocol walks the agent through dependency checks, the curl install, JSON verification, reload instructions, and the post-reload smoke test. A companion `llms-uninstall.md` covers the reverse path.
+The protocol walks the agent through dependency checks, auth verification, marketplace add/install, reload instructions, and the post-reload smoke test. A companion `llms-uninstall.md` covers the reverse path.
 
 ### Development / Testing
 
@@ -44,21 +62,45 @@ Use `/reload-plugins` inside Claude Code to hot-reload after changes.
 
 ### Requirements
 
+- **git** — required for marketplace cloning (private repo)
+- **gh** (GitHub CLI) — needed for private repo auth (`gh auth login && gh auth setup-git`)
 - **Node.js** (via nvm or global) — required for pre-commit-gate hook (tsc check)
 - **jq** — used by hooks to parse JSON input
-- **git** — install.sh clones via git
 
 ### Update
 
 ```bash
-bash /path/to/claude-subteams/scripts/update.sh
+claude plugin marketplace update articortex
+```
+
+Or with the shell wrapper:
+
+```bash
+bash scripts/update.sh
 ```
 
 ### Uninstall
 
 ```bash
-bash /path/to/claude-subteams/scripts/uninstall.sh
+claude plugin uninstall claude-subteams@articortex
 ```
+
+Or with the shell wrapper:
+
+```bash
+bash scripts/uninstall.sh
+```
+
+### Upgrading from a pre-marketplace install (v1.7 and earlier)
+
+If you installed via the old `install.sh` script, remove the stale local marketplace before reinstalling:
+
+```bash
+claude plugin marketplace remove bn-skn 2>/dev/null || true
+rm -rf "$HOME/.claude/plugins/marketplaces/bn-skn"
+```
+
+Then follow the Quick Install steps above.
 
 ## Activation
 
@@ -98,7 +140,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |
 | quality | `codebase-improvement` | Proactive codebase analysis. Dispatches improvement-agent for health checks and tech debt discovery. |
 | research | `live-research` | Fetches current library/API docs before coding against fast-moving SDKs (`/research`, `/whatsnew`). Orchestrator fetches via Context7/web; researcher synthesizes. |
-| cross-model | `cross-review` | Runs GPT-5.5 (Codex) critics alongside Claude critics to break model-monoculture blind spots (`/cross-review`, `/rescue`). Default 1 GPT call; deep mode 2. Strongest model at high reasoning effort. |
+| cross-model | `cross-review` | Runs Codex/GPT critics alongside Claude critics to break model-monoculture blind spots (`/cross-review`, `/rescue`). Full set by default (2 Claude + 2 GPT); Claude-only when Codex is down. Strongest model at high reasoning effort, native default. |
 
 ## Agents
 
