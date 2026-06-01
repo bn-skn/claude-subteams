@@ -21,6 +21,16 @@ bash /tmp/claude-subteams/scripts/install.sh
 
 If the script doesn't work, see [INSTALL.md](INSTALL.md) for manual steps.
 
+### Install via an AI agent
+
+You can hand `llms-install.md` to any coding agent (Cursor, Windsurf, Claude Code itself, etc.) and it will run the pre-flight checks, execute the installer, and verify the result — no manual steps required. Example invocation:
+
+```
+@llms-install.md install this plugin
+```
+
+The protocol walks the agent through dependency checks, the curl install, JSON verification, reload instructions, and the post-reload smoke test. A companion `llms-uninstall.md` covers the reverse path.
+
 ### Development / Testing
 
 To test the plugin locally without installing:
