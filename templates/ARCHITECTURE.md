@@ -55,4 +55,4 @@
 
 ## Related ADRs
 
-- [ADR-001: Title](docs/adrs/001-title.md)
+- [ADR-000: Template](docs/adr/000-adr-template.md)

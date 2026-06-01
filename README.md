@@ -76,6 +76,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | core | `model-selection` | Guide for choosing sonnet vs opus per task type. |
 | architecture | `clean-architecture` | Enforces layered architecture, dependency direction, and file size limits. |
 | architecture | `conventions-enforcer` | Validates project structure against CONVENTIONS.md. |
+| scaffolding | `project-scaffold` | Run-once wizard that bootstraps a brand-new project's doc/config skeleton (CLAUDE.md, SYSTEM.md, docs tree, .gitignore). Complements the component-level `scaffolding` skill. |
 | design | `design-to-code` | Pipeline from text spec to working code with browser preview and feedback loop. |
 | design | `design-qa` | Compares implementation against design spec; heuristic evaluation and visual consistency. |
 | ops | `ci-cd-pipeline` | Sets up and modifies CI/CD pipelines and environment promotion strategies. |
@@ -146,6 +147,15 @@ Project scaffolding templates in `templates/`:
 | `BACKLOG.md` | Task tracking: in progress, next up, ideas, done. |
 | `CHANGELOG.md` | Keep-a-Changelog format for release notes. |
 | `adr-template.md` | Lightweight MADR for architectural decisions. |
+
+Bootstrap templates for new projects in `templates/project-init/` (used by the `project-scaffold` skill):
+
+| File | Purpose |
+|---|---|
+| `SYSTEM.md` | Two-layer template: system description + append-only decisions journal (decision-context format). |
+| `CLAUDE.md` | Full project instructions template wired into this plugin's methodology. |
+| `README.md` | Minimal project README with stack/setup/usage placeholders. |
+| `dot-gitignore` | Stack-agnostic .gitignore (renamed to `.gitignore` at scaffold time). |
 
 ## vs. superpowers
 
