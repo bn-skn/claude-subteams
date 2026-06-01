@@ -82,6 +82,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | ops | `ci-cd-pipeline` | Sets up and modifies CI/CD pipelines and environment promotion strategies. |
 | process | `brainstorming` | Explores intent and requirements before any implementation. Use before creative work. |
 | process | `decision-context` | Mandatory block (Decision / Why / Alternatives / Risks / Linked) in the decisions journal for every non-trivial commit. Everyday companion to `adr-tracker`. |
+| process | `doc-quality-gate` | Classifies a change (cosmetic/feature/architectural/breaking) and defines the docs each class needs. Pairs with the session-end-reminder hook's breaking-signal escalation. |
 | quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID principles. |
 | quality | `adversarial-testing` | Writes tests designed to break the code — edge cases, race conditions, boundary violations. |
 | quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |
@@ -113,7 +114,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | `PreToolUse` (Bash) | `pre-commit-gate` | Runs tsc / mypy / go build before any git commit; warns on files over 200 lines. |
 | `PreToolUse` (Bash) | `pre-push-check` | Safety check before git push. |
 | `PostToolUse` (Edit/Write) | `post-edit-check` | Async check after file edits. |
-| `Stop` | `session-end-reminder` | **Enforces** documentation discipline at end of work. Detects unstaged code changes; if any non-doc files changed without `*.md` updates, blocks Stop with instructions to update the decisions journal. Counter resets on each new commit; after 2 enforcement attempts per HEAD, allows stop with audit warning. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See "Configuration" below. |
+| `Stop` | `session-end-reminder` | **Enforces** documentation discipline at end of work. Detects unstaged code changes; if any non-doc files changed without `*.md` updates, blocks Stop with instructions to update the decisions journal. Escalates to the full breaking-change checklist when it detects asymmetric signals (file deletions, schema/migration files) — see the `doc-quality-gate` skill. Counter resets on each new commit; after 2 enforcement attempts per HEAD, allows stop with audit warning. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See "Configuration" below. |
 | `UserPromptSubmit` | `user-prompt-check` | Async prompt validation. |
 
 ## Configuration

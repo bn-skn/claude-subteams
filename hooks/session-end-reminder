@@ -9,11 +9,22 @@
 #     a warning (prevents infinite loops when the model genuinely cannot comply)
 #   - Counter resets on every new commit (HEAD change)
 #
+# Breaking/architectural signal detection:
+#   - If changed files include deletions OR schema/migration files, the hook
+#     escalates to a stricter message in Case C (if CHANGELOG missing) and Case D.
+#   - Dependency manifests, API files, and routes are NOT hook signals; they flow
+#     through the normal Case C/D path. The model classifies them via doc-quality-gate.
+#   - See the doc-quality-gate skill for the model-side classifier and per-class
+#     doc requirements.
+#   - Known limitation: filenames containing spaces are not fully parsed (uses awk
+#     $NF); the hook fails toward over-reminding, never toward silence.
+#
 # Soft (no enforcement) when:
 #   - Not in a git repo
 #   - No changes in working tree
 #   - Only neutral / lock / config files changed
 #   - Both .md and non-.md files changed (treated as "you remembered docs")
+#     EXCEPT when breaking signals present and CHANGELOG.md not updated (escalates to block)
 #
 # Escape hatch:
 #   - Set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 to disable enforcement entirely.
@@ -51,13 +62,57 @@ if ! git rev-parse --git-dir &>/dev/null; then
 fi
 
 # ---- Get changed files in working tree (tracked + untracked) ----
-CHANGED_FILES=$(git status --porcelain 2>/dev/null | awk '{
-  if ($1 == "R" || $1 == "RM") { print $NF } else { print $NF }
-}')
+# Capture full porcelain output (two passes: filenames and deletion flags)
+PORCELAIN=$(git status --porcelain 2>/dev/null)
+
+CHANGED_FILES=$(printf '%s\n' "$PORCELAIN" | awk '{ print $NF }')
 
 # Nothing changed → silent pass
 if [ -z "$CHANGED_FILES" ]; then
   exit 0
+fi
+
+# ---- Detect breaking/architectural file signals ----
+# Deletions: porcelain status starts with D in col1 or col2
+DELETED_FILES=$(printf '%s\n' "$PORCELAIN" | awk '{
+  status = substr($0, 1, 2)
+  if (index(status, "D") > 0) { print $NF }
+}')
+
+SIGNAL_FILES=""
+
+# Helper: add a file to SIGNAL_FILES list
+_add_signal() {
+  local f="$1"
+  SIGNAL_FILES="${SIGNAL_FILES}  - ${f}
+"
+}
+
+# Check deletions
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  _add_signal "$f (deleted)"
+done <<< "$DELETED_FILES"
+
+# Check schema/data files among all changed files
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  f=${f##*-> }
+  if printf '%s\n' "$f" | grep -qE '(migrations/|\.sql$|\.prisma$|schema\.)'; then
+    _add_signal "$f (schema/data)"
+  fi
+done <<< "$CHANGED_FILES"
+
+# Boolean: any breaking/architectural signals found?
+BREAKING_SIGNALS=0
+if [ -n "$SIGNAL_FILES" ]; then
+  BREAKING_SIGNALS=1
+fi
+
+# Check if CHANGELOG.md is among the changed files
+CHANGELOG_UPDATED=0
+if printf '%s\n' "$CHANGED_FILES" | grep -qE '(^|/)CHANGELOG\.md$'; then
+  CHANGELOG_UPDATED=1
 fi
 
 # ---- Classify files ----
@@ -96,8 +151,70 @@ if [ "$CODE_COUNT" -eq 0 ]; then
   exit 0
 fi
 
-# Case C: Code + docs both changed → soft reminder, no block
+# Case C: Code + docs both changed
 if [ "$DOC_COUNT" -gt 0 ]; then
+  # Breaking signals present AND CHANGELOG not updated → escalate to block
+  if [ "$BREAKING_SIGNALS" -eq 1 ] && [ "$CHANGELOG_UPDATED" -eq 0 ]; then
+    HEAD_HASH=$(git rev-parse HEAD 2>/dev/null || printf 'no-head')
+    HEAD_FILE="/tmp/claude-subteams-head-${SESSION_ID}"
+    COUNTER_FILE="/tmp/claude-subteams-stop-attempts-${SESSION_ID}"
+
+    if [ -f "$HEAD_FILE" ]; then
+      LAST_HEAD=$(cat "$HEAD_FILE" 2>/dev/null || printf '')
+      if [ "$LAST_HEAD" != "$HEAD_HASH" ]; then
+        rm -f "$COUNTER_FILE"
+      fi
+    fi
+    printf '%s' "$HEAD_HASH" > "$HEAD_FILE"
+
+    ATTEMPTS=0
+    if [ -f "$COUNTER_FILE" ]; then
+      ATTEMPTS=$(cat "$COUNTER_FILE" 2>/dev/null || printf '0')
+    fi
+
+    if [ "$ATTEMPTS" -ge 2 ]; then
+      printf '[subteams] Breaking-change doc check enforced %s× — allowing stop with warning.\n' "$ATTEMPTS" >&2
+      printf 'Breaking/architectural signals detected but CHANGELOG.md not updated:\n' >&2
+      printf '%s' "$SIGNAL_FILES" >&2
+      printf 'If intentional, set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 next time.\n' >&2
+      rm -f "$COUNTER_FILE" "$HEAD_FILE"
+      exit 0
+    fi
+
+    ATTEMPTS=$((ATTEMPTS + 1))
+    printf '%s' "$ATTEMPTS" > "$COUNTER_FILE"
+
+    {
+      printf '[subteams:session-end-reminder] Breaking/architectural signals detected — .md files updated but CHANGELOG.md is missing.\n\n'
+      printf 'Signal files (breaking/architectural):\n'
+      printf '%s\n' "$SIGNAL_FILES"
+      printf 'These changes need more than a generic .md touch (attempt %s/2):\n' "$ATTEMPTS"
+      printf '  1. CHANGELOG.md updated with this change.\n'
+      printf '  2. Descriptive section of SYSTEM.md (or equivalent) overwritten — not appended.\n'
+      printf '  3. Decision-context block (Decision / Why / Alternatives / Risks / Linked).\n'
+      printf '  4. If a contract or integration broke: migration guide in the docs.\n'
+      printf '  5. Consider running the doc-agent (claude-subteams:doc-agent) for a breaking-change freshness audit.\n'
+      printf '     See claude-subteams:doc-quality-gate skill for the full breaking-change checklist.\n\n'
+      printf 'Escape hatch: set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 if enforcement is wrong for this session.\n'
+    } >&2
+    exit 2
+  fi
+
+  # Breaking signals present AND CHANGELOG updated → soft reminder mentioning checklist
+  if [ "$BREAKING_SIGNALS" -eq 1 ] && [ "$CHANGELOG_UPDATED" -eq 1 ]; then
+    printf '[subteams] Session ending. Code + docs both changed (CHANGELOG updated) — good.\n'
+    printf 'Breaking/architectural signals detected:\n'
+    printf '%s' "$SIGNAL_FILES"
+    printf 'Reminder: verify the breaking-change checklist is complete.\n'
+    printf '  - Decision-context block (Decision / Why / Alternatives / Risks / Linked)\n'
+    printf '  - Descriptive section overwritten (not appended)\n'
+    printf '  - Migration guide if a contract or integration broke\n'
+    printf '  - Doc-agent audit recommended (claude-subteams:doc-agent)\n'
+    printf '(See claude-subteams:doc-quality-gate skill for full requirements.)\n'
+    exit 0
+  fi
+
+  # Standard Case C: no breaking signals → soft reminder, no block
   printf '[subteams] Session ending. Code + docs both changed — good.\n'
   printf 'Reminder: ensure non-trivial decisions have a Decision context block in the journal.\n'
   printf '(See decision-context skill for format.)\n'
@@ -137,22 +254,44 @@ fi
 ATTEMPTS=$((ATTEMPTS + 1))
 printf '%s' "$ATTEMPTS" > "$COUNTER_FILE"
 
-{
-  printf '[subteams:session-end-reminder] Cannot end session yet — code changed without documentation updates.\n\n'
-  printf 'Files changed (no .md files updated):\n'
-  printf '%s\n' "$CODE_LIST"
-  printf 'Required before stopping (attempt %s/2):\n' "$ATTEMPTS"
-  printf '  1. Add a "Decision context" block to the project decisions journal\n'
-  printf '     (docs/SYSTEM.md or equivalent) for any non-trivial change.\n'
-  printf '     Format: Decision / Why / Alternatives / Risks / Linked.\n'
-  printf '     See the decision-context skill for full format and examples.\n'
-  printf '  2. If the change affected the descriptive part of the docs (top of\n'
-  printf '     SYSTEM.md or equivalent), update that section by overwriting it —\n'
-  printf '     stale descriptive docs are worse than missing ones.\n'
-  printf '  3. For cosmetic-only changes (whitespace, typos, patch bumps) — explain\n'
-  printf '     in your stop message why docs are not needed for these specific files.\n\n'
-  printf 'Escape hatch: set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 if enforcement is wrong for this session.\n'
-  printf 'After 2 enforcement attempts the hook lets the session stop with a warning.\n'
-} >&2
+if [ "$BREAKING_SIGNALS" -eq 1 ]; then
+  # Escalated message for breaking/architectural changes
+  {
+    printf '[subteams:session-end-reminder] Breaking/architectural signals detected — code changed without any documentation updates.\n\n'
+    printf 'Breaking/architectural signal files:\n'
+    printf '%s\n' "$SIGNAL_FILES"
+    printf 'All changed code files (no .md files updated):\n'
+    printf '%s\n' "$CODE_LIST"
+    printf 'Required before stopping (attempt %s/2):\n' "$ATTEMPTS"
+    printf '  1. Decision-context block with Alternatives + Risks in the decisions journal\n'
+    printf '     (docs/SYSTEM.md or equivalent). Format: Decision / Why / Alternatives / Risks / Linked.\n'
+    printf '  2. CHANGELOG.md updated with this change.\n'
+    printf '  3. Descriptive section of SYSTEM.md (or equivalent) overwritten — not appended.\n'
+    printf '  4. If a contract or integration broke: migration guide in the docs.\n'
+    printf '  5. Run the doc-agent (claude-subteams:doc-agent) for a breaking-change freshness audit.\n'
+    printf '     See claude-subteams:doc-quality-gate skill for the full breaking-change checklist.\n\n'
+    printf 'Escape hatch: set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 if enforcement is wrong for this session.\n'
+    printf 'After 2 enforcement attempts the hook lets the session stop with a warning.\n'
+  } >&2
+else
+  # Standard Case D message
+  {
+    printf '[subteams:session-end-reminder] Cannot end session yet — code changed without documentation updates.\n\n'
+    printf 'Files changed (no .md files updated):\n'
+    printf '%s\n' "$CODE_LIST"
+    printf 'Required before stopping (attempt %s/2):\n' "$ATTEMPTS"
+    printf '  1. Add a "Decision context" block to the project decisions journal\n'
+    printf '     (docs/SYSTEM.md or equivalent) for any non-trivial change.\n'
+    printf '     Format: Decision / Why / Alternatives / Risks / Linked.\n'
+    printf '     See the decision-context skill for full format and examples.\n'
+    printf '  2. If the change affected the descriptive part of the docs (top of\n'
+    printf '     SYSTEM.md or equivalent), update that section by overwriting it —\n'
+    printf '     stale descriptive docs are worse than missing ones.\n'
+    printf '  3. For cosmetic-only changes (whitespace, typos, patch bumps) — explain\n'
+    printf '     in your stop message why docs are not needed for these specific files.\n\n'
+    printf 'Escape hatch: set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 if enforcement is wrong for this session.\n'
+    printf 'After 2 enforcement attempts the hook lets the session stop with a warning.\n'
+  } >&2
+fi
 
 exit 2
