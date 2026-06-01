@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.14.0] - 2026-06-01
+
+### Changed
+- **Distribution migrated to a proper GitHub marketplace.** Added `.claude-plugin/marketplace.json` (marketplace `articortex`, plugin `claude-subteams`, source `./`). Install is now the official flow — `/plugin marketplace add bn-skn/claude-subteams` then `/plugin install claude-subteams@articortex` — instead of a bash script that hand-edited Claude Code's global JSON state. This kills the fragile installer whose fabricated `source: "local"` registration became invalid in current Claude Code and corrupted the marketplace list. `install.sh` / `update.sh` / `uninstall.sh` are now thin CLI wrappers (~660 → ~210 lines total) that never touch `known_marketplaces.json` / `installed_plugins.json` / `settings.json`. Private repo works with the user's git/gh credentials (`gh auth setup-git` or `GITHUB_TOKEN`); the repo stays private — no public listing required.
+- **llms-install / llms-uninstall / INSTALL / README** rewritten to the marketplace flow: layout-agnostic verification via `claude plugin list` (no hardcoded install paths), an upgrade note to remove the legacy `bn-skn` local clone, and the activation snippet embedded directly in the installer.
+- **README cross-review entry** corrected — runs the full critic set by default (2 Claude + 2 GPT when Codex is available), not the old "1 GPT call / deep mode" split (that was removed in v1.12.1).
+
 ## [1.13.0] - 2026-06-01
 
 ### Changed

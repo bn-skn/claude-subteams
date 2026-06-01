@@ -1,78 +1,107 @@
 # Manual Installation Guide
 
-If the install script doesn't work, follow these steps manually.
+This document covers manual / fallback installation when the primary marketplace path is unavailable.
 
-## Step 1: Clone the repo
+## Upgrading from a pre-marketplace install (v1.7 and earlier)
+
+If you previously installed via the old `install.sh` script (pre-Phase 6), a stale local marketplace clone lives at `~/.claude/plugins/marketplaces/bn-skn/`. Remove it before reinstalling:
 
 ```bash
-git clone https://github.com/bn-skn/claude-subteams ~/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams
+# Remove old marketplace registration (if it was written to known_marketplaces.json)
+claude plugin marketplace remove bn-skn 2>/dev/null || true
+# Remove the old directory
+rm -rf "$HOME/.claude/plugins/marketplaces/bn-skn"
 ```
 
-## Step 2: Register the plugin
+Then follow the primary path below.
 
-Add to `~/.claude/plugins/installed_plugins.json` (create if missing):
+## Primary path (recommended)
 
-```json
-{
-  "version": 2,
-  "plugins": {
-    "claude-subteams@bn-skn": [
-      {
-        "scope": "user",
-        "installPath": "/YOUR/HOME/.claude/plugins/marketplaces/bn-skn/plugins/claude-subteams",
-        "version": "1.4.1",
-        "installedAt": "2026-01-01T00:00:00.000Z",
-        "lastUpdated": "2026-01-01T00:00:00.000Z"
-      }
-    ]
-  }
-}
+Inside Claude Code, run:
+
+```
+/plugin marketplace add bn-skn/claude-subteams
+/plugin install claude-subteams@articortex
 ```
 
-Replace `/YOUR/HOME` with your actual home directory path.
+Or with the `claude` CLI:
 
-## Step 3: Enable the plugin
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "enabledPlugins": {
-    "claude-subteams@bn-skn": true
-  }
-}
+```bash
+claude plugin marketplace add bn-skn/claude-subteams
+claude plugin install claude-subteams@articortex
 ```
 
-If the file already exists, merge `enabledPlugins` into the existing object.
+**Private repo auth required.** Configure git credentials before running:
 
-## Step 4: Activate in your project
+```bash
+gh auth login
+gh auth setup-git
+```
+
+Or set `GITHUB_TOKEN` in your environment for non-interactive / CI use.
+
+After install, reload Claude Code (`/reload-plugins` or new session).
+
+---
+
+## Fallback: manual clone
+
+If the marketplace CLI is unavailable or fails, clone and let Claude Code discover the plugin:
+
+### Step 1: Clone the repo
+
+Clone into a temporary location, then let the CLI install from there:
+
+```bash
+git clone https://github.com/bn-skn/claude-subteams /tmp/claude-subteams
+```
+
+### Step 2: Register via CLI
+
+```bash
+claude plugin marketplace add bn-skn/claude-subteams
+claude plugin install claude-subteams@articortex
+```
+
+The CLI manages the final install location. Do not manually place files in `~/.claude/plugins/marketplaces/` — the layout depends on the `source` field in `marketplace.json` and may not match a hand-crafted path.
+
+### Step 3: Activate in your project
 
 Add this to your project's `CLAUDE.md`:
 
 ```markdown
 ## Development Methodology
 
-For development tasks use the claude-subteams plugin (orchestrator + 10 specialized agents).
+For development tasks use the claude-subteams plugin (orchestrator + 12 specialized agents).
 Invoke skill "claude-subteams:using-subteams" before significant development work.
 For small fixes — act directly, invoke code-review after if logic changed.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent.
 ```
 
-## Step 5: Verify
+### Step 4: Verify
 
 Restart Claude Code (new session or `/reload-plugins`), then check:
-- `/skills` should list `claude-subteams:using-subteams` and ~45 other skills
-- `/agents` should list `claude-subteams:code-reviewer` and 9 other agents
+
+- `/skills` should list `claude-subteams:using-subteams` and other skills
+- `/agents` should list `claude-subteams:code-reviewer` and other agents
+
+---
 
 ## Troubleshooting
 
 **Skills not showing up?**
+- Confirm reload: skills are only visible after `/reload-plugins` or a new session.
 - Check that skills are flat: `skills/{name}/SKILL.md`, NOT `skills/category/{name}/SKILL.md`
 - Claude Code only scans one level deep under `skills/`
 
-**Plugin not recognized?**
-- Check `installed_plugins.json` — `installPath` must be absolute and correct
-- Check `settings.json` — `enabledPlugins` key must match exactly: `"claude-subteams@bn-skn": true`
+**Marketplace add fails with auth error?**
+- Run `gh auth status` to confirm GitHub credentials.
+- Run `gh auth login && gh auth setup-git` if not configured.
+- Alternatively set `GITHUB_TOKEN` in your environment.
+
+**`claude plugin` subcommand not recognized?**
+- Run `claude plugin --help` to see available subcommands.
+- The CLI version may differ from what this guide expects — adjust accordingly.
 
 **Conflicts with superpowers?**
-- Remove `"superpowers@claude-plugins-official": true` from `settings.json` enabledPlugins
+- Remove `"superpowers@claude-plugins-official": true` from `~/.claude/settings.json` enabledPlugins.
