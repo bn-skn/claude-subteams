@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.10.0] - 2026-06-01
+
+### Added
+- **doc-quality-gate skill** — model-side change classifier (cosmetic / feature / architectural / breaking) with per-class documentation requirements and doc-agent dispatch rules. Maps the hook's file signals to a class, then defines what docs each class needs. Delegates decision-block format and field discipline to `decision-context` (no duplication). Includes an honest scope note: the hook reminds via file signals, it does not verify documentation content — real breaking-change verification is the doc-agent audit plus judgment.
+- **session-end-reminder hook — breaking-signal escalation.** The Stop hook now detects two reliable, asymmetric file signals — deletions (`git status D`) and schema/migration files (`migrations/`, `.sql`, `.prisma`, `schema.`) — and escalates its enforcement message to the full breaking-change checklist (CHANGELOG + descriptive rewrite + decision block + migration guide + doc-agent audit). Deliberately NARROW: routine additive signals (dependency manifests, new routes, `.proto`, `plugin.json`) do NOT trigger escalation — they flow through the standard reminder — to avoid false-positive fatigue that would push users to disable the hook entirely. Escalation also fires in the code+docs case when `CHANGELOG.md` is missing. Escape hatch (`CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`) and the 2-attempt cap are unchanged.
+
+### Changed
+- **doc-agent** — added a third mode: breaking-change audit. Verifies that a breaking/architectural change has all required artifacts present and current: migration guide (if integrations break), API/contract docs, CHANGELOG entry, rewritten (not appended) descriptive section, and a decision-context block with non-empty Alternatives and Risks.
+
 ## [1.9.0] - 2026-06-01
 
 ### Added
