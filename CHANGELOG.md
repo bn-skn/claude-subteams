@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.12.1] - 2026-06-01
+
+### Changed
+- **cross-review** — removed the quota-saving "default 1 GPT call / deep mode" split. `/cross-review` now dispatches the FULL critic set by default — both Claude critics (`code-reviewer` + `devils-advocate`) AND both GPT critics (`gpt-code-reviewer` + `gpt-devils-advocate`) — for complete cross-model coverage. Quota guidance reworded from a rationing constraint to awareness-only: run all critics whenever cross-review fires; pause Codex only if the human reports interactive ChatGPT being throttled (a reaction to a real signal, not a pre-emptive cap). Dropped the one-attempt-per-`/rescue`-session cap (no-auto-retry-on-failure remains, for reliability not rationing).
+
 ## [1.12.0] - 2026-06-01
 
 ### Added
