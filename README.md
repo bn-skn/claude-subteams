@@ -39,6 +39,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/bn-skn/claude-subteams/main/
 
 If the script doesn't work, see [INSTALL.md](INSTALL.md) for manual steps.
 
+For install / update / uninstall / **repair** commands in one place, see [docs/CHEATSHEET.md](docs/CHEATSHEET.md) — including how to fix a broken `/plugins` or a legacy script-based install.
+
 ### Install via an AI agent
 
 You can hand `llms-install.md` to any coding agent (Cursor, Windsurf, Claude Code itself, etc.) and it will run the pre-flight checks, execute the marketplace install, and verify the result — no manual steps required. Example invocation:
