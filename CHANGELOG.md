@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.16.0] - 2026-06-01
+
+### Added
+- **verification-gate: visual verification.** Compilation and tests prove code RUNS, not that it LOOKS right. Added a "Visual Verification" section: when work produces a visual artifact (UI page, component, landing page, rendered diagram, generated image, chart), verification MUST include viewing a screenshot and JUDGING quality — aligned / readable / polished, not merely regression-free — and fixing what looks wrong before claiming done. Wired into the Gate Function (new step 7), the Common Failures table, and the skill description. If the artifact genuinely cannot be seen (headless env, no screenshot tooling), that must be stated explicitly, never silently claimed complete. Capture via `ui-testing` / Playwright / chrome-devtools; structured quality pass via `design-qa`.
+
 ## [1.15.0] - 2026-06-01
 
 ### Added

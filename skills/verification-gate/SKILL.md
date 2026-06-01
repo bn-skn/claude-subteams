@@ -1,6 +1,6 @@
 ---
 name: verification-gate
-description: Use when about to claim work is complete, fixed, or passing. Requires running verification commands, backup before destructive changes, doc freshness checks, and stack-agnostic compilation checks. Evidence before assertions, always.
+description: Use when about to claim work is complete, fixed, or passing. Requires running verification commands, backup before destructive changes, doc freshness checks, stack-agnostic compilation checks, and visual checks for any UI/rendered output. Evidence before assertions, always.
 ---
 
 # Verification Gate
@@ -34,7 +34,9 @@ BEFORE claiming any status or expressing satisfaction:
    - If NO: State actual status with evidence
    - If YES: State claim WITH evidence
 6. DOCS     → Check documentation freshness
-7. ONLY THEN → Make the claim
+7. VISUAL   → If the output is visual (UI, page, image, diagram), view a
+              screenshot and judge it looks right — not just that it renders
+8. ONLY THEN → Make the claim
 
 Skip any step = lying, not verifying
 ```
@@ -78,6 +80,17 @@ BEFORE marking work complete, verify documentation is current:
 
 **Stale docs are bugs.** Treat them as blockers.
 
+## Visual Verification (when the output is visual)
+
+Compilation and tests prove code RUNS — not that it LOOKS right. When the work produced a visual artifact — a UI page, component, landing page, rendered diagram, generated image, chart, or any human-facing layout — verification MUST include looking at it, whenever a way to see it exists.
+
+1. **Render and look.** Capture a screenshot (`ui-testing` / Playwright / chrome-devtools for web UI; open the file for generated images, diagrams, PDFs). Actually view the result — never infer appearance from the code alone.
+2. **Judge quality, not just "no crash".** Is the layout aligned, spaced, readable? Does it look intentional and polished, or broken / cramped / overflowing / off? Run the `design-qa` skill for a structured pass (hierarchy, consistency, contrast, spacing, responsiveness).
+3. **Fix what looks wrong.** Misaligned, overflowing, low-contrast, clipped, or just ugly → fix it and re-screenshot. "It compiles" is not "it looks good."
+4. **If you genuinely cannot see it** (headless env, no screenshot tooling, non-visual task) — say so explicitly: *"visual state NOT verified — needs a human/visual check."* Never silently claim a visual artifact is done without having looked at it.
+
+This catches what `tsc` and unit tests never will: the thing renders without errors but looks broken.
+
 ## Common Verification Failures
 
 | Claim | Requires | NOT Sufficient |
@@ -91,6 +104,7 @@ BEFORE marking work complete, verify documentation is current:
 | Requirements met | Line-by-line checklist | Tests passing |
 | Agent completed | VCS diff shows changes | Agent reports "success" |
 | UI intact | Screenshot comparison: no visual regressions | tsc passes, unit tests pass |
+| Visual artifact looks good | Screenshot viewed + judged: aligned, readable, polished | "compiles" / "no regressions" (regression-free can still look broken) |
 
 ## Red Flags - STOP
 
