@@ -2,7 +2,28 @@
 
 **Date:** 2026-05-02
 **Branch:** fix/full-audit-overhaul
-**Status:** active
+**Status:** completed (2026-06-01)
+
+## Resolution (2026-06-01)
+
+Audited every item against current code (plugin had evolved v1.4 → v1.14 since this plan was written). All items are done or moot — nothing left to implement:
+
+- **C1, C2, C3** — RESOLVED by the v1.14.0 marketplace migration (install/update/uninstall.sh rewritten as thin CLI wrappers; old path/key mismatches gone).
+- **C4** — DONE: `hooks/pre-commit-gate` sources nvm (lines 5-7), warns gracefully if npx missing.
+- **I1** — DONE: regex is `\bgit\s+commit\b` (tighter than the plan proposed).
+- **I2** — DONE: `pre-push-check` uses `\b(main|master)\b`.
+- **I3** — DONE: message reads "these files exceed 200 lines".
+- **I4** — DONE: `user-prompt-check` uses compound patterns, no bare generic words.
+- **I5** — DONE: `hooks.json` has timeouts (pre-commit-gate 30000, session-start 10000).
+- **I6** — DONE: `researcher` documents the MCP dependency in a frontmatter comment.
+- **A1** — MOOT: nvm is sourced directly in the hooks (C4), so a `bin/` wrapper is unnecessary.
+- **A2** — MOOT: install.sh rewritten to the marketplace CLI; no hardcoded skill count remains.
+- **A3** — DONE: plugin.json has repository/license/homepage.
+- **A4** — DONE: README has `claude --plugin-dir` + `/reload-plugins` + env requirements.
+- **A5** — MOOT: uninstall.sh uses the CLI, which cleans installed_plugins.json itself.
+- **A6** — DONE: CHANGELOG.md is maintained.
+
+No code changes needed at closure — verification only. Moved to completed.
 
 ## Context
 
