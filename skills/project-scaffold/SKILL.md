@@ -8,7 +8,7 @@ description: "Bootstrap an empty/new directory into a project skeleton (docs, CL
 ## 1. Overview
 
 1. This skill creates the full documentation and project-skeleton scaffold for a brand-new project.
-2. It covers: `CLAUDE.md`, `README.md`, `.gitignore`, `docs/SYSTEM.md`, `docs/CONVENTIONS.md`, `docs/ARCHITECTURE.md`, `docs/BACKLOG.md`, `docs/CHANGELOG.md`, and the `docs/plans/` + `docs/adr/` directory seeds.
+2. It covers: `CLAUDE.md`, `README.md`, `.gitignore`, `docs/SYSTEM.md`, `docs/CONVENTIONS.md`, `docs/ARCHITECTURE.md`, `docs/BACKLOG.md`, `docs/CHANGELOG.md`, and the `docs/plans/` + `docs/specs/` + `docs/adr/` directory seeds.
 3. It does NOT scaffold source-code components (services, modules, endpoints, agents). Use the `scaffolding` skill for that after initialization.
 
 ## 2. When to Use
@@ -72,13 +72,18 @@ Create files in this exact order, substituting all gathered placeholder values:
 8. `docs/CHANGELOG.md` — from `templates/CHANGELOG.md`.
 9. `docs/plans/active/.gitkeep` — empty file to commit the directory.
 10. `docs/plans/completed/.gitkeep` — empty file to commit the directory.
-11. `docs/adr/000-adr-template.md` — from `templates/adr-template.md`.
+11. `docs/specs/.gitkeep` — empty file to commit the directory (where `brainstorming` writes design specs).
+12. `docs/adr/000-adr-template.md` — from `templates/adr-template.md`.
 
 ### Step 4 — Confirm and summarize
 
 1. Print the created file tree to the user.
 2. List every `<PLACEHOLDER>` that was NOT substituted because no value was gathered — the user must complete these manually.
-3. Mention that the `scaffolding` skill handles the next step: adding source-code components.
+3. **Hand off to the spec/plan process — this is the expected next step after scaffolding a new project:**
+   - For the first feature, run `claude-subteams:brainstorming` → it writes a design spec to `docs/specs/YYYY-MM-DD-<topic>-design.md`.
+   - Then `claude-subteams:writing-plans` turns the spec into an implementation plan in `docs/plans/active/`.
+   - Then implement via the pipeline (`claude-subteams:using-subteams`).
+4. For adding source-code components later (services, modules, endpoints), use the `scaffolding` skill.
 
 ## 4. Relationship to `scaffolding` Skill
 
@@ -121,5 +126,6 @@ Create files in this exact order, substituting all gathered placeholder values:
 | `docs/adr/000-adr-template.md` | `templates/adr-template.md` |
 | `docs/plans/active/` | (empty, `.gitkeep`) |
 | `docs/plans/completed/` | (empty, `.gitkeep`) |
+| `docs/specs/` | (empty, `.gitkeep`) — `brainstorming` writes specs here |
 
-Related skills: `scaffolding`, `claudemd-engineering`, `decision-context`, `conventions-enforcer`.
+Related skills: `brainstorming` + `writing-plans` (the spec → plan next step), `scaffolding`, `claudemd-engineering`, `decision-context`, `conventions-enforcer`.

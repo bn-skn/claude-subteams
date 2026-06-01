@@ -97,6 +97,21 @@ Before starting any task, scan available skills for relevance.
    - Add specialist skills only when the task clearly falls in their domain (security-audit for auth changes, accessibility for UI work)
 4. **Skills are not bureaucracy.** They exist because real failures happened without them. Treat them as safety nets, not red tape.
 
+### Specialist Skill Catalog
+
+This is the discovery surface for rule 1 — scan it by relevance. Most specialist skills are invoked by **domain match**, not by being referenced from another skill, so this roster is how you know they exist:
+
+- **Planning & flow:** `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-dev`, `parallel-dispatch`, `using-git-worktrees`, `finishing-branch`, `context-management`
+- **Quality & review:** `code-review`, `adversarial-testing`, `test-driven-development`, `verification-gate`, `receiving-review`, `cross-review`, `codebase-improvement`, `ui-testing`, `design-qa`, `prompt-evaluation`
+- **Architecture & design:** `clean-architecture`, `conventions-enforcer`, `refactoring`, `service-boundaries`, `api-design`, `database-design`, `design-to-code`, `scaffolding`, `project-scaffold`
+- **Agents & authoring:** `agent-engineering`, `subagent-prompt-design`, `skill-engineering`, `claudemd-engineering`
+- **Domain & stack:** `data-engineering`, `mobile-development`, `i18n-localization`, `accessibility`, `ci-cd-pipeline`, `monitoring-logging`, `error-handling`, `security-audit`, `dependency-audit`, `lint-and-style`, `config-and-secrets`
+- **Docs & decisions:** `decision-context`, `doc-quality-gate`, `adr-tracker`
+- **Research & debugging:** `live-research`, `systematic-debugging`, `incident-management`
+- **Process & ops:** `git-workflow`, `self-optimization`
+
+(The 3-skill cap in rule 2 still applies — this catalog is for discovery, not for loading everything.)
+
 ## 6. Pipeline Decision
 
 Every development task follows one of three pipelines. Choose based on scope and risk.

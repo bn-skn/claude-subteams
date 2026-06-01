@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.15.0] - 2026-06-01
+
+### Added
+- **using-subteams: Specialist Skill Catalog** — Section 5 now lists all 53 skills grouped by category (planning, quality, architecture, agents/authoring, domain/stack, docs, research, process). Most specialist skills are invoked by domain relevance (the 1% Rule), not via cross-references — so the catalog is the discovery surface that tells the orchestrator the full arsenal exists, not just the skills referenced from elsewhere. (Fixes the gap where ~15 domain/specialist skills were findable only by description, never named in the methodology.)
+
+### Changed
+- **project-scaffold wired into the spec → plan → implement process.** Now creates `docs/specs/` (where `brainstorming` writes design specs), and Step 4 explicitly hands off the spec/plan flow for a new project: `brainstorming` (spec → `docs/specs/`) → `writing-plans` (plan → `docs/plans/active/`) → `using-subteams` (implement). Previously the scaffold built the doc skeleton but didn't connect it to spec-writing — a fresh project landed with no clear "now write the spec" next step.
+
 ## [1.14.2] - 2026-06-01
 
 ### Fixed
