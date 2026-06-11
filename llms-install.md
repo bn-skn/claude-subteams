@@ -84,7 +84,7 @@ grep -s '"superpowers@claude-plugins-official": true' "$HOME/.claude/settings.js
 claude plugin list 2>/dev/null | grep -F "claude-subteams" && echo "ALREADY INSTALLED" || echo "FRESH INSTALL"
 ```
 
-**If ALREADY INSTALLED:** tell the user the plugin is already registered. Ask whether to reinstall or run an update (`claude plugin marketplace update articortex`) instead. Note the outcome for your step-7 report.
+**If ALREADY INSTALLED:** tell the user the plugin is already registered. Ask whether to reinstall or run an update instead. The canonical update is two steps: `claude plugin marketplace update articortex` (refresh catalog) then `claude plugin update claude-subteams@articortex` (bump the installed plugin) — the second step is required, `marketplace update` alone does not move a version-pinned install. Note the outcome for your step-7 report.
 **If FRESH INSTALL:** proceed to step 2 without comment.
 
 ---

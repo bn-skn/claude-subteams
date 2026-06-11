@@ -71,11 +71,24 @@ Use `/reload-plugins` inside Claude Code to hot-reload after changes.
 
 ### Update
 
+Two canonical steps — refresh the marketplace catalog, then update the installed plugin:
+
 ```bash
-claude plugin marketplace update articortex
+claude plugin marketplace update articortex        # 1. pull latest main from the repo into the catalog
+claude plugin update claude-subteams@articortex    # 2. bump the installed plugin to that version
 ```
 
-Or with the shell wrapper:
+Then restart Claude Code (or `/reload-plugins`) to apply. `marketplace update` alone refreshes the source but does NOT change the installed (version-pinned) plugin — step 2 is what actually upgrades it.
+
+Interactive equivalent inside Claude Code:
+
+```
+/plugin marketplace update articortex
+/plugin update claude-subteams@articortex
+/reload-plugins
+```
+
+Or with the shell wrapper (does both steps):
 
 ```bash
 bash scripts/update.sh

@@ -3,7 +3,7 @@
 Quick reference for installing, updating, removing, and **repairing** the plugin from any machine.
 
 - **Repo:** `bn-skn/claude-subteams` (private)
-- **Marketplace:** `articortex` · **Plugin:** `claude-subteams` · **Version:** 1.17.x
+- **Marketplace:** `articortex` · **Plugin:** `claude-subteams` · **Version:** 1.17.1
 - **Contents:** 16 agents, 53 skills, 6 hooks
 
 ---
@@ -40,9 +40,12 @@ Activate in a project: add the snippet from `templates/claudemd-snippet.md` to t
 ## Update
 
 ```bash
-claude plugin marketplace update articortex
+claude plugin marketplace update articortex        # 1. refresh catalog (pull latest main)
+claude plugin update claude-subteams@articortex    # 2. upgrade the installed plugin
 ```
-Then `/reload-plugins`. Pulls the latest commit of `main` from the private repo.
+Then `/reload-plugins` (or a new session) to apply. Step 1 pulls the latest `main` from the private repo into the marketplace catalog; step 2 bumps the **installed** plugin to that version. `marketplace update` alone is not enough — the installed plugin is version-pinned and only `plugin update` moves it.
+
+Interactive equivalent: `/plugin marketplace update articortex` → `/plugin update claude-subteams@articortex` → `/reload-plugins`.
 
 ---
 

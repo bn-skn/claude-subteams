@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.17.1] - 2026-06-11
+
+### Fixed
+- **Canonical update flow.** `scripts/update.sh`, the README/CHEATSHEET "Update" sections, and the `llms-install` already-installed branch documented only `claude plugin marketplace update articortex` — which refreshes the marketplace catalog but does NOT move the version-pinned installed plugin, so users stayed on the old version. The canonical Claude Code update is **two steps**: `claude plugin marketplace update articortex` then `claude plugin update claude-subteams@articortex` (interactive: `/plugin marketplace update articortex` → `/plugin update claude-subteams@articortex` → `/reload-plugins`). `update.sh` now runs both. No plugin behavior changed — docs/tooling only.
+
 ## [1.17.0] - 2026-06-11
 
 ### Added
