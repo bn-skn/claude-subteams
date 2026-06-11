@@ -148,7 +148,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | design | `design-to-code` | Pipeline from text spec to working code with browser preview and feedback loop. |
 | design | `design-qa` | Compares implementation against design spec; heuristic evaluation and visual consistency. |
 | ops | `ci-cd-pipeline` | Sets up and modifies CI/CD pipelines and environment promotion strategies. |
-| process | `brainstorming` | Explores intent and requirements before any implementation. Use before creative work. |
+| process | `brainstorming` | Explores intent and requirements before any implementation. Use before creative work. For greenfield/structural work, captures architectural decisions as ADRs during the interview and projects them into `ARCHITECTURE.md`/`CONVENTIONS.md` (gated by `check-arch-docs.sh`). |
 | process | `decision-context` | Mandatory block (Decision / Why / Alternatives / Risks / Linked) in the decisions journal for every non-trivial commit. Everyday companion to `adr-tracker`. |
 | process | `doc-quality-gate` | Classifies a change (cosmetic/feature/architectural/breaking) and defines the docs each class needs. Pairs with the session-end-reminder hook's breaking-signal escalation. |
 | quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID principles. |

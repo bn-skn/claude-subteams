@@ -85,6 +85,7 @@ Create files in this exact order, substituting all gathered placeholder values:
    - For the first feature, run `claude-subteams:brainstorming` → it writes a design spec to `docs/specs/YYYY-MM-DD-<topic>-design.md`.
    - Then `claude-subteams:writing-plans` turns the spec into an implementation plan in `docs/plans/active/`.
    - Then implement via the pipeline (`claude-subteams:using-subteams`).
+   - **Scaffolded `docs/ARCHITECTURE.md` and `docs/CONVENTIONS.md` are STUBS, not documentation.** They carry the sentinel `> STATUS: TEMPLATE — not yet populated` and unfilled placeholders. For greenfield, this is the first structural work — they MUST be populated through the `brainstorming` Architecture Capture flow (decisions captured as ADRs during the interview, then projected into the docs by the orchestrator in-context) BEFORE any structural implementation. `scripts/check-arch-docs.sh <target>` mechanically verifies the stub markers are gone, and the Full+Architecture pipeline blocks IMPLEMENT until it passes (using-subteams Critical Rule 24). Do NOT begin building modules against a stub architecture doc — a confidently wrong or empty architecture doc is read as ground truth by `architecture-guard` and future sessions.
 4. For adding source-code components later (services, modules, endpoints), use the `scaffolding` skill.
 
 ## 4. Relationship to `scaffolding` Skill

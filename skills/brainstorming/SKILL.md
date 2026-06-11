@@ -29,6 +29,7 @@ You MUST create a task for each of these items and complete them in order:
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
 6. **"What If?" Challenge** — generate 5-10 "what if" questions about the design and present to the user (see below)
 7. **Write design doc** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md` and commit
+   - **Architecture-capture branch (greenfield + non-trivial structural work only):** before writing the spec, capture each accepted architectural decision as an ADR and a decision-context block — see "Architecture Capture" below. This populates `docs/ARCHITECTURE.md` + `docs/CONVENTIONS.md` from real interview decisions, not from a later reconstruction.
 8. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
 9. **User reviews written spec** — ask user to review the spec file before proceeding
 10. **Transition to implementation** — invoke claude-subteams:writing-plans skill to create implementation plan
@@ -134,6 +135,33 @@ Present these questions to the user. Discuss any that surface real concerns. Adj
 - Where existing code has problems that affect the work, include targeted improvements as part of the design
 - Do not propose unrelated refactoring. Stay focused on what serves the current goal.
 
+## Architecture Capture (greenfield + non-trivial structural work)
+
+**Scope — this branch runs ONLY when both are true:**
+
+1. The work is **greenfield** (a new project / fresh scaffold) **OR** a **non-trivial structural change** — a new module, a new layer, a dependency-direction change, or a new external integration.
+2. The project carries the standard doc set with `docs/ARCHITECTURE.md` and `docs/CONVENTIONS.md` (scaffolded or retrofitted via `project-scaffold`).
+
+**Do NOT run it for:** logic-only features, bug fixes, refactors within an existing module, UI tweaks, copy changes, or anything that leaves the module boundaries and dependency graph unchanged. For those, the normal spec flow is sufficient — this branch would be bureaucracy. When unsure whether a change is "structural," ask the one question: *does it add or move a module, a layer, a dependency direction, or an external integration?* If no → skip this branch.
+
+**Capture at the moment of decision, never reconstruct later.** The reason this lives inside the interview, with you (the orchestrator) as in-context author, is that a fresh-context agent reconstructing decisions from a compressed brief produces authoritative-looking fiction. `ARCHITECTURE.md`/`CONVENTIONS.md` are load-bearing state that `architecture-guard` reads as truth — a wrong doc poisons the validator. You hold the dialogue, so you are the only author with the full decision context. Do NOT delegate this projection to a subagent.
+
+**Flow:**
+
+1. **During the interview** — the instant an architectural choice is settled (stack, framework, data store, layer boundary, dependency direction, external integration, deviation from convention), capture it immediately, while the rationale is fresh:
+   - Create an ADR via the `adr-tracker` skill: `docs/adr/NNN-title.md`, status `accepted`, with Context / Decision / Consequences.
+   - Add a `decision-context` block (Decision / Why / Alternatives / Risks / Linked) to the session journal as the lightweight companion record.
+2. **After the design is approved** — YOU, in-context, populate the docs from those captured records:
+   - `docs/ARCHITECTURE.md`: fill the real layers, components, data flow, and a `## Decision Records` section listing each accepted ADR as `- [ADR-NNN: Title](adr/NNN-title.md)`.
+   - `docs/CONVENTIONS.md`: fill the real stack, naming, structure, and limits that the interview established.
+   - Every non-obvious architectural choice in either doc must trace to an ADR (provenance link) **or** be marked `**TBD — unresolved**`. Never invent a value to fill a blank.
+3. **Remove every stub marker.** Delete the sentinel line `> STATUS: TEMPLATE — not yet populated` and any remaining `<PLACEHOLDER>` / `<STACK>` / `<FRAMEWORKS>` / template comments only once the section holds a real decision or an explicit `**TBD — unresolved**`. The gate (`scripts/check-arch-docs.sh`, enforced before IMPLEMENT — see `using-subteams` and `verification-gate`) fails while any marker remains, so a half-filled doc is caught mechanically rather than slipping through.
+
+**The two failure modes this prevents:**
+
+- **Fabrication** — filling `ARCHITECTURE.md` with a plausible-sounding architecture the interview never decided. Counter: every claim traces to an ADR or is `**TBD — unresolved**`.
+- **Empty truth** — leaving the template stub in place and proceeding to build. Counter: the mechanical gate blocks structural IMPLEMENT until the markers are gone.
+
 ## After the Design
 
 **Documentation:**
@@ -144,7 +172,7 @@ Present these questions to the user. Discuss any that surface real concerns. Adj
 
 **Spec Self-Review:**
 
-1. **Placeholder scan:** Any "TBD", "TODO", incomplete sections, or vague requirements? Fix them.
+1. **Placeholder scan:** Any "TBD", "TODO", incomplete sections, or vague requirements *in the spec*? Fix them. (Different artifact: in `ARCHITECTURE.md`/`CONVENTIONS.md` an explicit `**TBD — unresolved**` is the sanctioned exception, not a placeholder to scrub — see the Architecture Capture section.)
 2. **Internal consistency:** Do any sections contradict each other? Does the architecture match the feature descriptions?
 3. **Scope check:** Is this focused enough for a single implementation plan, or does it need decomposition?
 4. **Ambiguity check:** Could any requirement be interpreted two different ways? If so, pick one and make it explicit.

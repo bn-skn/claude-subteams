@@ -14,8 +14,11 @@ if [ -z "$PROMPT" ]; then
 fi
 
 # Agentic/prompt patterns — checked first (a more specific subtype of dev work)
-if printf '%s\n' "$PROMPT" | grep -qiE 'system prompt|prompt engineer|agentic|sub-?agent|multi-?agent|mcp server|tool (definition|schema)|llm[ -]?judge|rag pipeline|(build|create|design|edit|write|improve|optimi[sz]e)( an?| the| this)? (agent|prompt|skill)s?\b'; then
+if printf '%s\n' "$PROMPT" | grep -qiE 'system prompt|prompt engineer|agentic|sub-?agent|multi-?agent|mcp server|tool (definition|schema)|llm[ -]?judge|rag pipeline|(build|create|design|edit|write|improve|optimi[sz]e)( [a-z]+){0,3}? (agent|prompt|skill)s?\b'; then
   echo "[subteams:scope] Agentic/prompt work detected — apply using-subteams Section 6.5: agent-architect (design) / prompt-engineer (authoring) / prompt-evaluator (validation)."
+# Greenfield / structural patterns — checked before generic dev so the architecture-capture flow surfaces
+elif printf '%s\n' "$PROMPT" | grep -qiE 'new( [^ ]+){0,3} (project|service|module|layer|integration|microservice)|greenfield|scaffold|bootstrap (a |the |new )?project|from scratch|re-?design (the )?architecture|re-?architect|dependency direction|архитектур|нов(ый|ого)( [^ ]+){0,3} (проект|сервис|модул|слой|интеграци)|с нуля|редизайн'; then
+  echo "[subteams:scope] Greenfield/structural work detected — apply the architecture-capture flow: capture decisions as ADRs during brainstorming, populate ARCHITECTURE.md/CONVENTIONS.md, and gate IMPLEMENT on scripts/check-arch-docs.sh (using-subteams Rule 24)."
 # Dev patterns — compound phrases that clearly indicate development work
 elif printf '%s\n' "$PROMPT" | grep -qiE 'fix (the |a |this )?bug|implement\s+\w|refactor|write tests?|deploy to|run build|add (endpoint|feature|component)|create (api|migration|service)|git (commit|push|merge|branch)|code review|pull request'; then
   echo "[subteams:scope] Development task detected."

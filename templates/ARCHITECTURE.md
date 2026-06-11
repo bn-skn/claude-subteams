@@ -1,5 +1,7 @@
 # Architecture
 
+> STATUS: TEMPLATE — not yet populated
+
 ## Overview
 
 <!-- What the system does in 2-3 sentences. Who uses it and what problem it solves. -->
@@ -53,6 +55,6 @@
 |---|---|---|
 | Library / Service | Why it is used | x.y.z |
 
-## Related ADRs
+## Decision Records
 
-- [ADR-000: Template](docs/adr/000-adr-template.md)
+- [ADR-NNN: Title](adr/NNN-title.md)
