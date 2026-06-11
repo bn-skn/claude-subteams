@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.17.0] - 2026-06-11
+
+### Added
+- **Two agentic-quality specialists.** `prompt-engineer` (opus) authors and optimizes prompts, system prompts, and tool/skill instructions — context-first, eval-driven, hands off to `prompt-evaluator`. `agent-architect` (opus) designs subagents and multi-agent systems — boundaries, orchestration topology, tool scoping, contracts — applying the `agent-engineering` and `subagent-prompt-design` methodology. Until now those skills existed as *knowledge* but there was no specialist *persona* to dispatch for authoring/design (only `prompt-evaluator`, which tests). Agent count 14 → 16.
+- **using-subteams §6.5 — Agentic & Prompt Work (mandatory wiring).** When the task is building/editing agents, system prompts, skills, tool definitions, MCP servers, or multi-agent systems, the pipeline now mandates the agentic skills (`agent-engineering` + `subagent-prompt-design` + `prompt-evaluation`, treated as core not specialist — they do not count against the 3-skill cap) and the Author → Evaluate → Iterate loop (agent-architect/prompt-engineer produce, prompt-evaluator proves). Skipping the agentic specialists on agentic work is now a process failure (Critical Rule 22). New Scope-Detection row + `user-prompt-check` hook branch surface agentic work automatically.
+- **using-subteams §6.6 — Change Verification gate (every pipeline above Lightweight).** Before declaring done, confirm with EVIDENCE (not memory) that required gates ran: reviews happened and findings were addressed, tsc/lint/tests are actually green, docs updated per `doc-quality-gate`. Skipped gates must be stated explicitly, never presented as passed. Critical Rule 23.
+- **project-scaffold — Retrofit mode (§8).** The skill now has two modes: *Init* (empty dir, unchanged) and *Retrofit* (existing project with source code but missing/weak docs). Retrofit is additive and non-destructive: audits which standard docs are present/stub/substantive, infers real values from the repo (never fabricates), fills only gaps, and never overwrites populated docs without asking. Step 2 now routes empty→Init, source-present→Retrofit instead of aborting. New `session-start` hook signal flags a source project with < 2/5 core docs.
+
+### Changed
+- **Review is required for every logic change, calibrated by weight.** Lightweight pipeline is now reserved for *zero-logic* mechanical edits (rename, typo, import, formatting); the moment a change touches behavior it escalates to Standard. Standard review is calibrated: **code-reviewer always**, plus **devils-advocate for non-trivial logic** (multi-file, branching, contract/shared-state, or any uncertainty). A single isolated one-liner gets a reviewer but not an adversarial challenger; substantial logic gets both. Closes the gap where small logic changes shipped unreviewed without imposing two opus agents on every typo-adjacent fix. Critical Rule 21; Red Flags, executing-plans gate, and README roster note updated (devils-advocate is no longer "Full pipeline only").
+- **agent-engineering / subagent-prompt-design** cross-reference the new specialist agents (rulebook → execution handoff).
+- **Roster sync** across README, INSTALL, llms-install, templates/claudemd-snippet, docs/CHEATSHEET (16 agents), and using-subteams §2.
+- using-subteams skill version 1.5.0 → 1.7.0.
+
 ## [1.16.1] - 2026-06-01
 
 ### Added

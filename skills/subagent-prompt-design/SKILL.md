@@ -111,3 +111,7 @@ You are a [role]. Your task: [one-sentence description].
 3. ALWAYS validate the **Status** field exists in agent output before proceeding.
 4. MUST include the handoff statement before every Agent tool call.
 5. NEVER spawn a subagent for a task that would take you less than 30 seconds.
+
+## 9. Specialist Agent
+
+For authoring or optimizing a subagent's prompt at quality, dispatch the **prompt-engineer** agent (opus) — it applies this skill's rules (tool restriction, context minimization, output contract) to produce the wording, then hands off to **prompt-evaluator** for validation. See `using-subteams` Section 6.5. Use `agent-architect` first when the agent's boundaries and topology are not yet decided.

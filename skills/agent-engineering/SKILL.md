@@ -109,3 +109,13 @@ Before dispatching any agent:
 4. MUST log every agent dispatch and result for debugging.
 5. NEVER nest agents deeper than 3 levels.
 6. ALWAYS match model selection to task complexity.
+
+## 11. Specialist Agents
+
+This skill is the rulebook. For execution, dispatch the specialists (see `using-subteams` Section 6.5):
+
+1. **agent-architect** — applies this methodology to design a subagent or multi-agent system (boundaries, topology, tool scoping, contracts). Dispatch whenever a new agent or system is created or restructured.
+2. **prompt-engineer** — authors and optimizes the system-prompt wording once the structure is designed (see `subagent-prompt-design`).
+3. **prompt-evaluator** — validates the designed agent/prompt against test inputs before shipping (see `prompt-evaluation`).
+
+Division of labour: agent-architect owns structure and context; prompt-engineer owns wording; prompt-evaluator owns proof. Author → evaluate → iterate.

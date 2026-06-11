@@ -1,7 +1,7 @@
 ---
 name: using-subteams
-description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, or planning architecture."
-version: 1.5.0
+description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, planning architecture, or building/editing agents, prompts, skills, and multi-agent systems."
+version: 1.7.0
 ---
 
 # Using Subteams — Orchestrator Meta-Skill
@@ -51,6 +51,8 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 | 12 | improvement-agent | opus | Read, Grep, Glob, Bash | Periodic codebase health checks, tech debt discovery, sprint planning | Prioritized proposals (read-only, no code changes) |
 | 13 | gpt-code-reviewer | sonnet (+Codex/GPT) | Read, Grep, Glob, Bash | Cross-model review (`/cross-review`, breaking/security changes) — shells out to Codex for bug classes Claude under-weights | Structured cross-model findings |
 | 14 | gpt-devils-advocate | sonnet (+Codex/GPT) | Read, Grep, Glob, Bash | Cross-model architectural challenge alongside `devils-advocate` | Cross-model challenge report |
+| 15 | prompt-engineer | opus | Read, Write, Edit, Grep, Glob | Authoring/optimizing prompts, system prompts, tool/skill instructions (Section 6.5) | Authored prompt + design rationale + eval handoff |
+| 16 | agent-architect | opus | Read, Write, Edit, Grep, Glob | Designing a NEW subagent or restructuring a multi-agent system — boundaries, orchestration, tool scoping (Section 6.5). NOT for routine prompt edits | System design + agent definitions + handoffs |
 
 **Model note:** All agents default to opus except doc-agent, developer, and ui-tester (sonnet). The two GPT critics (#13-14) run as sonnet harnesses that shell out to the Codex CLI (GPT) at high reasoning effort — see the `cross-review` skill for model/effort policy. See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
 
@@ -63,6 +65,7 @@ Before applying any development skill, classify the task. This is not optional.
 | Task Type | Detection Signals | Action |
 |-----------|-------------------|--------|
 | Development | Code changes, file references, "implement", "fix", "refactor", "test", "deploy", architectural discussions | Full or lightweight pipeline (Section 7) |
+| **Agentic / prompt work** | Building or editing agents, system prompts, skills, tool definitions, MCP servers, multi-agent systems, LLM-judge/RAG pipelines | Development pipeline **+ mandatory Section 6.5 specialist wiring** |
 | Partial development | Marketing copy + code, design + implementation, docs + config | Apply only relevant skills — do not impose full process on non-code parts |
 | Non-development | General questions, analysis, writing, conversation, brainstorming without implementation | Respond directly. Plugin stays SILENT — do NOT impose process |
 
@@ -71,6 +74,7 @@ Before applying any development skill, classify the task. This is not optional.
 - Technical verbs ("implement", "add feature", "fix bug", "refactor") → development
 - Questions about code without change requests ("how does X work?") → non-development, just answer
 - "Build me a..." or "Create a..." → development, but check if brainstorming is needed first
+- Agent/prompt/skill/MCP/system-prompt mentioned, or "make the agent...", "write a prompt", "design the pipeline" → agentic work → Section 6.5 applies on top of the normal pipeline
 - Mixed signals → ask the user: "This could go a few ways — are you looking for me to implement this, or just discuss the approach?"
 
 **When uncertain → ask.** One clarifying question saves more time than running the wrong pipeline.
@@ -118,12 +122,18 @@ Every development task follows one of three pipelines. Choose based on scope and
 
 | Pipeline | Criteria | Steps |
 |----------|----------|-------|
-| **Lightweight** | < 3 files, no business logic, mechanical changes | Implement → tsc/lint → done |
-| **Standard** | 3-8 files, moderate logic, single-module | Plan (brief) → Branch → Implement → Single Review (code-reviewer) → Test → Commit → Merge |
+| **Lightweight** | < 3 files AND **zero logic** — purely mechanical (rename, typo, import, comment, formatting, string/const tweak with no behavior change) | Implement → tsc/lint → done. **No review only because there is nothing to reason about.** |
+| **Standard** | 3-8 files, moderate logic, single-module — OR **any change that touches logic** | Plan (brief) → Branch → Implement → **Review (code-reviewer always; + devils-advocate for non-trivial logic — see note)** → Fix → Test → Commit → Merge |
 | **Full** | Cross-module, user-facing, complex business logic | See Full Pipeline below |
 | **Full + Architecture** | New module, structural change, dependency changes | Full Pipeline + architecture-guard + doc-agent |
 
-**Pipeline escalation:** If you start lightweight and discover the change is more complex than expected — STOP and escalate to full. Do not continue lightweight "because you already started."
+**The logic line is the hard boundary, and review weight scales with it.** Lightweight is reserved for changes where there is genuinely nothing to reason about. The moment a change alters behavior — a condition, a calculation, control flow, an API shape, a data transformation — it gets reviewed:
+- **Any logic change** → at least **code-reviewer**. No exceptions. "It's a one-line logic fix" is exactly the change that ships bugs unreviewed.
+- **Non-trivial logic** (multi-file, branching/edge-case-heavy, touches a contract or shared state, or anything you are not 100% sure about) → **also devils-advocate**, in parallel.
+
+This calibration is deliberate: a single isolated one-line fix does not need an adversarial challenger, but it does need a reviewer; substantial logic needs both. When unsure whether something counts as logic, it counts. When unsure whether logic is "non-trivial," add devils-advocate.
+
+**Pipeline escalation:** If you start lightweight and discover the change touches logic or is more complex than expected — STOP and escalate to Standard (or Full). Do not continue lightweight "because you already started."
 
 **Pipeline shortcuts:** The user can say "skip review" or "just do it" to bypass gates. Honor this — they are the leader. But log that gates were skipped.
 
@@ -176,12 +186,12 @@ Dispatch both in a single message. Collect findings, address critical ones befor
 
 ### Lightweight Pipeline
 
-For lightweight tasks (< 3 files, no logic), the pipeline is:
+For lightweight tasks (< 3 files, **zero logic** — purely mechanical), the pipeline is:
 1. Implement (you or developer agent)
 2. tsc/lint check
 3. Commit
 
-No review, no plan, no backup. If you discover it is more complex — escalate to Full.
+No review, no plan, no backup — justified ONLY because a mechanical change has nothing to reason about. The moment the change touches behavior (a condition, calculation, control flow, contract, data shape) it is no longer lightweight: **escalate to Standard** so at least code-reviewer sees it (and devils-advocate too if the logic is non-trivial — see Section 6 calibration). When unsure whether it is "logic," treat it as logic and escalate.
 
 ### Standard Pipeline
 
@@ -190,16 +200,40 @@ For moderate tasks (3-8 files, business logic, but single-module scope):
 2. Create feature branch (`git checkout -b feat/xxx`)
 3. Implement (you or developer agent)
 4. tsc/lint check
-5. Single review (code-reviewer); optionally add `gpt-code-reviewer` in parallel when Codex is available (see `claude-subteams:cross-review`)
+5. Review: **code-reviewer** (correctness, SOLID, security) — always. For non-trivial logic (multi-file, branching, touches a contract/shared state, or any uncertainty), **also devils-advocate** in parallel — dispatch both in one message. Optionally add `gpt-code-reviewer` when Codex is available (see `claude-subteams:cross-review`)
 6. Fix critical findings
 7. Run tests
 8. Commit and merge to main
 
-No brainstorming, no plan defense, no triple review, no backup tag. If you discover it is more complex — escalate to Full.
+No brainstorming, no plan defense, no architecture-guard, no backup tag — but review is NOT optional. Every logic change gets at least code-reviewer; non-trivial logic also gets devils-advocate. If you discover it is more complex — escalate to Full.
 
 ### Branch Rule
 
 **main = production. Always deployable.** All development happens in feature branches. Merge to main only after pipeline passes. For parallel subagent work, use git worktrees.
+
+### 6.5 Agentic & Prompt Work (required-by-default specialist wiring)
+
+When the task is **building or editing agents, system prompts, skills, tool/function definitions, MCP servers, or multi-agent systems** (LLM-judge, RAG, orchestration), the normal pipeline still applies — AND the wiring below is layered on top. Treat it as a strong default, not red tape: agentic systems fail silently and expensively, and a prompt is code that ships untested if you skip evaluation.
+
+1. **Load the agentic skills** — `agent-engineering` (system design: boundaries, orchestration, context engineering, token efficiency), `subagent-prompt-design` (tool scoping, context minimization, output contract), and `prompt-evaluation` (validation). For agentic work these are **core, not specialist** — they do not count against the 3-skill cap in Section 5.
+2. **Dispatch specialists by sub-task — not all at once.** Match the specialist to what the work actually touches, so you stay within the 3-subagent awareness cap (Critical Rule 2):
+   - **agent-architect** — ONLY when a new subagent or multi-agent **system** is created or its topology restructured (who exists, boundaries, tools, models, contracts). For a routine prompt edit on an existing agent, you do NOT need the architect — the orchestrator already holds the `agent-engineering` rulebook. This keeps the architect from firing on every small change.
+   - **prompt-engineer** — when prompt/system-prompt wording or structure is written or materially changed. The default specialist for prompt work.
+   - **prompt-evaluator** — validates the result against happy/edge/adversarial/minimal inputs. Runs before shipping any new or changed prompt/agent.
+3. **Author → Evaluate → Iterate** (sequential, so it does not blow the subagent cap): architect/engineer produce → evaluator measures → fix regressions → re-run. NEVER ship a new or edited prompt/agent without an evaluation pass — an unevaluated prompt is an untested code change.
+4. **Division of labour:** agent-architect owns structure and topology (system-level only); prompt-engineer owns wording; prompt-evaluator owns proof. The skill (`agent-engineering`) is the rulebook the orchestrator always holds; the architect is a fresh-context specialist for when a real design problem warrants one.
+
+**Enforcement is honest:** the `user-prompt-check` hook surfaces agentic work with a (non-blocking) advisory, and these rules are methodology the orchestrator is expected to follow — there is no hard gate that blocks an unevaluated prompt. Skipping the specialists on substantive agentic work is a process failure (Section 13), the same way skipping code review on a logic change is — but the discipline is yours to keep.
+
+### 6.6 Change Verification — every pipeline above Lightweight
+
+Before you declare work done or commit, confirm with EVIDENCE that the required gates actually ran — do not trust your own memory of the process any more than you trust a subagent's report.
+
+1. Run `claude-subteams:verification-gate` — evidence before assertions.
+2. Confirm, with real output (not claims): the required review(s) ran and critical/important findings were addressed; tsc/lint/tests are actually green (paste/observe the output); docs were updated per `doc-quality-gate`.
+3. If any required gate was skipped (e.g. user said "skip review"), state that explicitly in your summary — never let a skipped gate read as a passed one.
+
+The pipeline only protects you if it actually ran. A green checkbox you cannot show evidence for is not green. This is self-attestation, not an external control — which is exactly why it must rest on observable output (command results, review findings) and not on your recollection that "it passed."
 
 ## 7. Dynamic User Interviewing
 
@@ -349,6 +383,9 @@ These are the rationalizations that lead to broken software. When you catch your
 | "The user won't notice this shortcut" | The user will notice when it breaks in production. Your job is quality, not speed. | Do it right. If it takes longer, it takes longer. |
 | "I agreed to A but it's hard, I'll do B instead" | You committed to a specific approach. Silently switching is deception — even if B seems equivalent. The user agreed to A, not B. | STOP. Tell the user: "I committed to X but discovered Y. Options: ..." Let THEM decide. |
 | "I'll handle it myself to not bother them" | The user WANTS to know about significant blockers and decisions. Autonomy on execution details is fine; autonomy on agreed plans is not. | Escalate. State the problem, present options, let the user decide. |
+| "It's just a one-line logic fix, skip review" | One-line logic changes are where bugs hide precisely because they look harmless. | Any logic change gets code-reviewer at minimum; non-trivial logic also gets devils-advocate (Section 6). |
+| "I'll just tweak the agent's prompt directly" | Prompts are code. An unevaluated prompt edit is an untested change that fails silently in production. | Apply Section 6.5: prompt-engineer authors, prompt-evaluator validates before shipping. |
+| "The review passed" (no output shown) | You are recalling the process, not proving it. Memory of a gate is not evidence it ran. | Show the evidence (Section 6.6 / verification-gate). No output = not done. |
 
 ## 13. Critical Rules
 
@@ -374,6 +411,9 @@ These are non-negotiable. Violating any of these is a process failure.
 18. **MUST** create backup tag before Full pipeline implementation (Step 4). Delete backup after successful merge (Step 12).
 19. **NEVER** silently substitute an agreed approach. If you committed to doing X and discover you cannot, or it is harder than expected — STOP and tell the user before doing anything else. Present the obstacle and realistic options. Let the user decide. Doing a different thing and presenting it as equivalent is a trust violation.
 20. **MUST** escalate to the user when facing blockers, impossible constraints, or decisions outside your authority (Section 9, Orchestrator Self-Escalation). Do not make autonomous decisions on agreed plans to "not bother" the user.
+21. **MUST** review every logic change. Lightweight is for zero-logic mechanical edits only; the moment behavior changes, run code-reviewer at minimum, plus devils-advocate for non-trivial logic (Section 6 calibration). "It's a small logic fix" is not an exemption from review.
+22. **MUST** apply Section 6.5 to agentic/prompt work. Building or editing agents, system prompts, skills, tool definitions, or multi-agent systems requires agent-engineering + subagent-prompt-design + prompt-evaluation and a prompt-evaluator pass. NEVER ship an unevaluated prompt or agent.
+23. **MUST** verify the process ran with evidence before declaring done (Section 6.6). A gate you cannot show output for did not happen. Skipped gates are stated explicitly, never presented as passed.
 
 ## 14. Instruction Hierarchy
 

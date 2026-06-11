@@ -13,8 +13,11 @@ if [ -z "$PROMPT" ]; then
   exit 0
 fi
 
+# Agentic/prompt patterns — checked first (a more specific subtype of dev work)
+if printf '%s\n' "$PROMPT" | grep -qiE 'system prompt|prompt engineer|agentic|sub-?agent|multi-?agent|mcp server|tool (definition|schema)|llm[ -]?judge|rag pipeline|(build|create|design|edit|write|improve|optimi[sz]e)( an?| the| this)? (agent|prompt|skill)s?\b'; then
+  echo "[subteams:scope] Agentic/prompt work detected — apply using-subteams Section 6.5: agent-architect (design) / prompt-engineer (authoring) / prompt-evaluator (validation)."
 # Dev patterns — compound phrases that clearly indicate development work
-if printf '%s\n' "$PROMPT" | grep -qiE 'fix (the |a |this )?bug|implement\s+\w|refactor|write tests?|deploy to|run build|add (endpoint|feature|component)|create (api|migration|service)|git (commit|push|merge|branch)|code review|pull request'; then
+elif printf '%s\n' "$PROMPT" | grep -qiE 'fix (the |a |this )?bug|implement\s+\w|refactor|write tests?|deploy to|run build|add (endpoint|feature|component)|create (api|migration|service)|git (commit|push|merge|branch)|code review|pull request'; then
   echo "[subteams:scope] Development task detected."
 elif printf '%s\n' "$PROMPT" | grep -qiE 'design (the |a )?ui|mockup|layout|style (the |a )'; then
   echo "[subteams:scope] Design task detected."

@@ -113,8 +113,9 @@ After install, add this snippet to your project's `CLAUDE.md` (or global `~/.cla
 
 For development tasks use the claude-subteams plugin (orchestrator + specialized sub-team agents).
 Invoke skill "claude-subteams:using-subteams" before significant development work.
-For small fixes — act directly, invoke code-review after if logic changed.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate.
+For small fixes — act directly, invoke code-review after if logic changed. Any logic change gets code-reviewer (and devils-advocate for non-trivial logic) — no "it's just one line" exemption.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect.
+Building/editing agents, prompts, skills, or multi-agent systems → invoke agent-architect + prompt-engineer + prompt-evaluator (using-subteams Section 6.5).
 ```
 
 This is also available as a file: `templates/claudemd-snippet.md`.
@@ -130,7 +131,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | core | `model-selection` | Guide for choosing sonnet vs opus per task type. |
 | architecture | `clean-architecture` | Enforces layered architecture, dependency direction, and file size limits. |
 | architecture | `conventions-enforcer` | Validates project structure against CONVENTIONS.md. |
-| scaffolding | `project-scaffold` | Run-once wizard that bootstraps a brand-new project's doc/config skeleton (CLAUDE.md, SYSTEM.md, docs tree, .gitignore). Complements the component-level `scaffolding` skill. |
+| scaffolding | `project-scaffold` | Bootstraps a new project's doc/config skeleton (CLAUDE.md, SYSTEM.md, docs tree, .gitignore) — OR retrofits the missing docs into an existing project (non-destructive). Complements the component-level `scaffolding` skill. |
 | design | `design-to-code` | Pipeline from text spec to working code with browser preview and feedback loop. |
 | design | `design-qa` | Compares implementation against design spec; heuristic evaluation and visual consistency. |
 | ops | `ci-cd-pipeline` | Sets up and modifies CI/CD pipelines and environment promotion strategies. |
@@ -156,12 +157,14 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | `doc-agent` | sonnet | Documentation freshness checks and updates. Write access, no Bash. |
 | `researcher` | opus | Deep technology research. Read + web (WebSearch, WebFetch). |
 | `security-auditor` | opus | Security-sensitive changes, secrets, and auth flows. Read-only access. |
-| `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline only. |
+| `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline + Standard (every logic change). |
 | `developer` | sonnet | Implementation specialist: modular code, minimal diffs, style preservation. |
 | `ui-tester` | sonnet | Browser-based UI/E2E testing via Playwright CLI. Screenshots, interactions, visual regression. |
 | `improvement-agent` | opus | Proactive codebase analyst. Finds improvement opportunities, returns prioritized proposals (read-only). |
 | `gpt-code-reviewer` | sonnet (+Codex/GPT-5.5) | Cross-model code review via `codex exec`. Finds bug classes Claude-family models under-weight. Read-only; graceful-skips if Codex unavailable. |
 | `gpt-devils-advocate` | sonnet (+Codex/GPT-5.5) | Cross-model architectural challenge via `codex exec`. Different training distribution than Claude. Read-only; graceful-skip. |
+| `prompt-engineer` | opus | Authors and optimizes prompts, system prompts, and tool/skill instructions. Context-first, eval-driven. Read + write. |
+| `agent-architect` | opus | Designs subagents and multi-agent systems: boundaries, orchestration, tool scoping, contracts. Read + write. |
 
 ## Hooks
 

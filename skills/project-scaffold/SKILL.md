@@ -1,22 +1,25 @@
 ---
 name: project-scaffold
-description: "Bootstrap an empty/new directory into a project skeleton (docs, CLAUDE.md, .gitignore, README) — use only when no source files exist yet."
+description: "Bootstrap an empty directory into a project skeleton (docs, CLAUDE.md, .gitignore, README) — OR retrofit the missing documentation set into an existing project that lacks it. Two modes: Init (empty dir) and Retrofit (existing project, weak/missing docs)."
 ---
 
 # Project Scaffold
 
 ## 1. Overview
 
-1. This skill creates the full documentation and project-skeleton scaffold for a brand-new project.
+1. This skill creates and maintains the documentation skeleton for a project. It has **two modes**:
+   - **Init mode** — bootstrap a brand-new project from an empty directory (Sections 3-4).
+   - **Retrofit mode** — fill the missing documentation set into an EXISTING project that already has source code but lacks proper docs (Section 8).
 2. It covers: `CLAUDE.md`, `README.md`, `.gitignore`, `docs/SYSTEM.md`, `docs/CONVENTIONS.md`, `docs/ARCHITECTURE.md`, `docs/BACKLOG.md`, `docs/CHANGELOG.md`, and the `docs/plans/` + `docs/specs/` + `docs/adr/` directory seeds.
-3. It does NOT scaffold source-code components (services, modules, endpoints, agents). Use the `scaffolding` skill for that after initialization.
+3. It does NOT scaffold source-code components (services, modules, endpoints, agents). Use the `scaffolding` skill for that.
+4. **Init vs Retrofit is decided by the safety check (Step 2):** an empty/benign-only directory → Init; a directory with source files → Retrofit (never Init, which would misroute existing work).
 
 ## 2. When to Use
 
-1. User says: "new project", "bootstrap project", "/init-project", "init project", "empty repo", "create project skeleton".
-2. The target directory does not yet exist, or it exists but contains only benign pre-existing files (see Step 2 allowlist).
-3. NEVER invoke this skill when a project already has source files — use `scaffolding` instead.
-4. If the target directory has no source files yet, this skill creates the skeleton; then use `scaffolding` for components.
+1. **Init mode** — user says: "new project", "bootstrap project", "/init-project", "init project", "empty repo", "create project skeleton"; AND the target directory is empty or contains only benign pre-existing files (Step 2 allowlist).
+2. **Retrofit mode** — user says: "the docs are a mess", "no documentation here", "add the docs", "set up docs for this project", "retrofit docs", "this project has no CLAUDE.md/SYSTEM.md"; OR the `session-start` hook flagged that a project with source files is missing most of the standard doc set; AND the project already contains source files.
+3. NEVER run **Init mode** on a project that already has source files — it is for empty dirs only. Use Retrofit mode instead.
+4. For adding source-code components (services, modules, endpoints), use the `scaffolding` skill — that is orthogonal to both modes here.
 
 ## 3. Wizard Flow
 
@@ -49,14 +52,13 @@ description: "Bootstrap an empty/new directory into a project skeleton (docs, CL
 15. **License** — e.g. MIT, Apache-2.0, proprietary; becomes `<LICENSE>`.
 16. **Target directory** — absolute path where the scaffold will be written.
 
-### Step 2 — Safety check (HARD prerequisite)
+### Step 2 — Safety check + mode routing (HARD prerequisite)
 
 1. Run `ls -A <target>` to list all files including dotfiles.
-2. If the directory does not exist or the listing is empty — proceed.
-3. If the listing contains ONLY files from this allowlist — proceed (never clobber them; skip writing if the file exists, or write `README.scaffold.md` instead of `README.md` and tell the user):
+2. If the directory does not exist or the listing is empty — proceed with **Init mode** (this wizard, Steps 3-4).
+3. If the listing contains ONLY files from this allowlist — proceed with **Init mode** (never clobber them; skip writing if the file exists, or write `README.scaffold.md` instead of `README.md` and tell the user):
    - `.git/`, `.gitignore`, `LICENSE`, `LICENSE.md`, `README.md`, `.github/`, `.DS_Store`
-4. If ANY file outside the allowlist is present — ABORT. Report exactly which files blocked the scaffold. Do not write anything.
-   Blockers include but are not limited to: `package.json`, `pyproject.toml`, `go.mod`, `src/`, `*.ts`, `*.py`, `*.go`, any source or config file.
+4. If ANY file outside the allowlist is present (`package.json`, `pyproject.toml`, `go.mod`, `src/`, `*.ts`, `*.py`, `*.go`, any source or config file) — this is an EXISTING project. Do NOT run Init mode (it would misroute existing work). Switch to **Retrofit mode (Section 8)**, which adds only the missing docs without ever clobbering existing files.
 
 ### Step 3 — Create output structure
 
@@ -87,9 +89,10 @@ Create files in this exact order, substituting all gathered placeholder values:
 
 ## 4. Relationship to `scaffolding` Skill
 
-1. **project-scaffold** — use once, at project start, to create the documentation and config skeleton for a whole new project.
-2. **scaffolding** — use repeatedly, for adding components (service, module, endpoint, skill, agent) INTO an already-initialized project.
-3. These skills are complementary and non-overlapping. Never use project-scaffold on an existing project. Never use scaffolding to create the initial project skeleton.
+1. **project-scaffold (Init mode)** — use once, at project start, to create the documentation and config skeleton for a whole new project.
+2. **project-scaffold (Retrofit mode)** — use on an existing project that has source code but lacks proper docs, to fill the gaps without clobbering anything.
+3. **scaffolding** — use repeatedly, for adding source components (service, module, endpoint, skill, agent) INTO an already-initialized project.
+4. These skills are complementary and non-overlapping. project-scaffold owns the documentation skeleton (create OR retrofit); scaffolding owns source components. Never use scaffolding to create or repair the documentation skeleton.
 
 ## 5. Red Flags
 
@@ -100,6 +103,8 @@ Create files in this exact order, substituting all gathered placeholder values:
 | Inventing a new template structure | Creates divergence from maintained templates | Always copy from `templates/` and `templates/project-init/` |
 | Leaving `<PLACEHOLDER>` values not listed in Step 4 | Broken docs that mislead future contributors | List every unfilled placeholder explicitly |
 | Skipping `docs/plans/active` or `docs/plans/completed` | Breaks backlog references in CLAUDE.md and BACKLOG.md | Always create both subdirs |
+| Overwriting a populated `CLAUDE.md`/`README.md` during retrofit | Destroys real project knowledge | Retrofit only fills gaps; never clobber content (Section 8) |
+| Running Init mode on a repo with source files | Misroutes existing work, may clobber | Route to Retrofit mode (Step 2 → Section 8) |
 
 ## 6. Critical Rules
 
@@ -107,9 +112,10 @@ Create files in this exact order, substituting all gathered placeholder values:
 2. NEVER abort for benign pre-existing files (`.git/`, `.gitignore`, `LICENSE`, `README.md`, `.github/`, `.DS_Store`) — skip or rename, never clobber.
 3. ALWAYS reuse templates from `templates/` and `templates/project-init/` — do not invent new structure.
 4. MUST substitute every placeholder for which a value was gathered; any placeholder with no gathered value MUST be explicitly listed in Step 4 so the user completes it.
-5. MUST create both `docs/plans/active/` and `docs/plans/completed/` directories.
-6. NEVER use this skill on a project that already contains source files.
-7. ALWAYS refer the user to `scaffolding` skill for component-level work after initialization.
+5. MUST create both `docs/plans/active/` and `docs/plans/completed/` directories (Init mode).
+6. In **Init mode**, NEVER run on a project that already contains source files — route to Retrofit mode (Section 8) instead.
+7. In **Retrofit mode**, NEVER overwrite or truncate an existing doc that has real content — only create absent files or replace empty/near-empty stubs, and ask before touching anything non-trivial.
+8. ALWAYS refer the user to `scaffolding` skill for source-component work.
 
 ## 7. Quick Reference
 
@@ -127,5 +133,44 @@ Create files in this exact order, substituting all gathered placeholder values:
 | `docs/plans/active/` | (empty, `.gitkeep`) |
 | `docs/plans/completed/` | (empty, `.gitkeep`) |
 | `docs/specs/` | (empty, `.gitkeep`) — `brainstorming` writes specs here |
+
+## 8. Retrofit Mode (existing project, missing/weak docs)
+
+Use when a project already has source code but its documentation is missing, sparse, or stub-only. Retrofit is **additive and non-destructive** — it never overwrites real content. New projects are not the only ones that lack docs; this mode brings an existing codebase up to the documentation baseline.
+
+### Step R1 — Audit the existing doc set
+
+1. Run `ls -A <target>` and check `docs/`. For each file in the standard set (Section 7 Quick Reference), classify it as:
+   - **Present & substantive** — exists with real content → LEAVE UNTOUCHED.
+   - **Stub** — missing, empty, or near-empty (< ~5 non-boilerplate lines, or only an unfilled template) → candidate to fill.
+2. Read each present-but-thin doc before judging — do not assume from filename. A short but real `README.md` is substantive; an autogenerated empty one is a stub.
+3. Produce a gap report: which standard docs are missing, which are stubs, which are fine. Show it to the user before writing anything.
+
+### Step R2 — Infer real values (do not invent)
+
+1. Derive `<PROJECT_NAME>`, `<STACK>`, `<FRAMEWORKS>`, `<DATABASE>`, commands, etc. from the actual repo: `package.json`/`pyproject.toml`/`go.mod`, lockfiles, existing scripts, README fragments, source layout.
+2. For anything not inferable with confidence, leave the `<PLACEHOLDER>` and list it for the user — NEVER fabricate architecture, goals, or commands the code does not show.
+3. For `SYSTEM.md`/`ARCHITECTURE.md`, describe only what the code actually demonstrates; mark unknowns as "TBD — confirm with maintainer."
+
+### Step R3 — Fill gaps only (non-destructive write)
+
+1. Create ONLY the missing or stub files, from the same templates as Init mode (Section 7).
+2. NEVER overwrite or truncate a substantive existing doc. If a doc is thin but has real content, propose additions as a diff and ask before applying.
+3. If a file exists as a real doc but in the wrong place (e.g. `CHANGELOG.md` at root vs `docs/`), do not move it silently — note it in the gap report and ask.
+4. Create any missing `docs/plans/{active,completed}/`, `docs/specs/`, `docs/adr/` seeds (these are safe — empty dirs).
+
+### Step R4 — Confirm and summarize
+
+1. Print what was created vs left untouched vs flagged-for-user.
+2. List every unfilled `<PLACEHOLDER>` for the user to complete.
+3. **If `docs/SYSTEM.md` or `docs/ARCHITECTURE.md` were generated, a `doc-agent` audit pass against the actual code is REQUIRED before they count as done** — these two files describe architecture and are the ones a model is most tempted to narrate plausibly-but-wrongly. A confidently wrong architecture doc is worse than no doc: future sessions read it as ground truth. Other generated docs (BACKLOG, CHANGELOG, CONVENTIONS) get an optional `doc-agent` audit; `decision-context` applies going forward.
+
+### Retrofit Critical Rules
+
+1. NEVER overwrite or truncate a doc with real content. Gaps-only.
+2. NEVER fabricate facts the code does not support — leave placeholders and flag them. For SYSTEM.md/ARCHITECTURE.md, describe ONLY what the code demonstrably shows; everything else is "TBD — confirm with maintainer."
+3. ALWAYS show the gap report and get the go-ahead before writing ANY file — not only borderline ones.
+4. When a doc is borderline (thin but real), ask — do not decide to overwrite for the user.
+5. A generated `SYSTEM.md`/`ARCHITECTURE.md` is NOT done until a `doc-agent` audit has checked it against the real code (Step R4.3).
 
 Related skills: `brainstorming` + `writing-plans` (the spec → plan next step), `scaffolding`, `claudemd-engineering`, `decision-context`, `conventions-enforcer`.
