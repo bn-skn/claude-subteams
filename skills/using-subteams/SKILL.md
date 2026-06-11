@@ -1,7 +1,7 @@
 ---
 name: using-subteams
 description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, planning architecture, or building/editing agents, prompts, skills, and multi-agent systems."
-version: 1.7.0
+version: 1.8.0
 ---
 
 # Using Subteams — Orchestrator Meta-Skill
@@ -125,7 +125,7 @@ Every development task follows one of three pipelines. Choose based on scope and
 | **Lightweight** | < 3 files AND **zero logic** — purely mechanical (rename, typo, import, comment, formatting, string/const tweak with no behavior change) | Implement → tsc/lint → done. **No review only because there is nothing to reason about.** |
 | **Standard** | 3-8 files, moderate logic, single-module — OR **any change that touches logic** | Plan (brief) → Branch → Implement → **Review (code-reviewer always; + devils-advocate for non-trivial logic — see note)** → Fix → Test → Commit → Merge |
 | **Full** | Cross-module, user-facing, complex business logic | See Full Pipeline below |
-| **Full + Architecture** | New module, structural change, dependency changes | Full Pipeline + architecture-guard + doc-agent |
+| **Full + Architecture** | New module, structural change, dependency changes, **greenfield** | Full Pipeline + architecture-guard + doc-agent. **Architecture-capture gate (Rule 24):** before IMPLEMENT, `ARCHITECTURE.md`/`CONVENTIONS.md` must be populated via the `brainstorming` capture flow — `scripts/check-arch-docs.sh` passes AND every non-obvious choice traces to an ADR. |
 
 **The logic line is the hard boundary, and review weight scales with it.** Lightweight is reserved for changes where there is genuinely nothing to reason about. The moment a change alters behavior — a condition, a calculation, control flow, an API shape, a data transformation — it gets reviewed:
 - **Any logic change** → at least **code-reviewer**. No exceptions. "It's a one-line logic fix" is exactly the change that ships bugs unreviewed.
@@ -144,6 +144,9 @@ This calibration is deliberate: a single isolated one-line fix does not need an 
 2. PLAN           → Write implementation plan (writing-plans skill)
 3. DEFEND PLAN    → Devils-advocate + architecture-guard review the plan in parallel
 4. BACKUP         → git tag backup/pre-<feature>-$(date +%s)
+4.5 ARCH GATE     → [greenfield / structural only — Rule 24] ARCHITECTURE.md + CONVENTIONS.md
+                    populated via brainstorming capture; `scripts/check-arch-docs.sh` exits 0
+                    AND every non-obvious choice traces to an ADR. Block IMPLEMENT until green.
 5. IMPLEMENT      → Developer agent writes code (dispatched via executing-plans or subagent-driven-dev)
    └── Per task:  developer implements → tsc check → (orchestrator reviews before commit)
 6. TRIPLE REVIEW  → Three reviewers in parallel:
@@ -165,6 +168,11 @@ This calibration is deliberate: a single isolated one-line fix does not need an 
 - **architecture-guard**: checks structural decisions, dependency direction, naming, fit with existing architecture ("this violates the dependency graph", "this pattern doesn't match the project")
 
 Dispatch both in a single message. Collect findings, address critical ones before proceeding to implementation.
+
+**Step 4.5 (Architecture-Capture Gate)** applies ONLY to greenfield and non-trivial structural work (new module, new layer, dependency-direction change, new external integration — Critical Rule 24 defines the exact scope). For those tasks, structural implementation does NOT begin until both hold:
+- `scripts/check-arch-docs.sh <project-dir>` exits 0 — `docs/ARCHITECTURE.md` and `docs/CONVENTIONS.md` carry no stub markers (the sentinel `> STATUS: TEMPLATE — not yet populated`, `<PLACEHOLDER>`, `<STACK>`, etc. are gone).
+- Every non-obvious architectural choice in those docs traces to an ADR (`## Decision Records` lists them) or is explicitly `**TBD — unresolved**` — never invented.
+The docs are populated by the orchestrator in-context during `brainstorming` (Architecture Capture section), NOT by a subagent. This gate is invoked inside the pipeline, not as a global commit hook — it must NOT fire on logic-only features, bug fixes, or in-module refactors. If the task is not greenfield/structural, skip this step entirely.
 
 **Step 6 (Triple Review)** runs three agents IN PARALLEL after implementation:
 - Dispatch all three in a single message (one Agent call per reviewer)
@@ -414,6 +422,7 @@ These are non-negotiable. Violating any of these is a process failure.
 21. **MUST** review every logic change. Lightweight is for zero-logic mechanical edits only; the moment behavior changes, run code-reviewer at minimum, plus devils-advocate for non-trivial logic (Section 6 calibration). "It's a small logic fix" is not an exemption from review.
 22. **MUST** apply Section 6.5 to agentic/prompt work. Building or editing agents, system prompts, skills, tool definitions, or multi-agent systems requires agent-engineering + subagent-prompt-design + prompt-evaluation and a prompt-evaluator pass. NEVER ship an unevaluated prompt or agent.
 23. **MUST** verify the process ran with evidence before declaring done (Section 6.6). A gate you cannot show output for did not happen. Skipped gates are stated explicitly, never presented as passed.
+24. **MUST** gate greenfield and non-trivial structural work on populated architecture docs (Full Pipeline Step 4.5). Before structural IMPLEMENT, `docs/ARCHITECTURE.md` + `docs/CONVENTIONS.md` must be populated via the `brainstorming` capture flow — `scripts/check-arch-docs.sh` passes AND every non-obvious choice traces to an ADR (or is `**TBD — unresolved**`, never invented). **Scope is strict:** greenfield (new project) and non-trivial structural changes ONLY — a new module, a new layer, a dependency-direction change, or a new external integration. This rule does NOT apply to logic-only features, bug fixes, in-module refactors, UI tweaks, or any change that leaves the module boundaries and dependency graph intact. Applying it to small changes is bureaucracy, not safety. The orchestrator populates the docs in-context — never a fresh-context subagent, which would fabricate decisions it never witnessed.
 
 ## 14. Instruction Hierarchy
 

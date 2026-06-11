@@ -10,6 +10,7 @@
 - [ ] Add CONVENTIONS.md to claudebot project
 
 ## Ideas
+- **Architecture-doc tripwire at read time (follow-up to v1.18.0).** The arch-capture gate (Rule 24) only fires in the Full+Architecture pipeline. A greenfield "just do it" routes to Lightweight/Standard, skips brainstorming, and ships a stub `ARCHITECTURE.md` with no gate — then a later session's `architecture-guard` reads the unpopulated template as truth (deferred empty-truth). Consider: `architecture-guard` (or the session-start hook) flags when it is about to treat a stub arch doc (sentinel still present) as ground truth.
 - Publish to Claude Code plugin marketplace (when stable)
 - Add skill manifest to plugin.json for better discovery
 - Merge overlapping skills (orchestrator-briefing + subagent-prompt-design + agent-engineering → one skill)

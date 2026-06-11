@@ -80,6 +80,17 @@ BEFORE marking work complete, verify documentation is current:
 
 **Stale docs are bugs.** Treat them as blockers.
 
+## Architecture-Doc Check (structural / greenfield work only)
+
+For greenfield projects and non-trivial structural changes (new module, new layer, dependency-direction change, new external integration), the architecture docs are load-bearing state — `architecture-guard` reads them as truth. Before claiming structural work is ready to implement or done, verify they are actually populated, with EVIDENCE, not on your word:
+
+1. **Run** `scripts/check-arch-docs.sh <project-dir>` and read the exit code. Exit 0 = `docs/ARCHITECTURE.md` and `docs/CONVENTIONS.md` carry no stub markers; exit 1 = stub markers remain (the script prints which marker/file failed).
+2. **Paste the actual output** (or the non-zero failure lines) as evidence. "The docs are filled in" without the script output is a claim, not verification — the whole point of this skill.
+3. **Confirm provenance.** Spot-check that non-obvious architectural choices in `ARCHITECTURE.md` trace to an ADR (`## Decision Records`) or are marked `**TBD — unresolved**`. A doc that passes the marker scan but states an invented architecture is worse than a stub.
+4. **Scope:** this check applies to structural/greenfield work ONLY — skip it for logic-only features, bug fixes, and in-module refactors. Do not run it on every task.
+
+**A stub architecture doc that ships as "done" poisons every future session that reads it.** The mechanical check is cheap; the cost of authoritative-looking fiction is not.
+
 ## Visual Verification (when the output is visual)
 
 Compilation and tests prove code RUNS — not that it LOOKS right. When the work produced a visual artifact — a UI page, component, landing page, rendered diagram, generated image, chart, or any human-facing layout — verification MUST include looking at it, whenever a way to see it exists.
@@ -103,6 +114,7 @@ This catches what `tsc` and unit tests never will: the thing renders without err
 | No regressions | Full test suite: all pass | Running only new tests |
 | Requirements met | Line-by-line checklist | Tests passing |
 | Agent completed | VCS diff shows changes | Agent reports "success" |
+| Arch docs populated (structural work) | `check-arch-docs.sh` exit 0 + output shown; choices trace to ADRs | "I filled them in", template still has stub markers |
 | UI intact | Screenshot comparison: no visual regressions | tsc passes, unit tests pass |
 | Visual artifact looks good | Screenshot viewed + judged: aligned, readable, polished | "compiles" / "no regressions" (regression-free can still look broken) |
 

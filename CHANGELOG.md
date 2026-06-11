@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.18.0] - 2026-06-11
+
+### Added
+- **Architecture capture → projection → mechanical gate.** Closes the gap where architectural decisions made during `brainstorming` never landed in `docs/ARCHITECTURE.md`/`docs/CONVENTIONS.md` — those files stayed template stubs while structural work proceeded against them. New flow: each accepted architectural decision is captured **during the interview** as an ADR (`adr-tracker`) + a `decision-context` block; then the orchestrator, **in-context** (it holds the dialogue — never a fresh-context subagent), projects those records into `ARCHITECTURE.md` + `CONVENTIONS.md` with ADR provenance links. Unresolved items are marked `**TBD — unresolved**`, never invented. NO new agent — the fix is capture semantics + a mechanical gate, not labor. (Two adversaries, Claude `devils-advocate` + cross-model `gpt-devils-advocate`, converged: a fresh-context author reconstructing decisions from a lossy brief produces "authoritative-looking fiction", and these docs are load-bearing state `architecture-guard` reads as truth — so a wrong doc poisons the validator.)
+- **`scripts/check-arch-docs.sh`** — mechanical evidence script: scans `docs/ARCHITECTURE.md` + `docs/CONVENTIONS.md` for stub markers (sentinel `> STATUS: TEMPLATE — not yet populated`, `<PLACEHOLDER>`, `<STACK>`, etc.), exit 0 = populated, exit 1 = stub markers remain (prints which). Provides evidence, not self-attestation. (Authored under Task A.)
+- **using-subteams Full Pipeline Step 4.5 — Architecture-Capture Gate (Critical Rule 24).** Greenfield and non-trivial structural work does NOT enter IMPLEMENT until `check-arch-docs.sh` passes AND every non-obvious architectural choice traces to an ADR. **Scope is strict** — greenfield + new module / new layer / dependency-direction change / new external integration ONLY; NOT every Full-pipeline task, NOT logic-only features, bug fixes, or in-module refactors. Invoked inside the pipeline, never as a global commit hook — by design it does not fire on small changes (bureaucracy was the explicit failure mode the adversaries flagged). New `user-prompt-check` hook branch emits a `[subteams:scope]` advisory on greenfield/structural signals.
+
+### Changed
+- **brainstorming** — new "Architecture Capture" section + step-7 branch: capture-at-decision (ADR + decision-context block during the interview), then orchestrator in-context projection into the arch docs with provenance links; stub markers removed only once a section holds a real decision or `**TBD — unresolved**`. Capture at the moment of decision, never reconstruct later.
+- **project-scaffold** — Step 4 handoff now states explicitly that scaffolded `ARCHITECTURE.md`/`CONVENTIONS.md` are stubs that MUST be populated through the brainstorming capture flow before structural implementation; references `check-arch-docs.sh` and Rule 24.
+- **verification-gate** — new "Architecture-Doc Check" section + Common-Failures row: for structural/greenfield work, run `check-arch-docs.sh` and paste the output as evidence (not on your word); spot-check ADR provenance.
+- **using-subteams** — `Full + Architecture` pipeline row extended (greenfield + gate); skill version 1.7.0 → 1.8.0.
+
 ## [1.17.1] - 2026-06-11
 
 ### Fixed

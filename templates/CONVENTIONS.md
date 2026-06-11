@@ -1,5 +1,7 @@
 # Conventions
 
+> STATUS: TEMPLATE — not yet populated
+
 ## 1. File Structure
 
 ```
