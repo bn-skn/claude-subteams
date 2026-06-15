@@ -20,15 +20,15 @@ description: "Orchestrates parallel GPT + Claude critics to break model-monocult
 
 - **Default:** whatever model the Codex CLI is configured to use (`~/.codex/config.toml`). Both agent files do NOT pass `-m` unless `CROSS_REVIEW_MODEL` is set, so Codex uses its own configured default natively.
 - **Optional pin:** set `CROSS_REVIEW_MODEL=<model>` in the environment to lock a specific model for both agents at once, without any agent file edits.
-- **Effort:** always forced to `high` (`${CROSS_REVIEW_EFFORT:-high}`). Codex defaults to no effort; high effort is what makes cross-review valuable. Override with `CROSS_REVIEW_EFFORT=<level>` if needed.
+- **Effort:** resolved by precedence — `CROSS_REVIEW_EFFORT` env var if set, else a **top-level** `model_reasoning_effort` in your Codex config (`~/.codex/config.toml`), else a `high` fallback so cross-review never silently drops to Codex's shallow default. Set `CROSS_REVIEW_EFFORT=<level>` to override per run. Detection is a presence check, not a full TOML parse: an effort key scoped under a `[profile.*]`/`[model_providers.*]` section (rather than top-level) — or a config saved with a UTF-8 BOM — is not detected, so the `high` fallback applies. Set `CROSS_REVIEW_EFFORT` explicitly if you rely on a profile-scoped effort.
 
 ```
 # Optional overrides — only set these if you want to deviate from Codex CLI defaults
 CROSS_REVIEW_MODEL=<specific-model>   # pin a model; omit to use Codex CLI default
-CROSS_REVIEW_EFFORT=high              # override effort level; default is already high
+CROSS_REVIEW_EFFORT=high              # override effort; unset → Codex config, else high fallback
 ```
 
-**Why this matters:** Codex defaults to no reasoning effort, producing shallow reviews equivalent to a quick scan. High effort enables multi-step reasoning over the diff. Using any weaker configuration defeats the purpose of cross-review.
+**Why this matters:** Codex's bare default is no reasoning effort, producing shallow reviews equivalent to a quick scan. Cross-review reads the effort from your Codex config when present and falls back to `high` when neither the env var nor the config specify one — so it never silently degrades. High effort enables multi-step reasoning over the diff.
 
 **Severity normalization (apply when merging findings across model families):**
 
@@ -42,7 +42,7 @@ CROSS_REVIEW_EFFORT=high              # override effort level; default is alread
 | — | significant | **high** |
 | — | worth-considering | **medium** |
 
-**Maintenance note:** To upgrade the model, change the default in your Codex CLI config (`~/.codex/config.toml`) — the critics inherit it automatically; no plugin edit needed. Use `CROSS_REVIEW_MODEL` only to pin a specific model temporarily. Verify the new model works at high effort:
+**Maintenance note:** To upgrade the model, change the default in your Codex CLI config (`~/.codex/config.toml`) — the critics inherit it automatically; no plugin edit needed. Use `CROSS_REVIEW_MODEL` only to pin a specific model temporarily. The same applies to reasoning effort: set `model_reasoning_effort` at the top level of `~/.codex/config.toml` and the critics inherit it; cross-review injects a `high` fallback only when neither a top-level config key nor `CROSS_REVIEW_EFFORT` specify one (profile-scoped keys are not detected — see the effort note in Section 2). Verify the new model works at high effort:
 ```bash
 codex exec -c model_reasoning_effort=high -s read-only --skip-git-repo-check "Return your model name and reasoning effort level as JSON."
 ```
@@ -95,10 +95,15 @@ Use when Claude has been debugging a problem across multiple turns without resol
 ```bash
 MODEL_FLAG=()
 [ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
-EFFORT="${CROSS_REVIEW_EFFORT:-high}"
+# Reasoning-effort precedence: CROSS_REVIEW_EFFORT env > ~/.codex/config.toml > high fallback.
+EFFORT_FLAG=()
+if [ -n "${CROSS_REVIEW_EFFORT:-}" ]; then
+  EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")
+elif ! awk '/^[[:space:]]*\[/{exit} /^[[:space:]]*model_reasoning_effort[[:space:]]*=/{f=1} END{exit !f}' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null; then
+  EFFORT_FLAG=(-c model_reasoning_effort=high)
+fi
 
-codex exec "${MODEL_FLAG[@]}" \
-  -c model_reasoning_effort="$EFFORT" \
+codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   -s read-only \
   "<symptom description> — files: <list>. Diagnose the root cause and propose a concrete fix. You may read files in read-only sandbox."
 ```
@@ -127,10 +132,15 @@ SCHEMA
 
 MODEL_FLAG=()
 [ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
-EFFORT="${CROSS_REVIEW_EFFORT:-high}"
+# Reasoning-effort precedence: CROSS_REVIEW_EFFORT env > ~/.codex/config.toml > high fallback.
+EFFORT_FLAG=()
+if [ -n "${CROSS_REVIEW_EFFORT:-}" ]; then
+  EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")
+elif ! awk '/^[[:space:]]*\[/{exit} /^[[:space:]]*model_reasoning_effort[[:space:]]*=/{f=1} END{exit !f}' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null; then
+  EFFORT_FLAG=(-c model_reasoning_effort=high)
+fi
 
-codex exec "${MODEL_FLAG[@]}" \
-  -c model_reasoning_effort="$EFFORT" \
+codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   -s read-only \
   --output-schema "$SCHEMA_FILE" \
   -o "$OUTPUT_FILE" \
@@ -175,13 +185,13 @@ rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 
 ## 8. Critical Rules
 
-1. MUST invoke Codex with `-c model_reasoning_effort="${CROSS_REVIEW_EFFORT:-high}" -s read-only`. Pass `-m "$CROSS_REVIEW_MODEL"` only when `CROSS_REVIEW_MODEL` is set — never hardcode a model name; Codex uses its CLI-configured default when no `-m` flag is present.
-2. NEVER use Codex with default reasoning effort — it produces reviews equivalent to a quick scan.
+1. MUST invoke Codex with `-s read-only` and resolve reasoning effort by precedence — `CROSS_REVIEW_EFFORT` env > `model_reasoning_effort` in `~/.codex/config.toml` > `high` fallback (inject `-c model_reasoning_effort=high` only when both are absent). Pass `-m "$CROSS_REVIEW_MODEL"` only when `CROSS_REVIEW_MODEL` is set — never hardcode a model name; Codex uses its CLI-configured default when no `-m` flag is present.
+2. NEVER let Codex run at its bare default reasoning effort — the precedence chain (env → config → `high` fallback) guarantees at least `high`.
 3. ALWAYS run availability check before invoking Codex.
 4. NEVER block the main pipeline when Codex is unavailable.
 5. NEVER auto-resolve critical/blocking cross-model disagreements — escalate to human.
 6. NEVER run cross-review as a default commit gate.
-7. MUST change model/effort via `CROSS_REVIEW_MODEL` / `CROSS_REVIEW_EFFORT` env vars — never hardcode in individual agent files.
+7. MUST change model/effort via the Codex config (`~/.codex/config.toml`) or the `CROSS_REVIEW_MODEL` / `CROSS_REVIEW_EFFORT` env vars — never hardcode in individual agent files.
 8. NEVER allow Codex to write to the repository — read-only sandbox always.
 9. MUST cap review rounds at 1-2 — no Claude↔GPT debate loops.
 
