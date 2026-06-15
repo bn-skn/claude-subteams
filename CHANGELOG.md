@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.19.0] - 2026-06-15
+
+### Changed
+- **Cross-review reasoning effort is now config-driven with a `high` fallback** (was hard-forced to `high`). Precedence at every Codex invocation site: `CROSS_REVIEW_EFFORT` env var → a **top-level** `model_reasoning_effort` in `~/.codex/config.toml` (`$CODEX_HOME` honored) → `high` fallback. This makes effort symmetric to how model selection already works (`MODEL_FLAG`): the critics inherit a higher effort (e.g. `xhigh`) straight from the user's Codex config instead of being capped at `high`, while still guaranteeing at least `high` when neither the env var nor the config specify one — so cross-review never silently degrades to Codex's shallow bare default. Applied identically to all 5 invocation sites: `gpt-code-reviewer` (prompt + `review --base` modes), `gpt-devils-advocate`, and the `cross-review` skill's `/rescue` + generic escape-hatch blocks. Policy text, Critical Rules 1/2/7, the maintenance note, and both agents' output-contract Notes lines updated to match.
+  - **Detection is a presence check, not a full TOML parse** (an `awk` scan that stops at the first `[section]` header). Known limitation, documented in the skill: an effort key scoped under a `[profile.*]`/`[model_providers.*]` section — or a config saved with a UTF-8 BOM — is not detected and triggers the `high` fallback. Set `CROSS_REVIEW_EFFORT` explicitly if you rely on a profile-scoped effort. Reviewed by Claude `code-reviewer` + cross-model `gpt-code-reviewer` (which both flagged the original section-blind `grep`; narrowed to top-level `awk` in response). The empty-array-under-`set -u` exposure is pre-existing and identical to the established `MODEL_FLAG` idiom, so left consistent rather than diverged.
+
 ## [1.18.0] - 2026-06-11
 
 ### Added

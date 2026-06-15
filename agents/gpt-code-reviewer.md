@@ -73,10 +73,15 @@ OUTPUT_FILE=$(mktemp /tmp/gpt-review-out-XXXXXX.json)
 
 MODEL_FLAG=()
 [ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
-EFFORT="${CROSS_REVIEW_EFFORT:-high}"
+# Reasoning-effort precedence: CROSS_REVIEW_EFFORT env > ~/.codex/config.toml > high fallback.
+EFFORT_FLAG=()
+if [ -n "${CROSS_REVIEW_EFFORT:-}" ]; then
+  EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")
+elif ! awk '/^[[:space:]]*\[/{exit} /^[[:space:]]*model_reasoning_effort[[:space:]]*=/{f=1} END{exit !f}' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null; then
+  EFFORT_FLAG=(-c model_reasoning_effort=high)
+fi
 
-codex exec "${MODEL_FLAG[@]}" \
-  -c model_reasoning_effort="$EFFORT" \
+codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   -s read-only \
   --output-schema "$SCHEMA_FILE" \
   -o "$OUTPUT_FILE" \
@@ -118,10 +123,15 @@ If the task specifies a git base branch (default: `main`), prefer the `review` s
 ```bash
 MODEL_FLAG=()
 [ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
-EFFORT="${CROSS_REVIEW_EFFORT:-high}"
+# Reasoning-effort precedence: CROSS_REVIEW_EFFORT env > ~/.codex/config.toml > high fallback.
+EFFORT_FLAG=()
+if [ -n "${CROSS_REVIEW_EFFORT:-}" ]; then
+  EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")
+elif ! awk '/^[[:space:]]*\[/{exit} /^[[:space:]]*model_reasoning_effort[[:space:]]*=/{f=1} END{exit !f}' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null; then
+  EFFORT_FLAG=(-c model_reasoning_effort=high)
+fi
 
-codex exec "${MODEL_FLAG[@]}" \
-  -c model_reasoning_effort="$EFFORT" \
+codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   -s read-only \
   --output-schema "$SCHEMA_FILE" \
   -o "$OUTPUT_FILE" \
@@ -163,7 +173,7 @@ Why Claude might miss: <sentence>
 <summary from Codex output>
 
 ### Notes
-- Model: ${CROSS_REVIEW_MODEL:-<codex default>}, reasoning effort: ${CROSS_REVIEW_EFFORT:-high}
+- Model: ${CROSS_REVIEW_MODEL:-<codex config default>}, reasoning effort: ${CROSS_REVIEW_EFFORT:-<codex config, else high fallback>}
 - Files reviewed: <list>
 - Invocation mode: git-diff (--base main) | explicit prompt
 ```
