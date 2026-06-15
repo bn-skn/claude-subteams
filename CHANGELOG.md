@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.20.0] - 2026-06-15
+
+### Changed
+- **Cross-review reasoning effort now delegates to Codex's own config instead of the plugin parsing it.** Reverses the `awk`-based config detection shipped in 1.19.0. The effort flag is passed **only** when `CROSS_REVIEW_EFFORT` is set; otherwise nothing is passed and Codex resolves effort from its own config natively (`model_reasoning_effort`, profile-scoped keys, BOM — Codex parses its own TOML correctly). This is now genuinely symmetric to the `MODEL_FLAG` / `CROSS_REVIEW_MODEL` idiom: `[ -n "${CROSS_REVIEW_EFFORT:-}" ] && EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")`. Applied at all 5 invocation sites (`gpt-code-reviewer` ×2, `gpt-devils-advocate`, `cross-review` skill `/rescue` + generic); policy text, "Why this matters", maintenance note, Critical Rules 1/2/7, and both output-contract Notes lines updated.
+- **Why the reversal:** a full cross-model review of 1.19.0 (Claude + GPT-5.5 critics, the dimension this very change governs) converged on the `awk` heuristic being a leaky abstraction — it reimplemented a fragment of Codex's TOML/profile resolution in shell, producing real defects: a UTF-8 BOM or a `[profile.*]`-scoped key could silently mis-detect and either suppress or wrongly inject the `high` fallback, and the heuristic was copy-pasted across 5 sites. Letting Codex own value resolution removes that entire defect class. **Behavior change:** there is no longer a plugin-side `high` floor — if neither `CROSS_REVIEW_EFFORT` nor a Codex config effort is set, Codex runs at its own default. To guarantee deep reviews, set `model_reasoning_effort = "high"` (or higher) in `~/.codex/config.toml` (Critical Rule 2). For users with effort already configured (e.g. `xhigh`), the critics now inherit it exactly as Codex resolves it.
+
 ## [1.19.0] - 2026-06-15
 
 ### Changed
