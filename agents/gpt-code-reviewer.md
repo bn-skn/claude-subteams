@@ -73,13 +73,9 @@ OUTPUT_FILE=$(mktemp /tmp/gpt-review-out-XXXXXX.json)
 
 MODEL_FLAG=()
 [ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
-# Reasoning-effort precedence: CROSS_REVIEW_EFFORT env > ~/.codex/config.toml > high fallback.
+# Reasoning effort: pass CROSS_REVIEW_EFFORT when set, else nothing so Codex reads its own config.
 EFFORT_FLAG=()
-if [ -n "${CROSS_REVIEW_EFFORT:-}" ]; then
-  EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")
-elif ! awk '/^[[:space:]]*\[/{exit} /^[[:space:]]*model_reasoning_effort[[:space:]]*=/{f=1} END{exit !f}' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null; then
-  EFFORT_FLAG=(-c model_reasoning_effort=high)
-fi
+[ -n "${CROSS_REVIEW_EFFORT:-}" ] && EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")
 
 codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   -s read-only \
@@ -123,13 +119,9 @@ If the task specifies a git base branch (default: `main`), prefer the `review` s
 ```bash
 MODEL_FLAG=()
 [ -n "${CROSS_REVIEW_MODEL:-}" ] && MODEL_FLAG=(-m "$CROSS_REVIEW_MODEL")
-# Reasoning-effort precedence: CROSS_REVIEW_EFFORT env > ~/.codex/config.toml > high fallback.
+# Reasoning effort: pass CROSS_REVIEW_EFFORT when set, else nothing so Codex reads its own config.
 EFFORT_FLAG=()
-if [ -n "${CROSS_REVIEW_EFFORT:-}" ]; then
-  EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")
-elif ! awk '/^[[:space:]]*\[/{exit} /^[[:space:]]*model_reasoning_effort[[:space:]]*=/{f=1} END{exit !f}' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null; then
-  EFFORT_FLAG=(-c model_reasoning_effort=high)
-fi
+[ -n "${CROSS_REVIEW_EFFORT:-}" ] && EFFORT_FLAG=(-c model_reasoning_effort="$CROSS_REVIEW_EFFORT")
 
 codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   -s read-only \
@@ -173,7 +165,7 @@ Why Claude might miss: <sentence>
 <summary from Codex output>
 
 ### Notes
-- Model: ${CROSS_REVIEW_MODEL:-<codex config default>}, reasoning effort: ${CROSS_REVIEW_EFFORT:-<codex config, else high fallback>}
+- Model: ${CROSS_REVIEW_MODEL:-<codex config default>}, reasoning effort: ${CROSS_REVIEW_EFFORT:-<codex config default>}
 - Files reviewed: <list>
 - Invocation mode: git-diff (--base main) | explicit prompt
 ```
