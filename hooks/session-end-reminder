@@ -115,6 +115,58 @@ if printf '%s\n' "$CHANGED_FILES" | grep -qE '(^|/)CHANGELOG\.md$'; then
   CHANGELOG_UPDATED=1
 fi
 
+# ---- Doc-map freshness: a NEW spec/ADR added while the project's doc map lags ----
+# Closes the gap where "code + a new spec" passed silently because any .md touch counted
+# as "docs remembered" — the doc map would quietly lag the new doc.
+# One all-untracked listing feeds BOTH the new-doc scan and the map-updated check, so they
+# stay consistent (plain porcelain collapses a fully-untracked parent dir into "?? docs/",
+# hiding the individual file).
+ALL_PORCELAIN=$(git status --porcelain --untracked-files=all 2>/dev/null)
+
+# New tracked docs = ADDED ('A'), UNTRACKED ('??'), or RENAMED-into ('R') files under
+# docs/specs/ or docs/adr/. Parse the path from column 4 (after the 2-char status + space)
+# so filenames with spaces are not truncated; resolve rename arrows and surrounding quotes.
+# (Plans under docs/plans/ are handled by the living-plan gate, not here.)
+NEW_DOC_FILES=$(printf '%s\n' "$ALL_PORCELAIN" | awk '{
+  status = substr($0, 1, 2)
+  path = substr($0, 4)
+  sub(/^.*-> /, "", path)
+  gsub(/^"|"$/, "", path)
+  if (path ~ /(^|\/)docs\/(specs|adr)\/.*\.md$/ \
+      && (index(status, "A") > 0 || index(status, "R") > 0 || status == "??")) print path
+}')
+
+# Locate the project's doc map: env override, else first existing candidate. If the project
+# has no doc map, stay silent — never nag a project to invent one.
+DOC_MAP=""
+if [ -n "${CLAUDE_SUBTEAMS_DOC_MAP:-}" ] && [ -f "${CLAUDE_SUBTEAMS_DOC_MAP}" ]; then
+  DOC_MAP="${CLAUDE_SUBTEAMS_DOC_MAP}"
+else
+  for _cand in docs/INDEX.md INDEX.md docs/SUMMARY.md mkdocs.yml; do
+    if [ -f "$_cand" ]; then DOC_MAP="$_cand"; break; fi
+  done
+fi
+
+# Was the doc map touched in this changeset?
+DOC_MAP_UPDATED=0
+if [ -n "$DOC_MAP" ] && printf '%s\n' "$ALL_PORCELAIN" | awk '{print substr($0,4)}' | grep -qFx "$DOC_MAP"; then
+  DOC_MAP_UPDATED=1
+fi
+
+NEW_DOC_NO_MAP=0
+if [ -n "$NEW_DOC_FILES" ] && [ -n "$DOC_MAP" ] && [ "$DOC_MAP_UPDATED" -eq 0 ]; then
+  NEW_DOC_NO_MAP=1
+fi
+
+# Non-blocking reminder. Emitted once before the case logic so it fires regardless of how the
+# changeset is otherwise classified; never changes the exit code.
+if [ "$NEW_DOC_NO_MAP" -eq 1 ]; then
+  printf '[subteams] New doc(s) added under docs/specs|adr, but the doc map (%s) was not updated:\n' "$DOC_MAP"
+  printf '%s\n' "$NEW_DOC_FILES" | sed 's/^/  - /'
+  printf 'Add an entry to %s so the index does not lag the new doc.\n' "$DOC_MAP"
+  printf '(See claude-subteams:doc-quality-gate section 2.5.)\n'
+fi
+
 # ---- Classify files ----
 # Neutral: lock files, gitignore, editor config — don't trigger doc requirement
 NEUTRAL_RE='^(\.gitignore|\.editorconfig|\.gitattributes|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|composer\.lock)$|(^|/)\.DS_Store$'
@@ -146,7 +198,8 @@ if [ "$CODE_COUNT" -eq 0 ] && [ "$DOC_COUNT" -eq 0 ]; then
   exit 0
 fi
 
-# Case B: Only docs changed → silent pass (this is the expected state at end of work)
+# Case B: Only docs changed → expected state at end of work.
+# Still remind if a new spec was added without a doc-map (INDEX.md) update.
 if [ "$CODE_COUNT" -eq 0 ]; then
   exit 0
 fi
