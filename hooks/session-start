@@ -34,3 +34,29 @@ if [ "$HAS_SOURCE" = 1 ]; then
     echo "[subteams] Source files present but only $DOC_HITS/5 standard docs found — consider project-scaffold Retrofit mode (Section 8) to fill the documentation gaps."
   fi
 fi
+
+# ---- Multi-instance coordination (opt-in) ----
+# Register this instance, reap dead peers, and inject team awareness into context.
+# Entirely gated: nothing runs unless CLAUDE_SUBTEAMS_MULTI_INSTANCE=1.
+if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ] && command -v jq >/dev/null 2>&1; then
+  _mi_input=$(cat 2>/dev/null || printf '{}')
+  _mi_sid=$(printf '%s' "$_mi_input" | jq -r '.session_id // empty' 2>/dev/null)
+  [ -n "$_mi_sid" ] || _mi_sid="pid$$"
+  _mi_id="${_mi_sid:0:8}"
+  _mi_coord="${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh"
+  if [ -x "$_mi_coord" ]; then
+    # $PPID is this hook's parent (the Claude process) — best-effort liveness pid;
+    # heartbeat TTL is the reliable backstop.
+    "$_mi_coord" register --id "$_mi_id" --pid "$PPID" --worktree "$PWD" \
+      --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" >/dev/null 2>&1
+    "$_mi_coord" reap >/dev/null 2>&1
+    _mi_roster=$("$_mi_coord" roster 2>/dev/null)
+    _mi_n=$(printf '%s\n' "$_mi_roster" | grep -c '^  - ')
+    echo "[subteams:multi-instance] Active — you are instance '$_mi_id'; $_mi_n live instance(s) on this repo."
+    printf '%s\n' "$_mi_roster"
+    echo "Protocol (see the multi-instance skill): claim a file before editing it (coord.sh claim --id $_mi_id <path>); do NOT edit a file another live instance has claimed; commit under the commit-lock; send/receive handoffs via the mailbox. Claims are advisory — they bind cooperating instances, not external editors."
+    if [ "${GIT_OPTIONAL_LOCKS:-}" != "0" ]; then
+      echo "[subteams:multi-instance] Tip: export GIT_OPTIONAL_LOCKS=0 to avoid stale .git/index.lock from background git polling across worktrees."
+    fi
+  fi
+fi

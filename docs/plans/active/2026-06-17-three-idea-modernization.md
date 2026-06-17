@@ -2,7 +2,7 @@
 
 > **For agentic workers:** this is agentic/prompt work — `using-subteams` Section 6.5 applies (prompt-engineer authors prose, prompt-evaluator validates; agent-architect only where a new skill's topology/contract is designed). Each phase is its own pipeline cycle, branch, and version bump.
 
-**Status:** In progress (2026-06-17) — Phase 1 ✅ shipped (1.21.0), Phase 2 ✅ shipped (1.22.0), Phase 3 ⏳ TODO.
+**Status:** All three shipped (2026-06-17) — Phase 1 ✅ (1.21.0), Phase 2 ✅ (1.22.0), Phase 3 ✅ reduced v1 (1.23.0). Phase 3 was cut to a coherent core after a plan-defense review (agent-architect + devils-advocate); **deferred to a future "3c" phase**: shared task ledger, hooks-as-quality-gates, SQLite backend, fencing tokens, and any PreToolUse "enforcement" hook (claims ship as honest advisory coordination).
 **Author:** Bogdan + Claude Opus 4.8
 **Specs:** [`docs/specs/2026-06-17-living-plan-ledger.md`](../../specs/2026-06-17-living-plan-ledger.md), [`docs/specs/2026-06-17-multiinstance-coordination.md`](../../specs/2026-06-17-multiinstance-coordination.md)
 **Sequencing (approved):** 1 → 2 → 3, each shipped separately.
@@ -74,7 +74,7 @@ Idea 1 is ready (gap confirmed in code). Idea 2 plugs its refresh step into Idea
 
 ---
 
-## Phase 3 — Multi-instance coordination (Idea 3) → v1.23.0   ⏳ TODO (largest; concurrency-critical — needs adversarial review)
+## Phase 3 — Multi-instance coordination (Idea 3) → v1.23.0   ✅ SHIPPED as reduced v1 (registry + advisory claims + commit-lock + mailbox; ledger/gates/SQLite/fencing/enforcement-hook deferred to 3c)
 
 **Branch:** `feat/multi-instance-coordination`
 **Depends on:** Phase 2 (shared task ledger reused as the concurrency-safe ledger).

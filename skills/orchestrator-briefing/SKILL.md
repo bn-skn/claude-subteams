@@ -246,6 +246,7 @@ Parallel subagents are powerful but dangerous. One file edited by two subagents 
 4. Shared read-only files are fine — only WRITE conflicts matter.
 5. After parallel dispatch, check for conflicts before proceeding.
 6. When possible, use git worktrees for parallel work isolation.
+7. **Multi-instance mode** (opt-in, `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`): if active, the files a subagent will edit must be **claimed by you first** (`coord.sh claim`), and the brief must state which files are claimed/off-limits — a subagent cannot claim on its own. See the `multi-instance` skill.
 
 ### Parallel Dispatch Checklist
 

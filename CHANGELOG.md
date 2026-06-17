@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.23.0] - 2026-06-17
+
+### Added
+- **`multi-instance` skill + `scripts/coord.sh` — opt-in coordination for several Claude Code instances on one machine/one repo** (Idea 3 of the 3-idea modernization, spec `docs/specs/2026-06-17-multiinstance-coordination.md`). Portable and deliberately **NOT** coupled to Claude Code's native agent-teams (so it survives onto other harnesses); file-based (flock + `jq` JSON + per-instance inbox), zero new runtime deps beyond `jq`. **Scope deliberately reduced** after a plan-defense review (agent-architect + devils-advocate): this v1 is registry + advisory file claims + a global commit-lock + a fire-and-forget mailbox + heartbeat. Deferred by design: shared task ledger, hooks-as-quality-gates, SQLite backend, fencing tokens, and any PreToolUse "enforcement" hook (claims are honest advisory coordination, not OS-enforced locks).
+  - **`scripts/coord.sh`** — subcommands `init/register/deregister/heartbeat/roster/reap/claim/release/claims/send/recv/commit-lock`. Liveness is authoritative by **PID** (`kill -0`) + worktree existence on this single host — a PID-alive instance is never reaped on a stale heartbeat (heartbeat is recorded for observability only; PID reuse is an accepted rare gap). Claim is an **atomic claim-or-reject under flock** and requires a registered live instance (an unregistered claimant fails loudly, never silently void). Orphan claims (holder no longer live) are pruned on reap; a corrupt/unparseable ledger **aborts** the prune rather than wiping all claims. `recv` tolerates a malformed inbox line (skips it, keeps the rest). `--id`/`--to` are validated (no path traversal); `--pid` must be numeric. Coord dir keyed by `git --git-common-dir` (with a `cksum` fallback if `md5sum` is absent) so all worktrees of one repo share one registry.
+  - **Opt-in gate `CLAUDE_SUBTEAMS_MULTI_INSTANCE`** — `coord.sh` and every new hook branch no-op (early `exit 0`) when unset, so single-instance sessions are unaffected. (The one non-zero cost is the existing hooks' extra gated `jq`/heartbeat line; no new always-on PreToolUse hook was added.)
+  - **Hook lifecycle wiring:** SessionStart registers + reaps + injects a `[subteams:multi-instance]` awareness line (you are instance `<id>`, the live roster, the claim-before-edit protocol, the `GIT_OPTIONAL_LOCKS=0` tip); UserPromptSubmit + PostToolUse refresh heartbeat; a **separate** Stop hook (`hooks/coord-stop`) deregisters + releases claims independently of the doc-enforcement Stop hook (so it is not skipped when that one `exit 2`s). Crash/OOM cleanup falls to PID-based reap.
+  - **2–3 instance cap** on ≤4 GB hosts surfaced in the skill (lived OOM lesson). Wired references in `using-subteams` (§10) and `orchestrator-briefing` (pre-claim files before dispatching a subagent).
+
 ## [1.22.0] - 2026-06-17
 
 ### Added

@@ -358,6 +358,10 @@ Optional MCP servers that enhance capabilities. None are required — all skills
 
 **When to use playwright:** UI verification, screenshot comparison, E2E test execution. Not needed for backend-only work.
 
+### Multi-instance coordination (opt-in)
+
+The subagents above run **inside one Claude Code process** (in-process parallelism). A separate, **opt-in** capability coordinates **several Claude Code instances** on one machine/one repo (each in its own worktree) — for when you run multiple `claude` sessions in parallel windows. Enable with `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`; when unset there is zero effect. When active, the SessionStart hook injects a `[subteams:multi-instance]` awareness line and you follow the `multi-instance` skill: claim a file before editing, commit under the commit-lock, message peers via the mailbox. It is portable (file-based, not Claude Code agent-teams) and capped at 2–3 instances on small hosts. See the `multi-instance` skill. (Most sessions are single-instance — this never fires for them.)
+
 ## 11. Session Start Checklist
 
 Every session begins with orientation. Do not start work until you understand the current state.

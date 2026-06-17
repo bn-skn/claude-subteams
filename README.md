@@ -152,6 +152,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | process | `decision-context` | Mandatory block (Decision / Why / Alternatives / Risks / Linked) in the decisions journal for every non-trivial commit. Everyday companion to `adr-tracker`. |
 | process | `doc-quality-gate` | Classifies a change (cosmetic/feature/architectural/breaking) and defines the docs each class needs. Pairs with the session-end-reminder hook's breaking-signal escalation. |
 | process | `living-plan` | Maintains a single multi-level plan-of-record (package → acceptance criterion → status) for multi-package/contracted work. Validated by `check-plan.sh`. |
+| coordination | `multi-instance` | Opt-in protocol for several Claude Code instances on one machine/one repo: claim files before editing, commit under a lock, message peers. Portable (file-based, not agent-teams). `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`. |
 | quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID principles. |
 | quality | `adversarial-testing` | Writes tests designed to break the code — edge cases, race conditions, boundary violations. |
 | quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |

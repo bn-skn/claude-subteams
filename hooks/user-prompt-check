@@ -7,6 +7,13 @@ if ! command -v jq &>/dev/null; then
 fi
 
 INPUT=$(cat)
+
+# Multi-instance heartbeat (opt-in): refresh this instance's liveness on each prompt.
+if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ]; then
+  _hb_sid=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+  [ -n "$_hb_sid" ] && "${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh" heartbeat --id "${_hb_sid:0:8}" >/dev/null 2>&1
+fi
+
 PROMPT=$(printf '%s' "$INPUT" | jq -r '.user_prompt // empty' 2>/dev/null)
 
 if [ -z "$PROMPT" ]; then
