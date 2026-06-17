@@ -6,9 +6,10 @@
 <!--
   Living plan-of-record. One file per contract/project, under docs/plans/active/.
   Use ONLY for multi-package (>=2) or TZ-with-acceptance work (see the living-plan skill).
-  Status tokens (use exactly): DONE | WIP | TODO | BLOCKED.
+  Status tokens (use exactly): DONE | WIP | TODO | BLOCKED — as a trailing marker
+  after a separator, e.g. "— DONE". An unresolved criterion uses **TBD — unresolved**
+  (also accepted by the validator). Never invent acceptance criteria — mark unknowns TBD and ask.
   Remove the STATUS sentinel line above once real content is filled in.
-  Never invent acceptance criteria — mark unknowns **TBD — unresolved** and ask.
 -->
 
 ## Rollup

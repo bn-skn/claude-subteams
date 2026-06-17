@@ -26,7 +26,7 @@ Structure (see the template for the exact form):
 - A **Rollup** table: one row per package with counts of acceptance criteria by status (DONE / WIP / TODO / BLOCKED) and an Acceptance column.
 - Per-package sections (`## P<n> — <name>`), each mapping to TZ sections, each listing acceptance criteria as checkboxes with an explicit status token and (when applicable) a blocker and owner.
 
-Status tokens (use exactly these): `DONE`, `WIP`, `TODO`, `BLOCKED`. A checkbox `- [x]` is DONE; `- [ ]` is anything not-done — the trailing token disambiguates WIP/TODO/BLOCKED.
+Status tokens (use exactly these): `DONE`, `WIP`, `TODO`, `BLOCKED`, written as a **trailing marker after a separator** (e.g. `— DONE`, `— TODO — blocker: …`). A checkbox `- [x]` is DONE; `- [ ]` is anything not-done — the trailing token disambiguates WIP/TODO/BLOCKED. An unresolved acceptance criterion is marked `**TBD — unresolved**` (the validator accepts `TBD` as a recognized marker).
 
 ## 3. Lifecycle
 
@@ -37,7 +37,7 @@ Status tokens (use exactly these): `DONE`, `WIP`, `TODO`, `BLOCKED`. A checkbox 
 
 ## 4. Validation
 
-Run `scripts/check-plan.sh <project-dir>` before declaring plan-of-record work done. It checks every `docs/plans/active/IMPL-PLAN-*.md` for: sentinel removed, a Rollup table present, every checklist item carrying a recognized status token, and no orphan blocker text. Exit 0 = valid (or no plan-of-record present); exit 1 = a problem, printed. It is mechanical evidence, not self-attestation — paste its output as proof, do not claim freshness from memory.
+Run `scripts/check-plan.sh <project-dir>` before declaring plan-of-record work done. It checks every `docs/plans/active/IMPL-PLAN-*.md` for: sentinel removed, a Rollup table present, and every checklist item carrying a recognized status marker (`— DONE/WIP/TODO/BLOCKED` or `TBD`). Exit 0 = valid (or no plan-of-record present); exit 1 = a problem, printed. It is mechanical evidence, not self-attestation — paste its output as proof, do not claim freshness from memory.
 
 ## 5. Relationship to Other Skills
 

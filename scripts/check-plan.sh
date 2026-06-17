@@ -19,11 +19,14 @@ PROJECT_DIR="${1:-.}"
 ACTIVE_DIR="${PROJECT_DIR}/docs/plans/active"
 
 SENTINEL='> STATUS: TEMPLATE — not yet populated'
-# Recognized status tokens for a checklist item.
-TOKEN_RE='(DONE|WIP|TODO|BLOCKED)'
+# A well-formed checklist item carries its status as a TRAILING marker after a
+# separator — `— DONE`, `— TODO`, `-- WIP`, ` - BLOCKED` — OR the unresolved marker
+# `TBD` (authored as `**TBD — unresolved**`). Anchoring to a separator avoids matching
+# a status word that merely appears in the criterion's prose (e.g. "never BLOCKED by
+# overload"); the bare `TBD` literal is safe (it does not occur incidentally).
+STATUS_RE='(—|--|[[:space:]]-[[:space:]])[[:space:]]*(DONE|WIP|TODO|BLOCKED)|TBD'
 
 FAILED=0
-FOUND=0
 
 # Gather IMPL-PLAN files without relying on nullglob.
 PLANS=()
@@ -40,7 +43,6 @@ fi
 
 check_plan() {
   local file="$1"
-  FOUND=1
   echo "[check-plan] Checking: $file"
 
   # 1. Sentinel must be gone once populated.
@@ -55,17 +57,18 @@ check_plan() {
     FAILED=1
   fi
 
-  # 3. Every checklist item must carry a recognized status token.
+  # 3. Every checklist item must carry a recognized status marker.
   #    Checklist lines look like:  - [ ] ...   or   - [x] ...
+  #    The `|| [ -n "$line" ]` guard processes a final line with no trailing newline.
   local line lineno=0 bad=0
-  while IFS= read -r line; do
+  while IFS= read -r line || [ -n "$line" ]; do
     lineno=$((lineno + 1))
     case "$line" in
       *"- ["*"]"*)
         # Only treat genuine task checkboxes (- [ ] / - [x] / - [X]) as items.
         if printf '%s' "$line" | grep -qE '^[[:space:]]*-[[:space:]]\[[ xX]\]'; then
-          if ! printf '%s' "$line" | grep -qE "$TOKEN_RE"; then
-            echo "  NO STATUS TOKEN (line $lineno): ${line# }"
+          if ! printf '%s' "$line" | grep -qE "$STATUS_RE"; then
+            echo "  NO STATUS MARKER (line $lineno): ${line#"${line%%[![:space:]]*}"}"
             bad=1
             FAILED=1
           fi
