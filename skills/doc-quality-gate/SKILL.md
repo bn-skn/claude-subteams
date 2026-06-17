@@ -29,9 +29,10 @@ Examples: whitespace, typos, comment tweaks, lint autofix, patch-version bumps w
 Examples: new function/endpoint/route/module added, new config option, new dependency added, new capability — no existing contract broken or removed.
 
 **Doc requirements:**
-1. BACKLOG.md or CHANGELOG.md entry (what was added).
+1. CHANGELOG.md entry for any user-visible or release-relevant feature; AND a BACKLOG.md status update if the work was tracked there (mark the item done). When both apply, update both — updating only one is the common miss. (Internal-only plumbing that is not release-relevant may skip CHANGELOG; say so in your stop message.)
 2. Extend the descriptive section of SYSTEM.md (or equivalent) if the architecture changed.
 3. Decision-context block only if the implementation involved a non-obvious choice (see decision-context skill).
+4. Doc-map entry — see section 2.5 (any new tracked doc requires it, independent of class).
 
 ### Class 3 — Architectural
 
@@ -54,6 +55,14 @@ Examples: removed functionality, changed or removed route/endpoint/proto field, 
 4. Migration guide if any existing integration or consumer breaks.
 5. API/contract docs updated (OpenAPI spec, .proto file headers, plugin.json).
 6. Dispatch doc-agent in breaking-change audit mode (section 5).
+
+## 2.5 Cross-cutting: doc-map freshness
+
+When a change **adds a new tracked doc** — a new `docs/specs/*` file or an ADR (`docs/adr/`) — it MUST also add a corresponding entry to the project's **doc map** (`docs/INDEX.md` or equivalent) in the same change, *regardless of the code change's class*. This applies even when the code change itself is Cosmetic (Class 1): "Doc requirements: none" governs the per-class requirements for the *code*, while an added doc independently owes a doc-map entry. (Plans under `docs/plans/` are tracked by the living-plan gate, not this rule.)
+
+The doc map is the discovery surface; a new doc with a stale index silently reads as "the doc set is complete" when it is not, and breaks any conventions check that trusts the index. **If the project has no doc map, this requirement does not apply — do not create one solely to satisfy it.**
+
+This is the gap the freshness gate previously missed: a commit of "code + a new spec" satisfied the per-class rules (a `.md` was touched) while the index quietly fell behind. The `session-end-reminder` hook now flags a changeset that introduces a new doc under `docs/specs/` or `docs/adr/` while the project's doc map — auto-detected from common names, or set via `CLAUDE_SUBTEAMS_DOC_MAP` — is left untouched. The hook stays silent when no doc map exists.
 
 ## 3. Signal → Class Mapping
 
@@ -97,6 +106,8 @@ Invocation: call the `doc-agent` subagent and specify mode `breaking-change audi
 | Architectural | Yes | Mandatory | Overwrite | No | Recommended |
 | Breaking | Yes | Mandatory (full fields) | Rewrite | If integrations break | Always |
 
+Independent of class: any new tracked doc (spec / ADR) requires a doc-map (`docs/INDEX.md` or equivalent) entry when the project has one — see section 2.5.
+
 ## 6. Red Flags
 
 | Pattern | Why It Is Wrong | Correct Action |
@@ -107,6 +118,8 @@ Invocation: call the `doc-agent` subagent and specify mode `breaking-change audi
 | No CHANGELOG entry for a new dependency | Dependency changes affect reproducibility and security posture | Add CHANGELOG entry; classify as Architectural minimum |
 | Skipping doc-agent after a breaking change | Stale migration guides and API docs will mislead future integrators | Dispatch doc-agent in breaking-change audit mode before stopping |
 | Classifying a changed/removed route or proto field as "feature add" | Changed contracts break existing callers silently | Reclassify as Breaking; check all callers; write migration note |
+| Adding a new spec/ADR without updating the doc map (`docs/INDEX.md` or equivalent) | The index silently lags; future sessions and any conventions check treat the doc set as complete when it is not | Add the doc-map entry in the same change (section 2.5); heed the hook's new-doc/stale-map reminder |
+| Updating only BACKLOG or only CHANGELOG when both apply | The other tracker drifts; release notes or task status goes stale | When both a CHANGELOG entry and a BACKLOG item apply, update both; mark the BACKLOG item done if it was tracked |
 
 ## 7. Critical Rules
 
@@ -115,6 +128,7 @@ Invocation: call the `doc-agent` subagent and specify mode `breaking-change audi
 3. MUST apply at least the minimum class from the signal tables; NEVER downgrade based on gut feeling.
 4. NEVER ship a breaking change without a CHANGELOG entry.
 5. For decision-context block rules (overwrite vs append, Alternatives field discipline) — follow `claude-subteams:decision-context`, not this skill.
+6. MUST update the doc map (`docs/INDEX.md` or equivalent), when the project has one, whenever a change adds a new tracked doc (spec or ADR). A new doc with a stale index is an incomplete change (section 2.5).
 
 ## 8. Cross-References
 

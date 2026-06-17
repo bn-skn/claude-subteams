@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.21.0] - 2026-06-17
+
+### Changed
+- **Doc-freshness gate now covers the doc map and tightens the feature-class tracker rule** (Idea 1 of the 3-idea modernization, spec `docs/specs/2026-06-17-living-plan-ledger.md` / plan `docs/plans/active/2026-06-17-three-idea-modernization.md`). Closes a confirmed gap: a commit of "code + a new spec" passed the freshness checks silently because any `.md` touch counted as "docs remembered", so the doc map quietly lagged every new spec.
+  - **`hooks/session-end-reminder`**: detects when a changeset adds a **new** doc under `docs/specs/` or `docs/adr/` (added / untracked / renamed-in, via `--untracked-files=all` so a fully-untracked parent dir doesn't hide it; path parsed from column 4 so spaces don't truncate it) while the project's **doc map** is left untouched, and emits a **non-blocking** reminder. The doc map is auto-detected from common names (`docs/INDEX.md`, `INDEX.md`, `docs/SUMMARY.md`, `mkdocs.yml`) or set via `CLAUDE_SUBTEAMS_DOC_MAP`; **when no doc map exists the hook stays silent** (never nags a project to invent one — the plugin's own repo has no INDEX.md and must not be flagged). The new-doc scan and the map-updated check read from one shared all-untracked listing for consistency. Emitted once before the case logic, so it fires regardless of classification and never changes the exit code. Existing Case A–D behavior (breaking-signal block, 2-attempt loop guard) is untouched.
+  - **`skills/doc-quality-gate/SKILL.md`**: new section 2.5 "Cross-cutting: doc-map freshness" — a new tracked doc (spec/ADR) requires a doc-map entry regardless of class, explicitly reconciled with Class 1 ("none" governs the code, an added doc still owes a map entry), and a no-doc-map project is exempt. Class 2 (Feature add) now asks for CHANGELOG on user-visible/release-relevant features **and** a BACKLOG status update when the work was tracked (was "BACKLOG *or* CHANGELOG"; not over-mandated to "always"). Added Quick-Reference note, two Red Flags, Critical Rule 6.
+  - Deliberately a reminder, not a block: scoped to *new* spec/ADR files and only when a doc map exists, to avoid false positives on doc-light, spec-editing, or map-less projects.
+
 ## [1.20.0] - 2026-06-15
 
 ### Changed
