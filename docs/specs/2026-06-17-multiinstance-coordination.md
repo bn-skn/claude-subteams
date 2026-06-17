@@ -81,10 +81,17 @@ A **file-based-primary** substrate (matches the plugin's portable, zero-dependen
 
 ### 4.1 Plugin deliverables (sketch — detailed in the impl plan after approval)
 
-- `skills/coordination/multi-instance/SKILL.md` — the protocol each instance's orchestrator follows (register on start, claim before edit, commit under lock, send/recv mailbox, heartbeat, deregister on exit).
-- `scripts/coord-*.sh` — `register`, `roster`, `claim`, `release`, `send`, `recv`, `heartbeat`, `reap-dead` (bash + flock; portable, zero-dep).
+- `skills/multi-instance/SKILL.md` — the protocol each instance's orchestrator follows (register on start, claim before edit, commit under lock, send/recv mailbox, heartbeat, deregister on exit).
+- `scripts/coord-*.sh` — `register`, `roster`, `claim`, `release`, `send`, `recv`, `heartbeat`, `reap-dead`, `deregister` (bash + flock; portable, zero-dep). Every script that mutates a shared file `flock`s it for the read-modify-write (the coordination mechanism must not race itself).
 - Optional `scripts/coord-sqlite.*` backend for SQLite projects.
-- Schema doc for the coordination directory layout (`<repo>/.subteams-coord/` or `~/.claude/subteams/<repo-hash>/`).
+- **Lifecycle hook wiring (the backbone — without it the substrate is honor-system).** All gated behind opt-in `CLAUDE_SUBTEAMS_MULTI_INSTANCE`; single-instance sessions pay zero cost:
+  - **SessionStart** (`hooks/session-start`): create/resolve coord dir, `register`, `reap-dead`, and inject awareness ("you are instance `<id>`; N peers; follow `multi-instance`").
+  - **PreToolUse `Edit|Write`** (new `hooks/pre-tool-use-edit`): block edits to a file claimed by another live instance (the enforcement teeth — covers subagent edits too). The plugin has no PreToolUse Edit/Write hook today.
+  - **UserPromptSubmit / PostToolUse**: piggyback `heartbeat` refresh (hooks are event-driven, not timed).
+  - **Stop** (`hooks/session-end-reminder`): `release --all-mine` + `deregister` (idempotent).
+  - **`using-subteams`** gains a multi-instance subsection; **`orchestrator-briefing`** notes claimed-files in subagent briefs.
+- **Coord dir keyed by the COMMON repo**, not the worktree: `~/.claude/subteams/<hash of git --git-common-dir>/` so all worktrees of one repo share one registry/ledger.
+- Schema doc for the coordination directory layout + the file formats (registry, claim ledger, inboxes).
 
 ## 5. Key decisions — RESOLVED (2026-06-17, owner approval)
 

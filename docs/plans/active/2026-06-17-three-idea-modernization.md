@@ -78,10 +78,25 @@ Idea 1 is ready (gap confirmed in code). Idea 2 plugs its refresh step into Idea
 
 **Branch:** `feat/multi-instance-coordination`
 **Depends on:** Phase 2 (shared task ledger reused as the concurrency-safe ledger).
-**Note:** largest phase; may itself split into 3a (registry + locks) and 3b (mailbox + ledger) at execution.
+**Note:** largest phase; may itself split into 3a (registry + locks + lifecycle wiring) and 3b (mailbox + ledger + gates) at execution.
+
+**Completeness principle (added after plan audit):** scripts + a protocol skill are NOT enough — without lifecycle wiring the whole thing is honor-system (the model must remember to read the skill and run the scripts; it won't). Phase 3 MUST wire the substrate into the plugin's hook lifecycle so registration, awareness, claim-enforcement, heartbeat, and deregistration happen automatically. All of it is gated behind an explicit opt-in so single-instance sessions pay zero cost.
+
+### Task 3.0 — Enablement flag + lifecycle hook wiring (agent-architect + developer, opus) — THE BACKBONE
+The mechanism that makes multi-instance automatic and enforced rather than documented. Nothing below fires unless `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` (or a settings equivalent) is set — single-instance sessions are completely unaffected.
+
+1. **Opt-in gate:** `CLAUDE_SUBTEAMS_MULTI_INSTANCE` env flag. Every new hook branch and coord script no-ops when unset. Document in README + skill.
+2. **SessionStart wiring** (`hooks/session-start`): when enabled — resolve the shared coord dir, create it if absent, `coord-register` this instance (id, pid, worktree, branch, heartbeat), `reap-dead` stale peers, and **inject awareness** into context: "multi-instance mode: you are instance `<id>`; N peers active: <roster>; follow the `multi-instance` skill — claim files before editing, communicate via mailbox." Without this injection the orchestrator never knows it is in a team.
+3. **Claim ENFORCEMENT** — new `hooks/pre-tool-use-edit` on `PreToolUse` matcher `Edit|Write` (the plugin has no PreToolUse Edit/Write hook today): when enabled, look up the target file in the claim ledger; if claimed by *another live* instance → block (`exit 2`) with "file claimed by `<id>`; coordinate or wait", else auto-claim (or remind to claim) for this instance. This is the teeth behind "mark files busy"; covers subagent edits too (hooks are session-wide).
+4. **Heartbeat refresh:** piggyback `coord-heartbeat` on the existing `UserPromptSubmit` and async `PostToolUse` hooks so an active-but-quiet instance is not reaped. (Hooks are event-driven, not timed — refresh must ride existing events.)
+5. **Deregister + release on exit** (`hooks/session-end-reminder`, Stop): when enabled, `coord-release --all-mine` + `coord-deregister` (idempotent — Stop can fire repeatedly). flock-based locks auto-release on process death; file-based claims need this explicit path + heartbeat-reap as backstop.
+6. **using-subteams reference:** add a short multi-instance subsection to the always-loaded meta-skill so the orchestrator knows the capability exists and when it activates.
+7. **orchestrator-briefing:** note that in multi-instance mode, subagent briefs must state which files are claimed/off-limits.
 
 ### Task 3.1 — system design + contract (agent-architect, opus)
-- Design the coordination substrate topology: presence/registry (§4.0 of spec), flock commit-lock, claim/lease, mailbox, heartbeat/reap. Define the on-disk layout (`~/.claude/subteams/<repo-hash>/`), file schemas, and the exact script CLI contracts. Decide 3a/3b split.
+- Design the coordination substrate topology: presence/registry (§4.0 of spec), flock commit-lock, claim/lease, mailbox, heartbeat/reap. Define the on-disk layout, file schemas, and the exact script CLI contracts. Decide 3a/3b split.
+- **Shared coord dir key:** derive from the COMMON repo, not the worktree — `~/.claude/subteams/<hash of $(git rev-parse --git-common-dir)>/` — so all worktrees of one repo share one registry/ledger. (A per-worktree path would split the team.)
+- **Ledger write serialization:** every coord script that mutates the registry / claim ledger / mailbox MUST `flock` that file for its read-modify-write, or the coordination mechanism itself races.
 
 ### Task 3.2 — coord scripts (developer, sonnet)
 - `scripts/coord-*.sh`: `register`, `roster`, `claim`, `release`, `send`, `recv`, `heartbeat`, `reap-dead` — bash + flock, portable, zero-dep. Each `bash -n` clean; crash-safe (flock auto-release); stale-instance reap by heartbeat TTL.
@@ -99,9 +114,12 @@ Idea 1 is ready (gap confirmed in code). Idea 2 plugs its refresh step into Idea
 - CHANGELOG `## [1.23.0]`; version bumps; README (+1 skill, new coordination capability); recurring checklist.
 
 ### Verify
-- Script-level: spin 2 mock instances in temp worktrees; assert mutual exclusion (one claim wins), mailbox delivery, dead-instance reap. Real flock contention test.
-- prompt-evaluator: protocol skill triggers on a multi-instance scenario, not on normal single-session work.
-- code-reviewer + devils-advocate + (cross-model gpt critics if Codex available): race conditions, advisory-lock cooperation gaps, scope-creep toward a job-queue framework.
+- **Opt-in isolation:** with the flag UNSET, confirm every new hook branch and coord script no-ops — a normal single-instance session behaves byte-identically to 1.22.0 (no coord dir created, no awareness injected, no edit interference). This is the most important regression test.
+- **Lifecycle wiring:** SessionStart in enabled mode creates the coord dir + registers + injects awareness; Stop deregisters + releases claims; heartbeat refreshes on prompt/tool events.
+- **Claim enforcement:** the PreToolUse Edit|Write hook blocks an edit to a file claimed by another live instance and allows it once released/reaped; verify it also fires for a subagent's edit.
+- Script-level: spin 2 mock instances sharing one coord dir (different worktrees of one repo → same `--git-common-dir` key); assert mutual exclusion (one claim wins), mailbox delivery, dead-instance reap, ledger-write serialization under concurrent claims.
+- prompt-evaluator: protocol skill + awareness injection trigger on a multi-instance scenario, not on normal single-session work.
+- code-reviewer + devils-advocate + adversarial-testing + (cross-model gpt critics if Codex available): race conditions in the ledger read-modify-write, advisory-lock cooperation gaps, the enabled-but-no-peers case, Stop firing repeatedly, and scope-creep toward a job-queue framework.
 
 ---
 
@@ -115,7 +133,9 @@ Idea 1 is ready (gap confirmed in code). Idea 2 plugs its refresh step into Idea
 
 - **Hook false positives (Phase 1):** INDEX-stale reminder firing on doc-light changes. Mitigation: trigger only on *new* `docs/specs/*.md`, reminder not block.
 - **Ledger staleness (Phase 2):** a drifting plan-of-record is worse than none. Validator + gate coupling are the defense.
-- **Cooperative-only locks (Phase 3):** advisory locks don't stop a non-participating process. The skill must make "claim before edit" unambiguous; this is a discipline, not enforcement.
+- **Cooperative-only locks (Phase 3):** advisory locks don't stop a process that bypasses the protocol. The PreToolUse Edit|Write hook (Task 3.0.3) enforces claims *within* a participating Claude Code instance (covers orchestrator + subagents), but a non-Claude editor or a `--no-hooks` run is not bound. This is enforced-within-the-tool, not OS-level mandatory locking — state the boundary in the skill.
+- **Opt-in or bust (Phase 3):** all coordination is gated behind `CLAUDE_SUBTEAMS_MULTI_INSTANCE`. The single-instance path must be provably unaffected (see Verify) — a coordination cost leaking into ordinary sessions would be a worse regression than the feature is worth.
+- **Heartbeat liveness vs swap pauses (Phase 3):** on a loaded ≤4 GB host, a real instance can stall past its heartbeat TTL and be wrongly reaped. Keep TTL generous (e.g. ≥10 min) and, for correctness-critical claims, pair with a fencing token (spec §3.2) — do not reap aggressively.
 - **Resource ceiling (Phase 3):** proven by the OOM during the research that produced this plan — the 2–3 instance cap is the real safety control on small hosts, not the algorithm.
 - **Rollback (each phase):** `git checkout main && git branch -D feat/<phase>`; backup tag `backup/pre-<phase>-*`.
 - **Plugin update after each phase:** `/plugin marketplace update articortex` → `/plugin update claude-subteams@articortex` → `/reload-plugins`; canonical tag `claude-subteams--vX.Y.Z`.
