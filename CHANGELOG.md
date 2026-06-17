@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.22.0] - 2026-06-17
+
+### Added
+- **`living-plan` skill — a single multi-level plan-of-record for multi-package / contracted work** (Idea 2 of the 3-idea modernization, spec `docs/specs/2026-06-17-living-plan-ledger.md`). Solves the "real plan scattered across estimate + BACKLOG + specs, acceptance-readiness invisible at a glance" problem. The artifact is a matrix that rolls up: `package → TZ section → acceptance criterion → status (DONE/WIP/TODO/BLOCKED) → blocker/owner`, in `docs/plans/active/IMPL-PLAN-<slug>.md`.
+  - **Scope-gated:** mandatory ONLY for ≥2 packages OR a TZ with acceptance clauses; single-feature work keeps using the brief `writing-plans` plan (no bureaucracy on small tasks).
+  - **`templates/IMPL-PLAN.md`** — starting template with the `> STATUS: TEMPLATE — not yet populated` sentinel and the status-token convention.
+  - **`scripts/check-plan.sh`** — mechanical validator: sentinel removed, Rollup table present, every checklist item carries a recognized status token. Exit 0 when valid OR when no plan-of-record exists (it is optional — absence is never a failure); exit 1 when a present plan is malformed. Evidence, not self-attestation.
+  - **In-context authorship discipline** (same as architecture-capture): acceptance criteria are authored from the real estimate/TZ, never fabricated — unknowns marked `**TBD — unresolved**`.
+  - Wired into `writing-plans` (author the plan-of-record for qualifying work) and `executing-plans` (flip criterion status + recompute Rollup as tasks close). README skills roster updated.
+
 ## [1.21.0] - 2026-06-17
 
 ### Changed
