@@ -13,6 +13,8 @@ Load plan, dispatch each step to an appropriate subagent, run quality gates betw
 
 **Core principle:** Each plan step becomes a briefing to a subagent. Quality gates between steps catch issues early. Parallel execution where dependencies allow.
 
+**Plan-of-record upkeep:** if the work has a living plan-of-record (`docs/plans/active/IMPL-PLAN-*.md`, see the `living-plan` skill), flip the matching acceptance criterion's status (TODO → WIP → DONE) and recompute its Rollup row as each task closes — keeping it in lockstep with `BACKLOG.md` / `CHANGELOG.md`. Validate with `scripts/check-plan.sh` before declaring the plan done.
+
 ## The Process
 
 ### Step 1: Load and Review Plan

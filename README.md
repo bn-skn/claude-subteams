@@ -151,6 +151,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | process | `brainstorming` | Explores intent and requirements before any implementation. Use before creative work. For greenfield/structural work, captures architectural decisions as ADRs during the interview and projects them into `ARCHITECTURE.md`/`CONVENTIONS.md` (gated by `check-arch-docs.sh`). |
 | process | `decision-context` | Mandatory block (Decision / Why / Alternatives / Risks / Linked) in the decisions journal for every non-trivial commit. Everyday companion to `adr-tracker`. |
 | process | `doc-quality-gate` | Classifies a change (cosmetic/feature/architectural/breaking) and defines the docs each class needs. Pairs with the session-end-reminder hook's breaking-signal escalation. |
+| process | `living-plan` | Maintains a single multi-level plan-of-record (package → acceptance criterion → status) for multi-package/contracted work. Validated by `check-plan.sh`. |
 | quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID principles. |
 | quality | `adversarial-testing` | Writes tests designed to break the code — edge cases, race conditions, boundary violations. |
 | quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |

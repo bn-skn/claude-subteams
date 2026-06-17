@@ -18,6 +18,8 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 **Save plans to:** `docs/plans/active/YYYY-MM-DD-<feature-name>.md`
 - (User preferences for plan location override this default)
 
+**Multi-package / contracted work:** if the work decomposes into ≥2 packages OR is measured against a TZ with acceptance clauses, ALSO author a single living plan-of-record (`docs/plans/active/IMPL-PLAN-<slug>.md`) per the `living-plan` skill — a package → acceptance-criterion matrix that answers "how close to acceptance" at a glance. For single-feature work the brief plan above is enough; do not add a plan-of-record.
+
 ## Scope Check
 
 If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it was not, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
