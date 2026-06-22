@@ -1,5 +1,8 @@
 #!/bin/bash
-# UserPromptSubmit hook — NOTIFY (count only) of unread peer mailbox messages (opt-in).
+# UserPromptSubmit + PostToolUse hook — NOTIFY (count only) of unread peer mailbox
+# messages (opt-in). UserPromptSubmit covers interactive turns; PostToolUse covers
+# AUTONOMOUS runs (no human prompts ever fire UserPromptSubmit), throttled to one notice
+# per newly-arrived message. The event is passed as $1; subagents are skipped.
 #
 # Deliberately injects only a COUNT, never message CONTENT. Peer text is UNtrusted: the
 # inbox is a plain file and `coord.sh send --from` is unauthenticated, so injecting a
@@ -21,14 +24,25 @@ COORD="${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh"
 [ -x "$COORD" ] || exit 0
 
 EVENT="${1:-}"
-case "$EVENT" in UserPromptSubmit|SessionStart) ;; *) exit 0;; esac  # unknown/missing event → do nothing, never guess
+case "$EVENT" in UserPromptSubmit|PostToolUse) ;; *) exit 0;; esac  # unknown/missing event → do nothing, never guess
 
 INPUT=$(cat 2>/dev/null || printf '{}')
+# Only the orchestrator (main thread) coordinates; a subagent has agent_id set — never
+# inject peer-coordination nudges into a subagent's context.
+AGENT_ID=$(printf '%s' "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)
+[ -z "$AGENT_ID" ] || exit 0
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -n "$SID" ] || exit 0
 ID="${SID:0:8}"
 
-N=$("$COORD" recv --id "$ID" --count 2>/dev/null)
+# PostToolUse fires on every tool call → THROTTLE (one notice per newly-arrived message).
+# UserPromptSubmit fires only on human turns → always show the current unread count so a
+# returning operator is reliably reminded.
+if [ "$EVENT" = "PostToolUse" ]; then
+  N=$("$COORD" notify-due --id "$ID" 2>/dev/null)
+else
+  N=$("$COORD" recv --id "$ID" --count 2>/dev/null)
+fi
 case "$N" in ''|*[!0-9]*) exit 0;; esac
 [ "$N" -gt 0 ] || exit 0
 

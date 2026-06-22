@@ -37,6 +37,14 @@
         "async": true,
         "timeout": 5000
       }]
+    }, {
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/coord-notify PostToolUse",
+        "async": false,
+        "timeout": 5000
+      }]
     }],
     "Stop": [
       {

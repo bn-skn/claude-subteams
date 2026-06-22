@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.25.0] - 2026-06-22
+
+### Added
+- **Autonomous mailbox delivery — peer messages reach promptless agents.** The 1.24.0 notifier fired only on `UserPromptSubmit` (interactive only); an agent running autonomously for hours never fires it. `coord-notify` now also runs on `PostToolUse` (autonomous agents call tools constantly), **throttled to one notice per newly-arrived message** via `coord.sh notify-due` (a per-instance `notify/<id>.last` timestamp marker — robust across `recv` clears). See [ADR-003](docs/adr/003-autonomous-mailbox-delivery.md).
+  - **Polling discipline is the backbone** (skill §3.7): the hook is an assist; the guarantee is the orchestrator running `recv`/`roster` at coordination checkpoints (before claim, after a work unit, before the commit-lock) and sending a deliberate handoff when a unit unblocks a peer. Communication is a conscious act, never an automatic broadcast of output.
+  - **Subagents are skipped** (`agent_id` present → no notice) so only the orchestrator is nudged. `UserPromptSubmit` keeps the always-show count (infrequent, wants reliability); `PostToolUse` uses the throttle.
+  - **Known limitation:** notice granularity is one second — a burst of messages to one recipient within a wall-clock second notifies once; `recv` still returns all of them (the notice is only a doorbell).
+
 ## [1.24.0] - 2026-06-22
 
 ### Added

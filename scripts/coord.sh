@@ -35,6 +35,7 @@
 #   claims                             list current claims
 #   send      --from ID --to ID MSG    append MSG to recipient inbox
 #   recv      --id ID [--count]         print + clear own inbox (--count: peek count, no clear)
+#   notify-due --id ID                  echo unread count IF new since last notify, else 0 (throttle)
 #   commit-lock -- CMD...              run CMD holding the global commit lock
 #   repokey                            print the derived repo key (debug)
 
@@ -367,6 +368,36 @@ cmd_commit_lock() {
   ( flock 9; "$@" ) 9>"$COMMIT_LOCK"
 }
 
+cmd_notify_due() {
+  # Throttled notification check for HIGH-FREQUENCY events (PostToolUse): echo the unread
+  # count IFF a message has arrived since this id was last notified — then advance the
+  # marker — else echo 0. This yields exactly ONE notice per newly-arrived message instead
+  # of one per tool call. Non-destructive: it never clears the inbox (recv stays the
+  # explicit consume). The marker is keyed by the newest message's `at` timestamp.
+  local id=""
+  while [ $# -gt 0 ]; do case "$1" in --id) id="$2"; shift 2;; *) shift;; esac; done
+  [ -n "$id" ] || return 2
+  _valid_id "$id" || { echo "[coord] notify-due: invalid --id '$id'" >&2; return 2; }
+  local box="$INBOX/$id.jsonl"
+  [ -s "$box" ] || { echo 0; return 0; }
+  cmd_init
+  ( flock 9
+    mkdir -p "$ROOT/notify" 2>/dev/null
+    local marker="$ROOT/notify/$id.last" newest last count
+    newest=$(jq -rR 'fromjson? | .at' "$box" 2>/dev/null | sort -n | tail -1)
+    case "$newest" in ''|*[!0-9]*) newest=0;; esac
+    last=0; [ -f "$marker" ] && last=$(cat "$marker" 2>/dev/null)
+    case "$last" in ''|*[!0-9]*) last=0;; esac
+    if [ "$newest" -gt "$last" ]; then
+      printf '%s' "$newest" > "$marker"
+      count=$(grep -cve '^[[:space:]]*$' "$box" 2>/dev/null || echo 0)
+      echo "$count"
+    else
+      echo 0
+    fi
+  ) 9>"$LOCK"
+}
+
 main() {
   local cmd="${1:-}"; shift || true
   case "$cmd" in
@@ -381,6 +412,7 @@ main() {
     claims) cmd_claims;;
     send) cmd_send "$@";;
     recv) cmd_recv "$@";;
+    notify-due) cmd_notify_due "$@";;
     commit-lock) cmd_commit_lock "$@";;
     repokey) echo "$REPOKEY  ($ROOT)";;
     ""|-h|--help) sed -n '2,40p' "$0";;
