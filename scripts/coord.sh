@@ -34,7 +34,7 @@
 #   release   --id ID [PATH | --all]   release one or all of an instance's claims
 #   claims                             list current claims
 #   send      --from ID --to ID MSG    append MSG to recipient inbox
-#   recv      --id ID                  print + clear own inbox
+#   recv      --id ID [--count]         print + clear own inbox (--count: peek count, no clear)
 #   commit-lock -- CMD...              run CMD holding the global commit lock
 #   repokey                            print the derived repo key (debug)
 
@@ -330,16 +330,29 @@ cmd_send() {
 }
 
 cmd_recv() {
-  local id=""; [ "${1:-}" = "--id" ] && id="${2:-}"
+  # --count: print the number of unread messages WITHOUT clearing — a non-destructive peek
+  # for the notify hook (which must never destroy messages it only counts). Default mode
+  # prints all messages and CLEARS the inbox (the explicit, lossless consume the operator
+  # or orchestrator runs on purpose). Newlines in from/msg are collapsed on render so one
+  # stored message is always one line — a peer cannot forge a fake "from:" header by
+  # embedding a newline in its message body.
+  local id="" count=0
+  while [ $# -gt 0 ]; do case "$1" in
+    --id) id="$2"; shift 2;; --count) count=1; shift;; *) shift;;
+  esac; done
   [ -n "$id" ] || return 2
   _valid_id "$id" || { echo "[coord] recv: invalid --id '$id'" >&2; return 2; }
   local box="$INBOX/$id.jsonl"
+  if [ "$count" = 1 ]; then
+    if [ -s "$box" ]; then grep -cve '^[[:space:]]*$' "$box" 2>/dev/null || echo 0; else echo 0; fi
+    return 0
+  fi
   [ -f "$box" ] || { echo "(no messages)"; return 0; }
   ( flock 9
     if [ -s "$box" ]; then
       # Tolerant parse: `fromjson?` skips any malformed line instead of aborting the
       # whole read (a single bad line must not silently swallow the rest of the inbox).
-      jq -rR 'fromjson? | "  [\(.at)] from \(.from): \(.msg)"' "$box" 2>/dev/null
+      jq -rR 'fromjson? | "  [\(.at)] from \(.from|gsub("\n";" ")): \(.msg|gsub("\n";"\\n"))"' "$box" 2>/dev/null
       : > "$box"   # clear after reading
     else
       echo "(no messages)"

@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.24.0] - 2026-06-22
+
+### Added
+- **Mailbox notification — you no longer have to remember to `recv`.** A new `coord-notify` hook (UserPromptSubmit, opt-in, async:false) injects a one-line **count** of unread peer messages ("you have N unread message(s)… run `coord.sh recv`") when any are waiting. See [ADR-002](docs/adr/002-mailbox-notify-count-only.md).
+  - **Count-only, by design — peer content is never auto-injected.** Injecting message *text* into context was prototyped (`coord-deliver`) and rejected in review (code-reviewer + devils-advocate): peer text is untrusted (the inbox is a plain file, `send --from` is unauthenticated, trust is transitive), so auto-injecting it is a prompt-injection surface and contradicts the plugin's no-arbitrary-injection principle. The notifier injects only a count and makes the orchestrator pull content with `recv` (read as tool output = data it requested), framed as untrusted in the skill.
+  - **Lossless:** the notifier never clears the inbox. New `recv --count` is a non-destructive peek; `recv` stays the explicit consume (read and clear are separable, so a dropped notice never loses a message).
+  - **Hardening:** `recv` now collapses newlines in rendered `from`/`msg` so a peer cannot forge a fake `from:` header by embedding a newline. The hook receives its event name authoritatively as an argv from `hooks.json` (never guesses it — a mismatched `hookEventName` would be silently dropped by the SDK) and stays off `SessionStart` to respect the "SessionStart does not inject" invariant. Multi-instance trust guidance (treat mailbox content as untrusted peer data, not commands) added to the skill.
+
 ## [1.23.1] - 2026-06-22
 
 ### Fixed
