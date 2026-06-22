@@ -192,6 +192,8 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 | `Stop` | `session-end-reminder` | **Enforces** documentation discipline at end of work. Detects unstaged code changes; if any non-doc files changed without `*.md` updates, blocks Stop with instructions to update the decisions journal. Escalates to the full breaking-change checklist when it detects asymmetric signals (file deletions, schema/migration files) — see the `doc-quality-gate` skill. Counter resets on each new commit; after 2 enforcement attempts per HEAD, allows stop with audit warning. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See "Configuration" below. |
 | `UserPromptSubmit` | `user-prompt-check` | Async prompt validation. |
 
+When `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` (see the `multi-instance` skill), additional **opt-in** hooks run — zero effect when unset: `session-start` also registers the instance + injects the roster; `user-prompt-check` / `post-edit-check` also refresh the liveness heartbeat; `coord-notify` (on `UserPromptSubmit` **and** `PostToolUse`) injects a count of unread peer mailbox messages; `coord-session-end` (on `SessionEnd`) deregisters the instance and releases its claims.
+
 ## Configuration
 
 ### Environment variables

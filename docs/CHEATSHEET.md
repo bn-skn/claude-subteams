@@ -3,8 +3,8 @@
 Quick reference for installing, updating, removing, and **repairing** the plugin from any machine.
 
 - **Repo:** `bn-skn/claude-subteams` (private)
-- **Marketplace:** `articortex` · **Plugin:** `claude-subteams` · **Version:** 1.18.0
-- **Contents:** 16 agents, 53 skills, 6 hooks
+- **Marketplace:** `articortex` · **Plugin:** `claude-subteams` · **Version:** 1.25.0 (see CHANGELOG for the latest)
+- **Contents:** 16 agents, 55 skills, 8 hooks
 
 ---
 

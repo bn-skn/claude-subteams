@@ -3,6 +3,12 @@
 > **For agentic workers:** this is agentic/prompt work — `using-subteams` Section 6.5 applies (prompt-engineer authors prose, prompt-evaluator validates; agent-architect only where a new skill's topology/contract is designed). Each phase is its own pipeline cycle, branch, and version bump.
 
 **Status:** All three shipped (2026-06-17) — Phase 1 ✅ (1.21.0), Phase 2 ✅ (1.22.0), Phase 3 ✅ reduced v1 (1.23.0). Phase 3 was cut to a coherent core after a plan-defense review (agent-architect + devils-advocate); **deferred to a future "3c" phase**: shared task ledger, hooks-as-quality-gates, SQLite backend, fencing tokens, and any PreToolUse "enforcement" hook (claims ship as honest advisory coordination).
+
+**Phase 3 follow-ups (2026-06-22), shipped & pushed — multi-instance made actually functional:** the 1.23.0 v1 had a latent blocker (PID-only liveness reaped every instance on SDK/service harnesses). Fixed and extended:
+- **1.23.1** — liveness keys on the resolved long-lived `claude`-ancestor pid (`pid_trusted`) with heartbeat-TTL fallback; `pid=0` guard; deregistration moved `Stop`→`SessionEnd`; self-healing heartbeat. ([ADR-001](../../adr/001-multiinstance-liveness-resolved-pid.md))
+- **1.24.0** — mailbox auto-notification (count-only, injection-safe; peer content stays pull-only via `recv`). ([ADR-002](../../adr/002-mailbox-notify-count-only.md))
+- **1.25.0** — autonomous delivery: `coord-notify` on `PostToolUse` (throttled) + polling-discipline backbone in the skill. ([ADR-003](../../adr/003-autonomous-mailbox-delivery.md))
+Each reviewed by code-reviewer + devils-advocate; UserPromptSubmit injection verified in vivo (SDK 0.2.77), PostToolUse injection pending a restart check. "3c" items remain deferred.
 **Author:** Bogdan + Claude Opus 4.8
 **Specs:** [`docs/specs/2026-06-17-living-plan-ledger.md`](../../specs/2026-06-17-living-plan-ledger.md), [`docs/specs/2026-06-17-multiinstance-coordination.md`](../../specs/2026-06-17-multiinstance-coordination.md)
 **Sequencing (approved):** 1 → 2 → 3, each shipped separately.
