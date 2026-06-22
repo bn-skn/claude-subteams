@@ -137,28 +137,65 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 
 ## Skills
 
+All 55 skills (auto-loaded on demand by description match; `using-subteams` loads at session start):
+
 | Sub-team | Skill | Description |
 |---|---|---|
 | core | `using-subteams` | Orchestrator meta-skill — methodology, pipeline, red flags. Loaded at session start. |
 | core | `orchestrator-briefing` | Subagent communication protocol. Use before every Agent tool call. |
 | core | `model-selection` | Guide for choosing sonnet vs opus per task type. |
-| architecture | `clean-architecture` | Enforces layered architecture, dependency direction, and file size limits. |
-| architecture | `conventions-enforcer` | Validates project structure against CONVENTIONS.md. |
-| scaffolding | `project-scaffold` | Bootstraps a new project's doc/config skeleton (CLAUDE.md, SYSTEM.md, docs tree, .gitignore) — OR retrofits the missing docs into an existing project (non-destructive). Complements the component-level `scaffolding` skill. |
-| design | `design-to-code` | Pipeline from text spec to working code with browser preview and feedback loop. |
-| design | `design-qa` | Compares implementation against design spec; heuristic evaluation and visual consistency. |
-| ops | `ci-cd-pipeline` | Sets up and modifies CI/CD pipelines and environment promotion strategies. |
-| process | `brainstorming` | Explores intent and requirements before any implementation. Use before creative work. For greenfield/structural work, captures architectural decisions as ADRs during the interview and projects them into `ARCHITECTURE.md`/`CONVENTIONS.md` (gated by `check-arch-docs.sh`). |
-| process | `decision-context` | Mandatory block (Decision / Why / Alternatives / Risks / Linked) in the decisions journal for every non-trivial commit. Everyday companion to `adr-tracker`. |
-| process | `doc-quality-gate` | Classifies a change (cosmetic/feature/architectural/breaking) and defines the docs each class needs. Pairs with the session-end-reminder hook's breaking-signal escalation. |
-| process | `living-plan` | Maintains a single multi-level plan-of-record (package → acceptance criterion → status) for multi-package/contracted work. Validated by `check-plan.sh`. |
-| coordination | `multi-instance` | Opt-in protocol for several Claude Code instances on one machine/one repo: claim files before editing, commit under a lock, message peers. Portable (file-based, not agent-teams). `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`. |
-| quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID principles. |
-| quality | `adversarial-testing` | Writes tests designed to break the code — edge cases, race conditions, boundary violations. |
-| quality | `ui-testing` | Browser-based UI testing with Playwright CLI. Visual regression, interaction testing, CI-ready E2E. |
-| quality | `codebase-improvement` | Proactive codebase analysis. Dispatches improvement-agent for health checks and tech debt discovery. |
-| research | `live-research` | Fetches current library/API docs before coding against fast-moving SDKs (`/research`, `/whatsnew`). Orchestrator fetches via Context7/web; researcher synthesizes. |
-| cross-model | `cross-review` | Runs Codex/GPT critics alongside Claude critics to break model-monoculture blind spots (`/cross-review`, `/rescue`). Full set by default (2 Claude + 2 GPT); Claude-only when Codex is down. Strongest model at high reasoning effort, native default. |
+| core | `context-management` | Managing the context window, checkpoints, and session summaries. |
+| agents | `agent-engineering` | Design multi-agent systems: orchestrator + specialists, context engineering, token efficiency, standardized contracts. |
+| agents | `subagent-prompt-design` | Design subagent prompts: minimal context, restricted tools, standardized output, explicit handoff. |
+| planning | `brainstorming` | Explores intent and requirements before any implementation. For greenfield/structural work, captures decisions as ADRs and projects them into `ARCHITECTURE.md`/`CONVENTIONS.md` (gated by `check-arch-docs.sh`). |
+| planning | `writing-plans` | Turn a spec into a step-by-step implementation plan before touching code. |
+| planning | `living-plan` | Single multi-level plan-of-record (package → acceptance criterion → status) for multi-package/contracted work. Validated by `check-plan.sh`. |
+| execution | `executing-plans` | Execute a written plan with subagent orchestration and quality gates. |
+| execution | `subagent-driven-dev` | Fresh subagent per independent task with two-stage review. |
+| execution | `parallel-dispatch` | Run 2+ independent tasks concurrently without shared state or sequential dependencies. |
+| execution | `finishing-branch` | Decide how to integrate completed work — merge, PR, or cleanup. |
+| execution | `receiving-review` | Verify and triage review feedback with technical rigor before implementing it. |
+| execution | `verification-gate` | Evidence before "done": run verification commands, backups, doc/compile/visual checks. |
+| execution | `systematic-debugging` | Reproduce → root-cause → fix → verify, before proposing any fix. |
+| execution | `self-optimization` | Iterative improve-test-deploy cycle for prompts, skills, and CLAUDE.md. |
+| docs | `decision-context` | Mandatory Decision / Why / Alternatives / Risks / Linked block for every non-trivial change. Companion to `adr-tracker`. |
+| docs | `adr-tracker` | Numbered lightweight-MADR ADRs in `docs/adr/` for project-wide decision history. |
+| docs | `doc-quality-gate` | Classifies a change (cosmetic/feature/architectural/breaking) and defines the docs each class needs. |
+| docs | `claudemd-engineering` | Standards for writing and maintaining concise, prioritized, regularly-pruned CLAUDE.md files. |
+| docs | `skill-engineering` | Standards for high-quality SKILL.md: one job per skill, numbered checklists, critical rules, mandatory testing. |
+| architecture | `clean-architecture` | Enforces layered architecture, dependency direction, and file-size limits (requires CONVENTIONS.md). |
+| architecture | `conventions-enforcer` | Validates project structure, file sizes, import direction, and naming against CONVENTIONS.md. |
+| architecture | `service-boundaries` | Decision framework for service decomposition: split vs keep together, bounded contexts, data ownership. |
+| architecture | `refactoring` | Safe refactoring: identifies god-files, circular deps, DRY violations; small steps with tests. |
+| scaffolding | `project-scaffold` | Bootstrap a project doc/config skeleton — OR retrofit missing docs into an existing project (non-destructive). |
+| scaffolding | `scaffolding` | Create new services, modules, API endpoints, skills, or agents from templates. |
+| design | `design-to-code` | Pipeline from text spec to working code with design system, browser preview, and feedback loop. |
+| design | `design-qa` | Compare implementation against spec: heuristic evaluation, visual consistency, responsiveness. |
+| design | `accessibility` | WCAG 2.1 AA audit: semantic HTML, keyboard nav, screen readers, color contrast, ARIA. |
+| quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID — and how to brief the reviewer. |
+| quality | `adversarial-testing` | Tests designed to break the code: edge cases, invalid data, race conditions, boundary violations. |
+| quality | `test-driven-development` | Red-Green-Refactor: write the test first, watch it fail, write minimal code to pass. |
+| quality | `ui-testing` | Browser UI testing via Playwright CLI: visual regression, interaction testing, CI-ready E2E. |
+| quality | `codebase-improvement` | Proactive codebase analysis; dispatches improvement-agent for health checks and tech-debt discovery. |
+| quality | `lint-and-style` | Consistent code style via linters, formatters, and editor config (ESLint, Prettier, EditorConfig). |
+| quality | `prompt-evaluation` | Test prompts and skills against regression cases with pass/fail metrics. |
+| security | `security-audit` | OWASP Top 10, prompt-injection, input validation, auth/authz; dispatches security-auditor. |
+| security | `config-and-secrets` | Env config, secrets protection, .gitignore enforcement, rotation, protected-file integrity. |
+| security | `dependency-audit` | Vulnerabilities, lockfile integrity, license compliance, unused packages, update strategy. |
+| backend | `api-design` | REST design: resource naming, HTTP methods, status codes, versioning, Zod validation, OpenAPI. |
+| backend | `database-design` | Schema design, migrations, query optimization; SQLite WAL mode and FTS5. |
+| backend | `data-engineering` | Data pipelines, ETL processes, data validation, and data-quality systems. |
+| backend | `error-handling` | Retry/backoff, circuit breakers, graceful degradation, structured errors; fix root causes. |
+| ops | `ci-cd-pipeline` | Set up and modify CI/CD pipelines, deployment workflows, environment promotion. |
+| ops | `git-workflow` | Branching strategy, conventional commits, and PR workflow. |
+| ops | `using-git-worktrees` | Isolated git worktrees for feature work or plan execution. |
+| ops | `monitoring-logging` | Structured logging, health checks, alerting, and observability for services. |
+| ops | `incident-management` | Production incident response, root-cause analysis, and postmortems. |
+| ops | `mobile-development` | Building, architecting, and deploying React Native, Flutter, or native apps. |
+| ops | `i18n-localization` | Internationalization, translation workflows, and locale-specific formatting. |
+| research | `live-research` | Fetch current library/API docs before coding against fast-moving SDKs (`/research`, `/whatsnew`). |
+| cross-model | `cross-review` | GPT (Codex) + Claude critics in parallel to break model-monoculture blind spots (`/cross-review`, `/rescue`); Claude-only when Codex is down. |
+| coordination | `multi-instance` | Opt-in coordination for several Claude Code instances on one repo: claim before edit, commit under a lock, mailbox + auto-notify. Portable (file-based, not agent-teams). `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`. |
 
 ## Agents
 
