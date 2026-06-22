@@ -6,6 +6,8 @@
 **Idea ref:** Idea 3 of the 3-idea modernization set
 **Research:** synthesized from deep-research run wf_c8320ebf-110 (42 agents; sources cited inline below). Synthesis assembled by orchestrator (workflow's own synthesize stage did not run).
 
+> **Amendment 2026-06-22 (1.23.1) — liveness implementation correction.** Shipped v1 (1.23.0) implemented liveness as PID-authoritative on the SessionStart hook's `$PPID` and treated heartbeat as observability-only — diverging from this spec's own §3.2/§7.9 heartbeat-TTL intent. On an SDK/service harness `$PPID` is an ephemeral hook shell, so every instance was reaped instantly and multi-instance was non-functional. 1.23.1 corrects this: register the **resolved long-lived `claude`-ancestor pid** (`pid_trusted`), authoritative via `kill -0`; **heartbeat TTL (`CLAUDE_SUBTEAMS_HEARTBEAT_TTL`, default 1800s) is the fallback** only when the pid is unresolvable. Deregistration moved `Stop`→`SessionEnd`. The §3.2 "bare TTL unsafe for correctness locks" caveat therefore applies only in the unresolvable-pid fallback mode. See [ADR-001](../adr/001-multiinstance-liveness-resolved-pid.md).
+
 ---
 
 ## 1. Problem & framing
