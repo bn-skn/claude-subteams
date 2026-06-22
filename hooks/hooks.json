@@ -43,21 +43,21 @@
         "matcher": "",
         "hooks": [{
           "type": "command",
-          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/coord-stop",
-          "async": false,
-          "timeout": 5000
-        }]
-      },
-      {
-        "matcher": "",
-        "hooks": [{
-          "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-end-reminder",
           "async": false,
           "timeout": 5000
         }]
       }
     ],
+    "SessionEnd": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/coord-session-end",
+        "async": false,
+        "timeout": 5000
+      }]
+    }],
     "UserPromptSubmit": [{
       "matcher": "",
       "hooks": [{

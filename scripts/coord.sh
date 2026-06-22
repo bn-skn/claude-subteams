@@ -6,9 +6,14 @@
 # can coordinate WITHOUT depending on Claude Code's native agent-teams. Opt-in only.
 #
 # Activation: nothing here does anything unless CLAUDE_SUBTEAMS_MULTI_INSTANCE=1.
-# Liveness is authoritative by PID (kill -0) on this single host; heartbeat TTL and a
-# missing worktree are only secondary reap signals. Claims are ADVISORY (cooperating
-# instances honor them) — this is coordination, not OS-enforced locking.
+# Liveness: we register the LONG-LIVED instance process pid — resolved by walking up the
+# process tree to the persistent `claude` ancestor, NOT the hook's ephemeral $PPID (an
+# `sh -c` shell that dies the instant the hook returns; registering it reaped every
+# instance on the first pass). When that resolution succeeds the entry is `pid_trusted`
+# and liveness is authoritative by PID (`kill -0`): a quiet instance is never wrongly
+# reaped, a dead one is reaped at once. Only when the real pid is UNobtainable do we fall
+# back to a heartbeat TTL (CLAUDE_SUBTEAMS_HEARTBEAT_TTL). A removed worktree is an
+# unconditional dead signal. Claims are ADVISORY (cooperating instances honor them).
 #
 # Layout (shared across all worktrees of one repo, keyed by --git-common-dir):
 #   $COORD_HOME/<repokey>/
@@ -22,7 +27,7 @@
 #   init                               ensure coord dir + files exist (atomic)
 #   register  --id ID [--worktree P --branch B --role R]
 #   deregister --id ID                 remove instance + release its claims
-#   heartbeat --id ID                  refresh liveness timestamp
+#   heartbeat --id ID [--pid P --worktree P --branch B]  refresh liveness; re-register if reaped
 #   roster                             list live instances (reaps dead first)
 #   reap                               remove dead instances + release their claims
 #   claim     --id ID PATH             atomic claim-or-reject (exit 0 ok, 3 rejected)
@@ -47,11 +52,36 @@ fi
 
 COORD_HOME="${CLAUDE_SUBTEAMS_COORD_HOME:-$HOME/.claude/subteams}"
 
+# Heartbeat TTL (seconds): a PID-dead instance whose heartbeat is older than this is
+# considered gone. The registered pid is only an accelerator, NOT authoritative — on
+# SDK/service harnesses the SessionStart pid is an ephemeral hook shell that dies at
+# once, so heartbeat freshness is the real liveness signal. Generous default so an
+# instance idling between user turns survives; override via CLAUDE_SUBTEAMS_HEARTBEAT_TTL.
+HEARTBEAT_TTL="${CLAUDE_SUBTEAMS_HEARTBEAT_TTL:-1800}"
+
 _now() { date +%s; }
 
 # Identity sanity: ids and inbox targets become filenames and jq keys — reject anything
 # that could traverse the coord dir or break the ledger. Session-hash ids are [a-f0-9].
 _valid_id() { printf '%s' "${1:-}" | grep -qE '^[A-Za-z0-9._-]+$'; }
+
+# Resolve the long-lived instance process pid: walk up the parent chain from <start>
+# (default $PPID) until a persistent agent process is found. Hooks (and this script)
+# run as transient `sh -c`/bash children of the session's `claude` process, so the
+# stable, per-instance, session-long pid is an ANCESTOR — not $PPID. Prints the pid and
+# returns 0 on success; returns 1 if no such ancestor exists (e.g. run outside a session,
+# under cron, or on a harness with a different process name) — callers then fall back to
+# a heartbeat TTL. Bounded depth so a pathological chain can never loop.
+_resolve_instance_pid() {  # _resolve_instance_pid [start_pid]
+  local p="${1:-$PPID}" comm depth=0
+  while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null && [ "$depth" -lt 16 ]; do
+    comm=$(ps -o comm= -p "$p" 2>/dev/null | tr -d ' ')
+    case "$comm" in claude|claude-code) printf '%s' "$p"; return 0;; esac
+    p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+    depth=$((depth + 1))
+  done
+  return 1
+}
 
 _repokey() {
   local common key
@@ -93,22 +123,38 @@ _jq_write() {  # _jq_write <target-file> <jq-args...>
   fi
 }
 
-# is instance <id> alive? PID exists (authoritative) AND its worktree still exists.
+# is instance <id> alive? Liveness = worktree-present AND (PID-alive OR heartbeat-fresh).
+# PID-alive is a fast-path accelerator (a busy instance is instantly live); heartbeat-TTL
+# is the authoritative fallback because on SDK/service harnesses the registered pid is an
+# ephemeral hook shell that dies immediately — a PID-only check would reap every instance
+# on the first reap pass. A removed worktree is an unconditional dead signal.
 _alive() {  # _alive <id>
-  local id="$1" pid wt
+  local id="$1" pid trusted wt hb now
   pid=$(jq -r --arg i "$id" '.[$i].pid // empty' "$INSTANCES" 2>/dev/null)
+  trusted=$(jq -r --arg i "$id" '.[$i].pid_trusted // false' "$INSTANCES" 2>/dev/null)
   wt=$(jq -r --arg i "$id" '.[$i].worktree // empty' "$INSTANCES" 2>/dev/null)
   [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1            # PID gone → dead
   [ -z "$wt" ] || [ -d "$wt" ] || return 1          # worktree removed → dead
-  return 0
+  # pid>0 guard FIRST: kill -0 0 hits the caller's process group and ALWAYS succeeds,
+  # which would make a pid=0 (unresolved/sanitized) entry immortal. Treat <=0 as no pid.
+  if [ "$pid" -gt 0 ] 2>/dev/null && kill -0 "$pid" 2>/dev/null; then
+    return 0                                        # real process alive → live
+  fi
+  # pid is dead-or-unusable. If we TRUSTED the pid (resolved to the real claude process),
+  # its death is authoritative → dead, reap now (no TTL wait). Only an UNtrusted pid
+  # (resolution failed on this harness) falls back to heartbeat freshness.
+  [ "$trusted" = "true" ] && return 1
+  hb=$(jq -r --arg i "$id" '.[$i].heartbeat // 0' "$INSTANCES" 2>/dev/null)
+  case "$hb" in ''|*[!0-9]*) hb=0;; esac
+  now=$(_now)
+  [ "$(( now - hb ))" -lt "$HEARTBEAT_TTL" ]        # fresh → live; stale → dead
 }
 
 # reap dead instances and free their claims (must be called inside the flock).
-# Liveness is authoritative by PID (+ worktree existence) on this single host — a
-# PID-alive instance is NEVER reaped on a stale heartbeat (a real instance can be quiet
-# for a long tool call). Heartbeat is recorded for observability; PID reuse is an
-# accepted rare gap on a single host with 2-3 long-lived instances.
+# Liveness model: a trusted (resolved-to-real-claude) pid is authoritative via kill -0;
+# an untrusted pid falls back to heartbeat TTL. See _alive and the file header. A removed
+# worktree is an unconditional dead signal. PID reuse (a recycled pid landing on an
+# unrelated live process) is an accepted rare gap on a single host with 2-3 instances.
 _reap_locked() {
   local ids id
   ids=$(jq -r 'keys[]' "$INSTANCES" 2>/dev/null)
@@ -127,24 +173,34 @@ _reap_locked() {
 }
 
 cmd_register() {
-  # --pid is the LONG-LIVED instance process to check liveness against (the Claude
-  # process), NOT coord.sh's own ephemeral pid. Defaults to $PPID (the hook/shell that
-  # invoked us — closer to the instance than $$). Heartbeat TTL is the reliable backstop
-  # when the captured pid is not the true instance pid.
-  local id="" wt="" br="" role="" pid="$PPID"
+  # The pid we store must be the LONG-LIVED instance process, not coord.sh's ephemeral
+  # caller. We resolve it by walking up to the `claude` ancestor (_resolve_instance_pid);
+  # that yields a session-long, per-instance, TRUSTED pid. An explicit --pid (e.g. from a
+  # launcher that already knows the real pid) wins over resolution. If neither yields a
+  # real ancestor we keep the given/PPID value but mark it UNtrusted, so _alive falls back
+  # to the heartbeat TTL instead of trusting a pid that may be ephemeral.
+  local id="" wt="" br="" role="" pid="" explicit=0
   while [ $# -gt 0 ]; do case "$1" in
     --id) id="$2"; shift 2;; --worktree) wt="$2"; shift 2;;
     --branch) br="$2"; shift 2;; --role) role="$2"; shift 2;;
-    --pid) pid="$2"; shift 2;; *) shift;;
+    --pid) pid="$2"; explicit=1; shift 2;; *) shift;;
   esac; done
   [ -n "$id" ] || { echo "[coord] register: --id required" >&2; return 2; }
   _valid_id "$id" || { echo "[coord] register: invalid --id '$id' (allowed: A-Za-z0-9._-)" >&2; return 2; }
-  case "$pid" in ''|*[!0-9]*) echo "[coord] register: --pid must be numeric (got '$pid')" >&2; return 2;; esac
+  local trusted=false rpid
+  if [ "$explicit" = 1 ]; then
+    case "$pid" in ''|*[!0-9]*) echo "[coord] register: --pid must be numeric (got '$pid')" >&2; return 2;; esac
+    trusted=true                                    # caller asserts a real pid
+  elif rpid=$(_resolve_instance_pid "$PPID"); then
+    pid="$rpid"; trusted=true                       # resolved to the real claude process
+  else
+    pid="$PPID"; trusted=false                      # no claude ancestor → TTL fallback
+  fi
   cmd_init
   ( flock 9
     _jq_write "$INSTANCES" --arg i "$id" --arg pid "$pid" --arg wt "$wt" \
-      --arg br "$br" --arg role "$role" --arg now "$(_now)" \
-      '.[$i] = {pid:($pid|tonumber), worktree:$wt, branch:$br, role:$role, started:($now|tonumber), heartbeat:($now|tonumber)}'
+      --arg br "$br" --arg role "$role" --arg tr "$trusted" --arg now "$(_now)" \
+      '.[$i] = {pid:($pid|tonumber), pid_trusted:($tr=="true"), worktree:$wt, branch:$br, role:$role, started:($now|tonumber), heartbeat:($now|tonumber)}'
   ) 9>"$LOCK"
 }
 
@@ -160,12 +216,35 @@ cmd_deregister() {
 }
 
 cmd_heartbeat() {
-  local id=""; [ "${1:-}" = "--id" ] && id="${2:-}"
+  # Self-healing: an existing entry just gets its heartbeat bumped; a MISSING entry is
+  # recreated (re-register), so an instance that was reaped or deregistered comes back on
+  # its next activity instead of vanishing for the rest of the session. On recreation we
+  # resolve the real claude pid exactly as cmd_register does (so the rebuilt entry is
+  # pid_trusted and gets authoritative liveness, not a TTL guess). Note: a late async
+  # heartbeat arriving just after SessionEnd can recreate a phantom entry; it holds no
+  # claims (those were released) and is reaped once its real pid dies, so impact is at
+  # most transient roster clutter.
+  local id="" pid="" explicit=0 wt="" br=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --id) id="$2"; shift 2;; --pid) pid="$2"; explicit=1; shift 2;;
+    --worktree) wt="$2"; shift 2;; --branch) br="$2"; shift 2;; *) shift;;
+  esac; done
   [ -n "$id" ] || return 2
-  [ -f "$INSTANCES" ] || return 0
+  _valid_id "$id" || { echo "[coord] heartbeat: invalid --id '$id'" >&2; return 2; }
+  local trusted=false rpid
+  if [ "$explicit" = 1 ] && printf '%s' "$pid" | grep -qE '^[0-9]+$'; then
+    trusted=true
+  elif rpid=$(_resolve_instance_pid "$PPID"); then
+    pid="$rpid"; trusted=true
+  else
+    pid="$PPID"; trusted=false
+  fi
+  cmd_init
   ( flock 9
-    _jq_write "$INSTANCES" --arg i "$id" --arg now "$(_now)" \
-      'if .[$i] then .[$i].heartbeat = ($now|tonumber) else . end'
+    _jq_write "$INSTANCES" --arg i "$id" --arg pid "$pid" --arg wt "$wt" \
+      --arg br "$br" --arg tr "$trusted" --arg now "$(_now)" \
+      'if .[$i] then .[$i].heartbeat = ($now|tonumber)
+       else .[$i] = {pid:($pid|tonumber), pid_trusted:($tr=="true"), worktree:$wt, branch:$br, role:"", started:($now|tonumber), heartbeat:($now|tonumber)} end'
   ) 9>"$LOCK"
 }
 

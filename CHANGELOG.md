@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.23.1] - 2026-06-22
+
+### Fixed
+- **Multi-instance coordination was non-functional on SDK/service harnesses — instances never saw each other.** Root cause: `_alive()` decided liveness purely by `kill -0 <pid>`, where `<pid>` is the SessionStart hook's `$PPID`. On a harness that runs Claude via the Agent SDK (not the interactive CLI), that PPID is an ephemeral hook shell that exits the instant the hook returns, so every instance was registered with a dead-on-arrival pid and reaped on the very first `reap`/`roster`/`claim` pass → `roster` always empty, `claim` always `exit 4: not registered`. The v1 "PID is authoritative, heartbeat is observability-only" model assumed the registered pid was the long-lived instance process; that assumption is false off the interactive CLI.
+  - **Root-cause fix — register the real long-lived pid, not `$PPID`.** New `_resolve_instance_pid()` walks up the process tree to the session's persistent `claude` ancestor; `cmd_register`/`cmd_heartbeat` store that pid and mark the entry `pid_trusted`. For a trusted pid, `_alive()` is authoritative by `kill -0` — a quiet instance is never wrongly reaped and a dead one is reaped immediately (no TTL wait). The hooks no longer pass `--pid` (the hook's `$PPID` is the ephemeral shell that caused the bug); coord.sh resolves it.
+  - **Heartbeat TTL is now only the *fallback*** for harnesses where the real pid is unresolvable (`_alive()` = `worktree-present AND (trusted-pid-alive, else untrusted-pid-alive OR heartbeat-within-TTL)`). New `CLAUDE_SUBTEAMS_HEARTBEAT_TTL` (default **1800s**). The starvation caveat (a long non-edit operation past the TTL) applies only in that fallback mode, not when the pid is trusted.
+  - **`pid=0` immortal-zombie fix** (caught in code review): `kill -0 0` targets the caller's process group and always succeeds, so a sanitized `pid=0` entry was never reaped. `_alive()` now guards `pid > 0` before any `kill -0`, falling through to the heartbeat check.
+  - **`cmd_heartbeat` is now self-healing (upsert):** an existing entry gets its heartbeat bumped; a *missing* entry is recreated (re-registered, re-resolving the trusted pid). This lets an instance that was reaped or deregistered come back on its next prompt/edit instead of vanishing for the session. `--id` is validated on the heartbeat path too. (A late async heartbeat just after SessionEnd can recreate a phantom entry; it holds no claims and is reaped once its real pid dies — bounded, documented in-code.)
+  - **Deregistration moved from `Stop` to `SessionEnd`** (`hooks/coord-stop` → `hooks/coord-session-end`). `Stop` fires at the end of *every assistant turn*, so the old wiring released all of an instance's claims and deregistered it after every turn — claims could not survive across turns. `SessionEnd` fires once at real session end; if a harness never emits it (or on crash), a trusted-pid instance is still reaped immediately on process death, and an untrusted one via TTL.
+
 ## [1.23.0] - 2026-06-17
 
 ### Added

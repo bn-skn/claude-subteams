@@ -20,8 +20,8 @@ This substrate is **portable and deliberately NOT Claude Code's native agent-tea
 When the flag is on, the plugin's hooks handle lifecycle for you:
 
 - **SessionStart** — registers your instance, reaps dead peers, injects the roster + this protocol into your context.
-- **UserPromptSubmit / PostToolUse** — refresh your heartbeat (liveness).
-- **Stop** — deregisters you and releases your claims (best-effort; a crash is still cleaned up by PID-based reap when a peer next runs).
+- **UserPromptSubmit / PostToolUse** — refresh your heartbeat (your liveness signal) and **re-register you if you were reaped** (self-healing).
+- **SessionEnd** — deregisters you and releases your claims (best-effort; if a harness never emits SessionEnd, or on a crash, your entry is reaped once its heartbeat ages past the TTL).
 
 You do NOT manage registration or heartbeat manually. You DO manage **claims, commits, and messages** (Section 3).
 
@@ -42,8 +42,8 @@ Your subagents (Agent tool) edit files within YOUR instance. Before dispatching 
 
 ## 5. Liveness & failure model
 
-- Liveness is authoritative by **PID** on this single host (`kill -0`) plus worktree existence: a dead process (or a removed worktree) is reaped by the next peer's `roster`/`claim`/`reap`, freeing its claims immediately. A PID-alive instance is **never** reaped for being quiet — a real instance can sit in a long tool call without harm.
-- Heartbeat is recorded (refreshed on prompt/edit events) for observability and reserved for future use; it is **not** a reap trigger. PID reuse (a different live process landing on a recycled pid) is an accepted rare gap on a single host with 2-3 long-lived instances.
+- **Liveness keys on the long-lived process pid.** At register/self-heal, `coord.sh` does NOT trust the hook's `$PPID` (an ephemeral `sh -c`/bash shell that dies immediately — trusting it reaped every instance on the first pass). It walks up the process tree to the session's persistent `claude` ancestor and stores that pid as **`pid_trusted`**. For a trusted pid, liveness is authoritative by `kill -0`: a quiet instance is **never** wrongly reaped (its real process is alive), and a genuinely dead one is reaped **immediately** by the next peer's `roster`/`claim`/`reap` — no TTL wait. A removed worktree is an unconditional dead signal.
+- **Heartbeat TTL is only the fallback** for harnesses where the real pid can't be resolved (no `claude` ancestor — e.g. a different process name, or running under cron). Default **1800s**, override with `CLAUDE_SUBTEAMS_HEARTBEAT_TTL`; heartbeat refreshes on every prompt and Edit/Write. In that fallback mode the starvation caveat applies (an instance doing only non-edit work past the TTL can be reaped while alive); with a trusted pid it does not. Either way claims are advisory and the substrate targets 2-3 actively cooperating instances.
 - `flock`-based locks (the commit-lock) auto-release on process death — crash-safe by construction.
 
 ## 6. Scope boundaries (what this is NOT)

@@ -1,0 +1,21 @@
+#!/bin/bash
+# SessionEnd hook — multi-instance deregistration (opt-in).
+# MUST be SessionEnd, not Stop: Stop fires at the end of EVERY assistant turn, so
+# deregistering/releasing there would drop the instance and free its claims mid-session
+# (claims must survive across turns). On session end we free claims + deregister at once.
+# If a harness does not emit SessionEnd (or on crash/OOM), cleanup falls to coord.sh's
+# heartbeat-TTL reap — a stale instance is reaped by the next peer's roster/claim/reap.
+[ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ] || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+
+COORD="${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh"
+[ -x "$COORD" ] || exit 0
+
+INPUT=$(cat 2>/dev/null || printf '{}')
+SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+[ -n "$SID" ] || exit 0
+ID="${SID:0:8}"
+
+"$COORD" release --id "$ID" --all >/dev/null 2>&1
+"$COORD" deregister --id "$ID" >/dev/null 2>&1
+exit 0

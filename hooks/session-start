@@ -45,9 +45,10 @@ if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ] && command -v jq >/dev/null 
   _mi_id="${_mi_sid:0:8}"
   _mi_coord="${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh"
   if [ -x "$_mi_coord" ]; then
-    # $PPID is this hook's parent (the Claude process) — best-effort liveness pid;
-    # heartbeat TTL is the reliable backstop.
-    "$_mi_coord" register --id "$_mi_id" --pid "$PPID" --worktree "$PWD" \
+    # Do NOT pass --pid: $PPID here is the hook's ephemeral sh/bash shell, not the
+    # long-lived instance. coord.sh resolves the real `claude` ancestor pid itself
+    # (and marks it trusted); only if that fails does it fall back to a heartbeat TTL.
+    "$_mi_coord" register --id "$_mi_id" --worktree "$PWD" \
       --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" >/dev/null 2>&1
     "$_mi_coord" reap >/dev/null 2>&1
     _mi_roster=$("$_mi_coord" roster 2>/dev/null)
