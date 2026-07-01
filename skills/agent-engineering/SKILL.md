@@ -56,7 +56,7 @@ Every agent MUST have:
 
 1. **Frontmatter** — name, description, model, tools list.
 2. **System prompt** — role, task, constraints, output format.
-3. **Output format** — standardized structure matching orchestrator-briefing: Task, Status, Changes, Verification, Questions, Notes.
+3. **Output format** — standardized structure matching orchestrator-briefing: Task, Status, Rails read, Changes, Verification, Questions, Notes.
 4. NEVER create an agent without all three components defined.
 
 ```
@@ -66,7 +66,7 @@ Model: [opus | sonnet]
 Tools: [explicit list]
 Task: [one sentence]
 Input: [what the orchestrator provides]
-Output: [Task, Status (done|partial|blocked), Changes, Verification, Questions, Notes]
+Output: [Task, Status (done|partial|blocked), Rails read, Changes, Verification, Questions, Notes]
 ```
 
 ## 7. Logging and Debugging
@@ -105,7 +105,7 @@ Before dispatching any agent:
 
 1. NEVER let specialists communicate directly — orchestrator mediates all.
 2. NEVER pass raw conversation history to agents — summarize.
-3. ALWAYS use the standardized output format from orchestrator-briefing (Task, Status, Changes, Verification, Questions, Notes).
+3. ALWAYS use the standardized output format from orchestrator-briefing (Task, Status, Rails read, Changes, Verification, Questions, Notes).
 4. MUST log every agent dispatch and result for debugging.
 5. NEVER nest agents deeper than 3 levels.
 6. ALWAYS match model selection to task complexity.

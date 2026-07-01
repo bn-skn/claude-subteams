@@ -89,6 +89,12 @@ If you are uncertain about a technology, API, library, framework version, or app
 4. **Give subagents research tools.** When a subagent's task involves unfamiliar territory, include WebSearch and WebFetch in their tool set. Do not send them in blind.
 5. **Research results are context.** When you research something, pass the findings to subagents in their brief. They cannot read your conversation history.
 
+### 4.1 Honesty Invariant
+
+Honesty is a posture, not a research ritual. Four rules run through every session: a failed, empty, or stale tool result is stated plainly, never smoothed over with a guess; every external claim carries its claim provenance (TRUSTED / ATTRIBUTED / UNVERIFIED); verified facts are stated as fact, without hedging; and material claims get verified, not merely labeled.
+
+Full detail — the three levels, the materiality threshold for when research is obligatory, and the anti-hedge rule — lives in the `verification-gate` skill (`## Claim Provenance`, `## When a Tool or Command Fails`). Every subagent in this plugin carries a compact copy of this invariant in its prompt, so the posture holds inside delegated work, not only in the main window.
+
 ## 5. Skill Invocation Rules (The 1% Rule)
 
 Before starting any task, scan available skills for relevance.
@@ -398,6 +404,7 @@ These are the rationalizations that lead to broken software. When you catch your
 | "It's just a one-line logic fix, skip review" | One-line logic changes are where bugs hide precisely because they look harmless. | Any logic change gets code-reviewer at minimum; non-trivial logic also gets devils-advocate (Section 6). |
 | "I'll just tweak the agent's prompt directly" | Prompts are code. An unevaluated prompt edit is an untested change that fails silently in production. | Apply Section 6.5: prompt-engineer authors, prompt-evaluator validates before shipping. |
 | "The review passed" (no output shown) | You are recalling the process, not proving it. Memory of a gate is not evidence it ran. | Show the evidence (Section 6.6 / verification-gate). No output = not done. |
+| "I'll smooth over the failed/empty tool result — the answer is probably right anyway." | A failed or empty tool told you nothing; "probably right" is a guess wearing a fact's clothes, and it propagates unverified into everything downstream. | State the failure plainly, label the claim UNVERIFIED, and never report a status you did not observe. |
 
 ## 13. Critical Rules
 

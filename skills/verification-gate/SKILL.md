@@ -13,6 +13,29 @@ Claiming work is complete without verification is dishonesty, not efficiency.
 
 **Violating the letter of this rule is violating the spirit of this rule.**
 
+## Claim Provenance
+
+Every claim you make carries a provenance level. State it — do not blur verified fact, cited source, and memory into one confident voice.
+
+| Level | When to use | How to state it |
+|-------|-------------|-----------------|
+| TRUSTED | Verified this session (ran the command, read the file) or read directly from the repo | State as fact. No qualifier. |
+| ATTRIBUTED | From an external source you consulted now | State with source + date |
+| UNVERIFIED | Recall / training memory, not checked this session (may be 6–18 months stale) | Label it: "unverified —" |
+
+**Anti-hedge (load-bearing).** What you verified is stated as fact, WITHOUT disclaimers. "should", "probably", "I think", "seems to" on a TRUSTED claim is a bug: it launders verified knowledge back into doubt and trains the reader to distrust everything you say. Hedge only what is genuinely UNVERIFIED.
+
+**Research is obligatory only for MATERIAL claims** — those that affect architecture, a dependency or version choice, user-visible behavior, external compatibility, security, or a contested fact. For everything else, an explicit UNVERIFIED label is the honest move, not a browsing ritual.
+
+**Reject mechanical citation rituals.** "Mentions a library → must go research it" is source laundering and disclaimer spam — it manufactures false confidence and buries the material claims that actually need checking. Materiality is the trigger, not pattern-matching. (Consistent with the 30-second rule in `using-subteams` §4.)
+
+This "claim provenance" is distinct from the architecture-doc "provenance" check later in this file (§ Architecture-Doc Check), which is about ADR-traceability of design decisions. This section is about how you state any factual claim.
+
+```
+BAD:   "The build should pass now."                       (hedged — a verified fact dressed as a guess)
+GOOD:  "Build passes — ran `npm run build`, exit 0."      (TRUSTED, stated as fact)
+```
+
 ## The Iron Law
 
 ```
@@ -40,6 +63,15 @@ BEFORE claiming any status or expressing satisfaction:
 
 Skip any step = lying, not verifying
 ```
+
+## When a Tool or Command Fails
+
+A tool that errors, times out, returns empty, or returns stale data has told you NOTHING — it has not told you the answer is fine.
+
+1. **State the failure plainly.** "The test command errored — exit 1, output below." Not silence, not a smoothed-over summary.
+2. **Never fill the gap with a guess.** A failed check is not a passed check. Do not infer success from an absent result, and do not report a status you did not observe.
+3. **Distinguish "tool failed" from "verified negative."** `grep` returning nothing because the pattern is genuinely absent is a real finding; `grep` erroring is you learning nothing. Say which one it is.
+4. **If you genuinely cannot see it — say so** explicitly, and name what a working tool or a human would need to check. An unverifiable claim is reported as unverified, never as done.
 
 ## Backup Before Destructive Changes
 

@@ -30,6 +30,7 @@ Every subagent MUST return results using the orchestrator-briefing output contra
 ```
 **Task:** brief description of what was done
 **Status:** done | partial | blocked
+**Rails read:** <path(s) read> — "<constraint quote>" applied at <file:line>
 
 ### Changes
 - `path/to/file.ts` — what changed and why
@@ -47,6 +48,7 @@ Every subagent MUST return results using the orchestrator-briefing output contra
 3. The **Status** field MUST always be present and MUST be one of: done, partial, blocked.
 4. Changes MUST include file:line references when applicable.
 5. This format matches the orchestrator-briefing skill — NEVER define a competing format.
+6. Agent-local `## Output Contract` sections inherit the `Rails read:` line from this canonical contract — it arrives via the brief and does not need to be duplicated into each agent file.
 
 ## 4. Agent Chain Rules
 
@@ -77,12 +79,16 @@ You are a [role]. Your task: [one-sentence description].
 ## Files
 [list of relevant file paths]
 
+## Rails
+[conventions/architecture docs and active plan the subagent must read before acting, when they exist]
+
 ## Constraints
 [numbered list of rules and limitations]
 
 ## Output Format
 **Task:** [what was done/found]
 **Status:** done | partial | blocked
+**Rails read:** [path — constraint applied]
 
 ### Changes
 - [file:line — what changed]
