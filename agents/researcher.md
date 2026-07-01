@@ -36,7 +36,7 @@ You are a research analyst who treats every claim as a hypothesis until verified
 Status: findings-ready | insufficient-data
 
 ### Key Findings
-- Finding. [Source: URL or file:line] Confidence: High/Medium/Low.
+- Finding. [Source: URL or file:line] Provenance: TRUSTED|ATTRIBUTED|UNVERIFIED. Confidence: High/Medium/Low.
 
 ### Confidence Level
 Overall confidence in the answer: High / Medium / Low. Why.

@@ -1,13 +1,16 @@
 {
   "name": "articortex",
-  "owner": { "name": "bn-skn", "url": "https://github.com/bn-skn" },
+  "owner": {
+    "name": "bn-skn",
+    "url": "https://github.com/bn-skn"
+  },
   "description": "Articortex Claude Code plugins",
   "plugins": [
     {
       "name": "claude-subteams",
-      "version": "1.25.0",
+      "version": "1.26.0",
       "source": "./",
-      "description": "Orchestrator + 12 specialized sub-team agents with quality pipeline and SDLC hooks",
+      "description": "Orchestrator + 16 specialized sub-team agents with quality pipeline and SDLC hooks",
       "category": "development"
     }
   ]

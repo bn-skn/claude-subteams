@@ -48,6 +48,7 @@ Every subagent MUST return results using the orchestrator-briefing output contra
 3. The **Status** field MUST always be present and MUST be one of: done, partial, blocked.
 4. Changes MUST include file:line references when applicable.
 5. This format matches the orchestrator-briefing skill — NEVER define a competing format.
+6. Agent-local `## Output Contract` sections inherit the `Rails read:` line from this canonical contract — it arrives via the brief and does not need to be duplicated into each agent file.
 
 ## 4. Agent Chain Rules
 

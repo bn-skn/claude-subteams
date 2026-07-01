@@ -142,7 +142,7 @@ All 55 skills (auto-loaded on demand by description match; `using-subteams` load
 | Sub-team | Skill | Description |
 |---|---|---|
 | core | `using-subteams` | Orchestrator meta-skill — methodology, pipeline, red flags. Loaded at session start. |
-| core | `orchestrator-briefing` | Subagent communication protocol. Use before every Agent tool call. |
+| core | `orchestrator-briefing` | Subagent communication protocol. Use before every Agent tool call. Now includes a mandatory `Rails:` briefing field (conventions/architecture docs + active plan) and a `Rails read:` output-contract line. |
 | core | `model-selection` | Guide for choosing sonnet vs opus per task type. |
 | core | `context-management` | Managing the context window, checkpoints, and session summaries. |
 | agents | `agent-engineering` | Design multi-agent systems: orchestrator + specialists, context engineering, token efficiency, standardized contracts. |
@@ -155,7 +155,7 @@ All 55 skills (auto-loaded on demand by description match; `using-subteams` load
 | execution | `parallel-dispatch` | Run 2+ independent tasks concurrently without shared state or sequential dependencies. |
 | execution | `finishing-branch` | Decide how to integrate completed work — merge, PR, or cleanup. |
 | execution | `receiving-review` | Verify and triage review feedback with technical rigor before implementing it. |
-| execution | `verification-gate` | Evidence before "done": run verification commands, backups, doc/compile/visual checks. |
+| execution | `verification-gate` | Evidence before "done": run verification commands, backups, doc/compile/visual checks. Authoritative home of the honesty invariant — claim provenance, tool-failure honesty. |
 | execution | `systematic-debugging` | Reproduce → root-cause → fix → verify, before proposing any fix. |
 | execution | `self-optimization` | Iterative improve-test-deploy cycle for prompts, skills, and CLAUDE.md. |
 | docs | `decision-context` | Mandatory Decision / Why / Alternatives / Risks / Linked block for every non-trivial change. Companion to `adr-tracker`. |
@@ -198,6 +198,8 @@ All 55 skills (auto-loaded on demand by description match; `using-subteams` load
 | coordination | `multi-instance` | Opt-in coordination for several Claude Code instances on one repo: claim before edit, commit under a lock, mailbox + auto-notify. Portable (file-based, not agent-teams). `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`. |
 
 ## Agents
+
+Every agent below carries a built-in honesty invariant right after "Who You Are" in its prompt — claim provenance (TRUSTED / ATTRIBUTED / UNVERIFIED), anti-hedge, tool-failure honesty, and a materiality threshold for when research is required. Authoritative detail lives in the `verification-gate` skill.
 
 | Agent | Model | Role |
 |---|---|---|

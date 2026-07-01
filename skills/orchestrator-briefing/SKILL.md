@@ -23,7 +23,7 @@ ALWAYS structure your brief with ALL of these sections. Missing sections produce
 Task: [specific, actionable — what exactly to do]
 Context: [why we're doing this, what the user decided, constraints]
 Files: [exact paths with line numbers where relevant]
-Rails: [path(s) the subagent MUST read before acting — project conventions/architecture docs (e.g. docs/CONVENTIONS.md, docs/ARCHITECTURE.md) and the active plan/contract, when they exist]
+Rails: [path(s) the subagent MUST read before acting — project conventions/architecture docs (e.g. docs/CONVENTIONS.md, docs/ARCHITECTURE.md) and the active plan/contract, when they exist; write "(none)" if the project has no such docs — never invent a path]
 Scope: [what to do AND what NOT to do]
 Model: [sonnet/opus — with justification]
 Tools: [exact list of tools granted]

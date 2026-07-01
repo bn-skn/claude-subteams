@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.26.0] - 2026-07-01
+
+### Added
+- **Honesty invariant — tool-failure honesty, claim provenance, anti-hedge, materiality — across the whole plugin** (Tier 1 of the planning/autonomy/honesty modernization, spec `docs/specs/2026-07-01-planning-autonomy-honesty-design.md`). See [ADR-004](docs/adr/004-honesty-invariant-placement.md).
+  - **Authoritative detail in `verification-gate`:** new `## Claim Provenance` section (TRUSTED / ATTRIBUTED / UNVERIFIED levels; anti-hedge as a load-bearing rule — verified facts stated as fact, WITHOUT disclaimers; research obligatory only for MATERIAL claims; mechanical citation rituals explicitly rejected) and `## When a Tool or Command Fails` (state the failure plainly; a failed check is not a passed check; "tool failed" ≠ "verified negative"). Namespaced "claim provenance" vs the pre-existing arch-doc provenance check.
+  - **Compact 4-bullet block in every agent** (`agents/*.md`, byte-identical, right after `## Who You Are`) — the agent prompt is the only delivery channel guaranteed to reach delegated work. The materiality bullet (verify material claims if tools allow, else flag for the orchestrator) was added in review: without it a subagent could label a material claim UNVERIFIED and feel compliant (devils-advocate finding).
+  - **`using-subteams` §4.1 pointer + Red Flags row** ("I'll smooth over the failed/empty tool result…"). `researcher` additionally maps its confidence scale to claim provenance (different dimensions, both required).
+- **Rails delivery into subagents via the briefing channel.** New mandatory `Rails:` field in the orchestrator-briefing Complete Brief Template (conventions/architecture docs + active plan the subagent must read before acting) and a `Rails read:` acknowledgment line in the subagent output contract — a short quote of the applied constraint plus the diff file:line. Honestly documented as an attention prime + spot-check anchor (two cross-referable anchors), NOT a checkable guarantee — posture-tier by design. Output-contract enumerations in `subagent-prompt-design` and `agent-engineering` synced (review caught them contradicting the new mandatory field). See [ADR-006](docs/adr/006-subagent-rails-hook-deferred.md).
+
+### Changed
+- **Scoped autonomy re-sequenced to Tier 2** after a three-critic plan defense (devils-advocate + architecture-guard + Codex cross-model): every safety claim of the Tier-1 draft (non-blocking caps, self-classified failure classes, env "gate" nothing executable reads, no post-compaction re-hydration) was posture, not structure — shipping it would be confidence theater. Tier 2 builds autonomy ON the canonical Task Contract with machine-checkable enforcement (diff-based scope gate, blocking caps + total-run budget, fail-closed grant record, kill-switch). See [ADR-005](docs/adr/005-autonomy-resequenced-to-tier2.md). No autonomy semantics ship in 1.26.0; `executing-plans` and hooks are untouched.
+- marketplace.json description corrected: 16 specialized sub-team agents (was stale "12").
+
 ## [1.25.0] - 2026-06-22
 
 ### Added
