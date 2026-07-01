@@ -30,6 +30,7 @@ Every subagent MUST return results using the orchestrator-briefing output contra
 ```
 **Task:** brief description of what was done
 **Status:** done | partial | blocked
+**Rails read:** <path(s) read> — "<constraint quote>" applied at <file:line>
 
 ### Changes
 - `path/to/file.ts` — what changed and why
@@ -77,12 +78,16 @@ You are a [role]. Your task: [one-sentence description].
 ## Files
 [list of relevant file paths]
 
+## Rails
+[conventions/architecture docs and active plan the subagent must read before acting, when they exist]
+
 ## Constraints
 [numbered list of rules and limitations]
 
 ## Output Format
 **Task:** [what was done/found]
 **Status:** done | partial | blocked
+**Rails read:** [path — constraint applied]
 
 ### Changes
 - [file:line — what changed]

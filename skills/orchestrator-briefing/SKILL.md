@@ -23,6 +23,7 @@ ALWAYS structure your brief with ALL of these sections. Missing sections produce
 Task: [specific, actionable — what exactly to do]
 Context: [why we're doing this, what the user decided, constraints]
 Files: [exact paths with line numbers where relevant]
+Rails: [path(s) the subagent MUST read before acting — project conventions/architecture docs (e.g. docs/CONVENTIONS.md, docs/ARCHITECTURE.md) and the active plan/contract, when they exist]
 Scope: [what to do AND what NOT to do]
 Model: [sonnet/opus — with justification]
 Tools: [exact list of tools granted]
@@ -45,6 +46,8 @@ Files:
 - src/domain/entities/user.ts (lines 1-30 — User entity, needs email/password types)
 - src/shared/validation.ts (reference — existing Zod patterns)
 - src/shared/result.ts (reference — Result type to follow)
+
+Rails: docs/CONVENTIONS.md (validation + Result-type conventions), docs/plans/active/user-validation.md (acceptance criteria)
 
 Scope:
 - DO: Add Zod schemas for email, password, username
@@ -216,6 +219,7 @@ Every subagent MUST return this structure:
 ```
 **Task:** brief description of what was done
 **Status:** done | partial | blocked
+**Rails read:** <path(s) you read> — "<short quote of the constraint>" applied at <file:line>
 
 ### Changes
 - `path/to/file.ts` — what changed and why
@@ -233,6 +237,8 @@ Every subagent MUST return this structure:
 ```
 
 **Include this output contract template in every brief** so the subagent knows what format you expect.
+
+The `Rails read:` line is mandatory. It names the rails path(s) the subagent actually read and ONE concrete constraint it took from them and applied — quoted briefly from the rails doc, with the diff file:line where it was applied. This is an attention prime and a spot-check anchor, not a guarantee: the quote + file:line pair gives the orchestrator two cross-referable anchors to verify in seconds when it matters. A brief that shipped a `Rails:` field but returns with no `Rails read:` line means the rails were ignored — treat the result as incomplete.
 
 ## File Conflict Prevention for Parallel Dispatch
 
@@ -287,6 +293,9 @@ The "mirror principle": reviewing your own output before submitting it dramatica
 
 **Include this instruction in EVERY subagent brief:**
 > "Before returning: re-read every changed file, run compilation, verify all paths exist. If you find problems — fix them yourself and re-check. Do not return broken work."
+
+**Include this honesty invariant in every brief to a generic (non-plugin) agent** — the plugin's own agents already carry it in their prompts:
+> "Tool/command failure or empty/stale output → state it plainly, never guess. Every external claim carries its claim provenance (TRUSTED / ATTRIBUTED / UNVERIFIED); anti-hedge — verified facts are stated as fact, without disclaimers."
 
 ## Nuances Documentation
 

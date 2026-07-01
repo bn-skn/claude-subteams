@@ -85,7 +85,7 @@ Honesty invariant:
           (e.g. docs/CONVENTIONS.md, docs/ARCHITECTURE.md) and the active plan/contract in
           docs/plans/active/, when they exist]
   ```
-- **Rails-read acknowledgment** (Codex suggestion, accepted): the subagent Output Contract (L212+) gains a line — `Rails read: <path(s)> — <one constraint from them applied to this task>`. Makes rails-following checkable via the existing output-contract pattern instead of assumed.
+- **Rails-read acknowledgment** (Codex suggestion, accepted): the subagent Output Contract (L212+) gains a line — `Rails read: <path(s)> — "<constraint quote>" applied at <file:line>`. An attention prime + spot-check anchor (quote and file:line are cross-referable in seconds), honestly NOT a guarantee — a posture-tier control, per review.
 - The subagent's own prompt is the **only 100%-guaranteed delivery channel** (hooks research) — so this field is the floor regardless of any future hook.
 
 ### T2.3 SubagentStart hook — deferred to Tier 2 (decision, ADR-006)
@@ -148,7 +148,8 @@ Version 1.25.0 → **1.26.0** (feat = minor). Bump `.claude-plugin/plugin.json` 
 - `skills/verification-gate/SKILL.md` — Claim Provenance + tool-failure sections
 - `skills/using-subteams/SKILL.md` — honesty pointer + Red Flags row
 - `skills/orchestrator-briefing/SKILL.md` — mandatory `Rails:` field + rails-read ack in Output Contract + honesty-in-every-brief
-- `agents/*.md` (16) — compact honesty block after `## Who You Are`
+- `agents/*.md` (16) — compact honesty block (heading + 4 bullets, incl. materiality) after `## Who You Are`; researcher.md additionally maps confidence↔claim-provenance taxonomies
+- `skills/subagent-prompt-design/SKILL.md` + `skills/agent-engineering/SKILL.md` — output-contract enumerations synced with the new `Rails read:` field (R5 ripple found in review)
 - `docs/adr/004..006-*.md` (new), `CHANGELOG.md`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` — version + decisions
 - `README.md` — feature docs (doc-agent)
 - NOT touched in Tier 1: `skills/executing-plans/SKILL.md` (autonomy → Tier 2), `hooks/*` (hook deferred)

@@ -28,27 +28,27 @@ Tier 1 is DONE when ALL hold, each with observable evidence:
 
 | Pkg | Title | DONE | WIP | TODO | BLOCKED | Acceptance |
 |-----|-------|------|-----|------|---------|-----------|
-| P1 | Honesty invariant | 0 | 0 | 4 | 0 | pending |
-| P2 | Rails via briefing | 0 | 0 | 2 | 0 | pending |
-| P3 | Review/eval/deploy | 0 | 0 | 5 | 0 | pending |
+| P1 | Honesty invariant | 0 | 4 | 0 | 0 | applied, in review |
+| P2 | Rails via briefing | 0 | 2 | 0 | 0 | applied, in review |
+| P3 | Review/eval/deploy | 0 | 1 | 4 | 0 | review running |
 
 ---
 
 ## P1 — Honesty invariant (Invariant B)
 
-- [ ] AC-1: `verification-gate` gains `## Claim Provenance` (trusted/attributed/unverified + anti-hedge + materiality) and `## When a Tool or Command Fails`; namespaced vs existing L89 arch-doc provenance — TODO
-- [ ] AC-2: `using-subteams` gains a short `## Honesty Invariant` pointer + one Red Flags row — TODO
-- [ ] AC-3: all 16 `agents/*.md` carry an identical compact 4-line honesty block after `## Who You Are`; grep verifies count=16 + byte-uniformity — TODO
-- [ ] AC-4: `orchestrator-briefing` embeds honesty in the "every brief" pattern (parallel to L288-289) — TODO
+- [ ] AC-1: `verification-gate` gains `## Claim Provenance` (trusted/attributed/unverified + anti-hedge + materiality) and `## When a Tool or Command Fails`; namespaced vs existing L89 arch-doc provenance — WIP (applied, evidence collected; pending review)
+- [ ] AC-2: `using-subteams` gains a short `## Honesty Invariant` pointer + one Red Flags row — WIP (applied, evidence collected; pending review)
+- [ ] AC-3: all 16 `agents/*.md` carry an identical compact honesty block (heading + 4 bullets) after `## Who You Are`; grep verifies count=16 + byte-uniformity — WIP (applied, evidence collected; pending review)
+- [ ] AC-4: `orchestrator-briefing` embeds honesty in the "every brief" pattern (parallel to L288-289) — WIP (applied, evidence collected; pending review)
 
 ## P2 — Rails via briefing channel
 
-- [ ] AC-5: `orchestrator-briefing` Complete Brief Template (L18-29) gains mandatory `Rails:` field — TODO
-- [ ] AC-6: subagent Output Contract (L212+) gains `Rails read:` acknowledgment line — TODO
+- [ ] AC-5: `orchestrator-briefing` Complete Brief Template (L18-29) gains mandatory `Rails:` field — WIP (applied, evidence collected; pending review)
+- [ ] AC-6: subagent Output Contract (L212+) gains `Rails read:` acknowledgment line — WIP (applied, evidence collected; pending review)
 
 ## P3 — Review / eval / deploy
 
-- [ ] AC-7: code-reviewer + devils-advocate on the diff; critical/important resolved — TODO
+- [ ] AC-7: code-reviewer + devils-advocate on the diff; critical/important resolved — WIP (both dispatched in parallel)
 - [ ] AC-8: prompt-evaluator pass; no regressions (incl. anti-hedge behavior: verified facts stated plainly) — TODO
 - [ ] AC-9: verification sweep — grep uniformity evidence, JSON validity, all gate outputs pasted — TODO
 - [ ] AC-10: ADRs 004 (honesty placement), 005 (autonomy → Tier 2 rationale), 006 (hook deferred + constraints) written; CHANGELOG + `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` → 1.26.0; "12 agents" → 16; README updated — TODO
