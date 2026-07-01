@@ -4,7 +4,7 @@
 **Spec:** docs/specs/2026-07-01-planning-autonomy-honesty-design.md (rev. after plan defense)
 **Branch:** feat/tier1-planning-autonomy-honesty
 **Target version:** 1.26.0
-**Status:** APPROVED (operator, option A) — in execution
+**Status:** COMPLETED 2026-07-01 — merged to local main (76baaaa), v1.26.0; public push pending (operator)
 **Scope decision:** autonomy re-sequenced to Tier 2 (on Task Contract, structural enforcement); SubagentStart hook deferred to Tier 2. Verdict of 3-critic plan defense, accepted by operator.
 
 ---
@@ -30,7 +30,7 @@ Tier 1 is DONE when ALL hold, each with observable evidence:
 |-----|-------|------|-----|------|---------|-----------|
 | P1 | Honesty invariant | 4 | 0 | 0 | 0 | reviewed, fixed |
 | P2 | Rails via briefing | 2 | 0 | 0 | 0 | reviewed, fixed |
-| P3 | Review/eval/deploy | 4 | 1 | 0 | 0 | merging |
+| P3 | Review/eval/deploy | 5 | 0 | 0 | 0 | merged |
 
 ---
 
@@ -52,7 +52,7 @@ Tier 1 is DONE when ALL hold, each with observable evidence:
 - [x] AC-8: prompt-evaluator pass — DONE (12 scenarios: 11 PASS, 1 FAIL agent-architect.md:29 stale enumeration + 3 minor; all 4 fixes applied. Anti-hedge confirmed: no disclaimer spam on TRUSTED facts)
 - [x] AC-9: verification sweep — DONE (16/16 single hash cc13fba1; zero stale enumerations; JSONs valid @1.26.0; "12 specialized" purged; Four-rules wording present; tree scope = expected 12 files)
 - [x] AC-10: ADRs 004-006 written; CHANGELOG [1.26.0] added; both version files → 1.26.0; "12 agents" → 16; README updated (3 clauses: briefing row, verification-gate row, Agents intro) — DONE
-- [ ] AC-11: backup tag → merge to local main → remove tag → move plan to completed/; public push = operator — WIP
+- [x] AC-11: backup tag → merge 76baaaa to local main → tag removed → plan moved to completed/ — DONE. Public push = operator (pending).
 
 ---
 
