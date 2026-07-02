@@ -19,8 +19,11 @@
   Changes append only, never rewrite:  REVISED: <what> — <why> — "<operator-ack quote>"
   The ack quote is REQUIRED when scope/acceptance changes (else check-plan.sh fails).
   Operator-owned: acceptance criteria, autonomy grant / scope / caps.  Agent-owned: progress, Rollup, checkpoints.
-  Autonomy runs only: a run record lives between the autonomy-run:begin / autonomy-run:end HTML-comment markers;
-  AUTONOMY_CHECKPOINT: lines are appended by scripts/autonomy-check.sh, never by the agent. Schema: living-plan skill (§3a).
+  Autonomy runs only: a run record lives between the autonomy-run:begin / autonomy-run:end HTML-comment markers,
+  ONE KEY PER LINE (no packed multi-key lines, no trailing inline comments — a malformed line fails closed,
+  never gets silently parsed). AUTONOMY_CHECKPOINT: lines are audit-only evidence appended by
+  scripts/autonomy-check.sh, never by the agent, and are not editable by the agent while the run is
+  active (hooks/autonomy-gate denies edits to this file during a run). Schema: living-plan skill (§3a).
 -->
 
 ## Rollup

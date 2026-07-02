@@ -48,7 +48,7 @@ Status tokens (use exactly these): `DONE`, `WIP`, `TODO`, `BLOCKED`, written as 
 
 ## 3a. Autonomy Run Record (autonomy runs only)
 
-When — and only when — an autonomy run is granted, the active plan carries a machine-readable **run record**, delimited by HTML-comment markers so `grep`/`awk` can extract it without parsing prose:
+When — and only when — an autonomy run is granted, the active plan carries a machine-readable **run record**, delimited by HTML-comment markers so `grep`/`awk` can extract it without parsing prose. **One key per line — no packed multi-key lines, no trailing inline comments.** The parser is prefix-anchored on the first `KEY: ` per line with no normalizer: a packed or malformed line fails closed (cannot evaluate) rather than being silently parsed, and free-text fields (`AUTONOMY_GRANT`, `AUTONOMY_CRITERIA_SNAPSHOT`) can never forge a later key by embedding it on the same line.
 
     <!-- autonomy-run:begin -->
     AUTONOMY_GRANT: <verbatim operator grant, one line>
@@ -58,14 +58,14 @@ When — and only when — an autonomy run is granted, the active plan carries a
     AUTONOMY_SESSION: <session id>
     AUTONOMY_GRANTED_EPOCH: <unix>
     AUTONOMY_EXPIRES_EPOCH: <unix — max TTL; expiry IS the wall-clock bound>
-    AUTONOMY_MAX_FILES: <n>   AUTONOMY_MAX_LINES: <n>   AUTONOMY_MAX_TASKS: <n>    (per-interval caps)
-    AUTONOMY_BUDGET_FILES: <n>   AUTONOMY_BUDGET_TASKS: <n>                        (aggregate budget)
+    AUTONOMY_MAX_FILES: <n>
+    AUTONOMY_MAX_LINES: <n>
     AUTONOMY_CHECKPOINT: <appended by scripts/autonomy-check.sh itself — never by the agent>
     <!-- autonomy-run:end -->
 
-**Scope semantics:** globs are bash case-patterns — `*` crosses `/`, so `src/*` covers the whole subtree. The record file itself is auto-exempt (the checkpoint script writes to it). A cap or budget that is present but non-numeric fails closed (cannot evaluate), never "unbounded".
+**Scope semantics:** globs are bash case-patterns — `*` crosses `/`, so `src/*` covers the whole subtree. The record file itself is auto-exempt from scope (and excluded from the files cap). A cap that is present but non-numeric fails closed (cannot evaluate), never "unbounded". `AUTONOMY_MAX_FILES`/`AUTONOMY_MAX_LINES` are **total-run caps, cumulative from `AUTONOMY_BASE_COMMIT`** — recomputed fresh from git on every check, not a running counter.
 
-**Ownership:** grant, criteria snapshot, scope, expiry, and caps are **operator-owned** — the agent copies them in verbatim at grant and never edits them mid-run. The `AUTONOMY_CHECKPOINT:` lines are **script-authored**: `scripts/autonomy-check.sh` appends them, closing the self-graded-counter hole — the agent cannot write its own progress evidence. Absent a fresh record, execution is interactive. Full activation contract and enforcement layers live in `executing-plans` (`## Autonomy Mode`).
+**Ownership:** grant, criteria snapshot, scope, expiry, and caps are **operator-owned** — the agent copies them in verbatim at grant and never edits them mid-run. **The record file itself is not agent-editable while a run is active** — `hooks/autonomy-gate` denies any Edit/Write/MultiEdit/NotebookEdit targeting it, structurally, not just by convention. The `AUTONOMY_CHECKPOINT:` lines are **script-authored, audit-only evidence**: `scripts/autonomy-check.sh` appends them via `--checkpoint`, closing the self-graded-counter hole — the agent cannot write its own progress evidence, and nothing in the script derives caps from prior checkpoint lines. Absent a fresh record, execution is interactive. Full activation contract and enforcement layers live in `executing-plans` (`## Autonomy Mode`).
 
 ## 4. Validation
 

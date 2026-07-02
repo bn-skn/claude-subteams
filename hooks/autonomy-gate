@@ -1,21 +1,44 @@
 #!/bin/bash
 # PreToolUse hook — autonomy scope/cap enforcement gate (Tier 2 bounded autonomy).
-# Fires before Edit/Write/Bash. Inert (2-line exit) when CLAUDE_SUBTEAMS_AUTONOMY is
-# unset — manual mode is completely unaffected; the env check is the FIRST thing this
-# hook does, before touching stdin/disk. Delegates the actual scope/cap arithmetic to
-# scripts/autonomy-check.sh (read-only invocation, no --checkpoint) so there is exactly
-# one source of truth for the caps math.
+# Fires before Edit/Write/MultiEdit/NotebookEdit/Bash. Inert (2-line exit) when
+# CLAUDE_SUBTEAMS_AUTONOMY is unset — manual mode is completely unaffected; the env
+# check is the FIRST thing this hook does after the event check, before touching
+# stdin/disk. Delegates the actual scope/cap arithmetic to scripts/autonomy-check.sh
+# (read-only invocation, no --checkpoint) so there is exactly one source of truth
+# for the caps math.
 #
 # NEVER invoke `claude` or anything that itself triggers PreToolUse from this hook —
 # that would deadlock the tool-call pipeline (plan R5).
+#
+# Event resolution (B1, belt-and-suspenders against wiring drift): hooks.json passes
+# "PreToolUse" as $1 (mirroring coord-notify). If $1 is ever empty — e.g. the wiring
+# regresses again — fall back to reading hook_event_name from stdin JSON before
+# deciding whether to proceed. Either way, only PreToolUse continues past this point.
+#
+# Record-edit deny (B3, closes the scope-widening jailbreak): the run record itself
+# — the file the agent could edit to grant itself a wider scope or looser caps mid-
+# run — is denied as an edit target outright while a run is active. The script's own
+# --checkpoint writes via mktemp+mv (not a tool call), so checkpoints are unaffected.
+#
+# Pre-hoc scope (B4, "blocks before it lands"): for the file-writing tools
+# (Edit/Write/MultiEdit/NotebookEdit), when tool_input.file_path is present, it is
+# folded into the changed-file set via `autonomy-check.sh --pending=<path>` BEFORE
+# the edit executes — an out-of-scope target is denied before it ever touches disk.
+# Bash has no single reliable target field to pre-check, so Bash stays POST-HOC
+# only: a violation is caught on the NEXT gate call (diff vs base already shows it),
+# not before the command runs. This is a documented, honest limitation — do not
+# read this hook as pre-hoc-blocking arbitrary Bash side effects.
 #
 # Silent-fail: any internal error here falls through to exit 0 (never break a
 # session) — nothing sensitive is logged, stdout only carries the deny JSON.
 
 EVENT="${1:-}"
-[ "$EVENT" = "PreToolUse" ] || exit 0
+if [ -n "$EVENT" ] && [ "$EVENT" != "PreToolUse" ]; then
+  exit 0
+fi
 
-# FIRST check, before any other work: env gate. Manual mode pays only this line.
+# Env gate, before any stdin/disk work. Manual mode (or a correctly-wired call with
+# the env unset) pays only the lines above and this one.
 [ -n "${CLAUDE_SUBTEAMS_AUTONOMY:-}" ] || exit 0
 
 HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || exit 0
@@ -24,44 +47,116 @@ CHECK_SCRIPT="${HOOK_DIR}/../scripts/autonomy-check.sh"
 
 PROJECT_DIR="$PWD"
 
-# Quick pre-check: no active run record at all → autonomy not in progress, allow.
+# Read stdin ONCE, tty-guarded so a manual CLI invocation never hangs on a missing
+# pipe. Feeds: the B1 event fallback, session id (anti-replay), tool_name and
+# tool_input.file_path (B2/B3/B4).
+INPUT='{}'
+if [ ! -t 0 ]; then
+  INPUT=$(cat 2>/dev/null || printf '{}')
+fi
+HAVE_JQ=0
+command -v jq >/dev/null 2>&1 && HAVE_JQ=1
+
+_jq_get() { # jq filter (already anchored with a leading '.') -> value or empty
+  [ "$HAVE_JQ" -eq 1 ] || return 1
+  printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null
+}
+# Literal-key text scan (no real JSON parsing — same simplification as the prior
+# session_id fallback). Works for a key at any nesting depth since it just looks
+# for the first `"key": "value"` occurrence in the raw payload text.
+_raw_get() { # key name (unquoted) -> value or empty
+  printf '%s' "$INPUT" | awk -v k="\"$1\"" '
+    {
+      idx = index($0, k)
+      if (idx > 0) {
+        rest = substr($0, idx + length(k))
+        sub(/^[[:space:]]*:[[:space:]]*/, "", rest)
+        if (substr(rest, 1, 1) == "\"") {
+          rest = substr(rest, 2)
+          q = index(rest, "\"")
+          if (q > 0) { print substr(rest, 1, q - 1); exit }
+        }
+      }
+    }'
+}
+
+if [ -z "$EVENT" ]; then
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    EVENT=$(_jq_get '.hook_event_name')
+  else
+    EVENT=$(_raw_get hook_event_name)
+  fi
+  [ "$EVENT" = "PreToolUse" ] || exit 0
+fi
+
+if [ "$HAVE_JQ" -eq 1 ]; then
+  SESSION_ID=$(_jq_get '.session_id')
+  TOOL_NAME=$(_jq_get '.tool_name')
+  FILE_PATH=$(_jq_get '.tool_input.file_path')
+else
+  SESSION_ID=$(_raw_get session_id)
+  TOOL_NAME=$(_raw_get tool_name)
+  FILE_PATH=$(_raw_get file_path)
+fi
+
+# Quick pre-check: no active run record at all -> autonomy not in progress, allow.
+# Same pass also detects (B3) whether FILE_PATH IS one of those record files.
 ACTIVE_DIR="${PROJECT_DIR}/docs/plans/active"
 HAS_RECORD=0
+RECORD_HIT=0
 if [ -d "$ACTIVE_DIR" ]; then
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if grep -qF -- '<!-- autonomy-run:begin -->' "$f" 2>/dev/null; then
       HAS_RECORD=1
-      break
+      if [ -n "$FILE_PATH" ] && [ "$FILE_PATH" = "$f" ]; then
+        RECORD_HIT=1
+      fi
     fi
   done < <(find "$ACTIVE_DIR" -maxdepth 1 -type f -name 'IMPL-PLAN-*.md' 2>/dev/null)
 fi
 [ "$HAS_RECORD" -eq 1 ] || exit 0
 
-# Session id from the hook stdin JSON (anti-replay: the record must belong to THIS
-# session). tty-guarded so a manual CLI invocation never hangs on a missing pipe.
-SESSION_ID=""
-if [ ! -t 0 ]; then
-  INPUT=$(cat 2>/dev/null || printf '{}')
-  if command -v jq >/dev/null 2>&1; then
-    SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
-  else
-    SESSION_ID=$(printf '%s' "$INPUT" | awk 'match($0, /"session_id"[[:space:]]*:[[:space:]]*"[^"]*"/) { s=substr($0, RSTART, RLENGTH); gsub(/.*:[[:space:]]*"/, "", s); gsub(/"$/, "", s); print s; exit }')
+# Deny-JSON builder (B5): jq when present (correctly escapes everything); the awk
+# fallback additionally strips control chars [\001-\037] (not just backslash/quote)
+# so a hostile path/message can never produce invalid JSON.
+_deny() { # reason text -> prints deny JSON, exits 0
+  local reason="$1" out esc
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    out=$(jq -nc --arg reason "[autonomy-gate] $reason" \
+      '{hookSpecificOutput:{hookEventName:"PreToolUse", permissionDecision:"deny", permissionDecisionReason:$reason}}' 2>/dev/null)
+    if [ -n "$out" ]; then
+      printf '%s\n' "$out"
+      exit 0
+    fi
   fi
+  esc=$(printf '%s' "$reason" | awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[autonomy-gate] %s"}}\n' "$esc"
+  exit 0
+}
+
+# B3: the run record is immutable-by-agent while a run is active.
+if [ "$RECORD_HIT" -eq 1 ]; then
+  _deny "the active autonomy run record is not editable during a run — end the run to change scope/caps"
 fi
 
-if [ -n "$SESSION_ID" ]; then
-  OUTPUT=$("$CHECK_SCRIPT" "$PROJECT_DIR" "--session=$SESSION_ID" 2>&1)
-else
-  OUTPUT=$("$CHECK_SCRIPT" "$PROJECT_DIR" 2>&1)
-fi
+# B4: fold the pending target into the pre-hoc scope check for file-writing tools
+# only. Bash has no reliable single target, so it stays post-hoc (no --pending).
+PENDING_ARG=""
+case "$TOOL_NAME" in
+  Edit|Write|MultiEdit|NotebookEdit)
+    [ -n "$FILE_PATH" ] && PENDING_ARG="--pending=$FILE_PATH"
+    ;;
+esac
+
+ARGS=("$PROJECT_DIR")
+[ -n "$SESSION_ID" ] && ARGS+=("--session=$SESSION_ID")
+[ -n "$PENDING_ARG" ] && ARGS+=("$PENDING_ARG")
+OUTPUT=$("$CHECK_SCRIPT" "${ARGS[@]}" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] && exit 0
 
 # 1/2/3/4 (any non-zero here) all mean STOP — deny with the script's own message.
 REASON=$(printf '%s\n' "$OUTPUT" | awk 'NF{line=$0} END{print line}')
 [ -n "$REASON" ] || REASON="[autonomy-check] blocked (exit $RC), no message captured."
-ESC=$(printf '%s' "$REASON" | awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); print }')
-
-printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[autonomy-gate] %s"}}\n' "$ESC"
-exit 0
+_deny "$REASON"

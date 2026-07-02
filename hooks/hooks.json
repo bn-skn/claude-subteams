@@ -29,10 +29,10 @@
         }]
       },
       {
-        "matcher": "Edit|Write|Bash",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
         "hooks": [{
           "type": "command",
-          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/autonomy-gate",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/autonomy-gate PreToolUse",
           "async": false,
           "timeout": 15000
         }]
@@ -43,7 +43,7 @@
         "matcher": "",
         "hooks": [{
           "type": "command",
-          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-rails",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-rails SubagentStart",
           "async": false,
           "timeout": 5000
         }]

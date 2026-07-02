@@ -96,13 +96,13 @@ Autonomy is the manual pipeline minus the human pause, plus bounded, evidence-ca
 **Activation contract.** A run is autonomous only when BOTH hold: (1) the operator grants it explicitly **in the current message**, and (2) a run record is written into the active contract (`living-plan` §3a: grant, criteria snapshot, scope, base commit, session, expiry, caps). No record, a stale/expired one, or a session mismatch → interactive: ask and wait. **Never continue on a remembered grant.**
 
 **Enforcement layers (honestly labeled):**
-- **HOOK = enforcement.** `autonomy-gate` (PreToolUse) blocks an out-of-scope or cap-exceeding edit *before* it lands. Inert when `CLAUDE_SUBTEAMS_AUTONOMY` is unset.
-- **`scripts/autonomy-check.sh` = checkpoint evidence**, not prevention — it evaluates scope/caps and appends the script-authored `AUTONOMY_CHECKPOINT:` line.
+- **HOOK = enforcement.** `autonomy-gate` (PreToolUse) blocks an out-of-scope or cap-exceeding edit *before* it lands for the file-writing tools (Edit/Write/MultiEdit/NotebookEdit — it resolves `tool_input.file_path` and pre-checks it against scope before the edit runs). For **Bash it is post-hoc only**: there is no single reliable target to pre-check, so a Bash-caused violation is caught on the *next* gate call (the diff vs base already shows it), not before the command runs — do not read this as pre-hoc-blocking arbitrary Bash side effects. The run record itself is not agent-editable while a run is active — the hook denies any edit targeting it. Inert when `CLAUDE_SUBTEAMS_AUTONOMY` is unset.
+- **`scripts/autonomy-check.sh` = checkpoint evidence**, not prevention — it evaluates scope/caps and, via `scripts/autonomy-check.sh --checkpoint`, appends the script-authored `AUTONOMY_CHECKPOINT:` audit line (nothing derives caps from it — caps are total-run, cumulative from the base commit, recomputed fresh from git every call).
 - **Prose = behavioral protocol** (re-hydration, kill-switch, self-assessed risk-triggers): posture, not structure. Do not mistake it for a gate.
 
 **Verifiability precondition.** A task with no external verifier — a deterministic exit code (tests/lint) or, for high-stakes runs, the rare Codex adversary anchored to the written criteria — is **not eligible** for autonomy. Run it interactively.
 
-**Checkpoint.** Every milestone in autonomy is a **non-blocking evidence checkpoint**: run `autonomy-check.sh` (≥1 deterministic exit code), record the script-authored line, and **continue unless a blocker class fires**. The exit code is the gate, not your judgment.
+**Checkpoint.** Every milestone in autonomy is a **non-blocking evidence checkpoint**: run `scripts/autonomy-check.sh --checkpoint` (≥1 deterministic exit code), which records the script-authored audit line, and **continue unless a blocker class fires**. The exit code is the gate, not your judgment.
 
 **Failure classes:**
 
@@ -116,7 +116,7 @@ Autonomy is the manual pipeline minus the human pause, plus bounded, evidence-ca
 
 **Kill-switch & re-hydration (behavioral protocol).** Any operator message mid-run = an immediate operator-decision-required checkpoint at the next tool boundary. On any compaction / context loss, re-read the contract + rails before the next action; if the grant+scope record is not recoverable verbatim, revert to interactive.
 
-**Env / caps.** `CLAUDE_SUBTEAMS_AUTONOMY` (gate on/off) · per-interval `CLAUDE_SUBTEAMS_AUTONOMY_MAX_FILES/LINES/TASKS` (default 10/400/5) · aggregate `CLAUDE_SUBTEAMS_AUTONOMY_BUDGET_FILES/TASKS`. Grant expiry is the wall-clock bound.
+**Env / caps.** `CLAUDE_SUBTEAMS_AUTONOMY` (gate on/off) · total-run, cumulative-from-base `CLAUDE_SUBTEAMS_AUTONOMY_MAX_FILES/LINES` (default 10/400). Grant expiry is the wall-clock bound.
 
 *Split-trigger: if this file exceeds 200 lines or this section exceeds 40% of it, extract Autonomy Mode into a dedicated `autonomous-execution` skill (Tier 3).*
 
