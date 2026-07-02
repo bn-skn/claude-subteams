@@ -18,7 +18,7 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 **Save plans to:** `docs/plans/active/YYYY-MM-DD-<feature-name>.md`
 - (User preferences for plan location override this default)
 
-**Multi-package / contracted work:** if the work decomposes into ≥2 packages OR is measured against a TZ with acceptance clauses, ALSO author a single living plan-of-record (`docs/plans/active/IMPL-PLAN-<slug>.md`) per the `living-plan` skill — a package → acceptance-criterion matrix that answers "how close to acceptance" at a glance. For single-feature work the brief plan above is enough; do not add a plan-of-record.
+**Contract artifact (two weights):** if any risk-trigger fires (using-subteams §6) or a single feature spans multiple sessions, author a **light contract** (`docs/plans/active/IMPL-PLAN-<slug>.md`: scope / acceptance criteria / non-goals) per the `living-plan` skill. Escalate to the **full package → criterion matrix** only for multi-package (≥2) or TZ-with-acceptance work. A risk-trigger mandates the artifact, not a deeper pipeline; trivial single-session work gets nothing.
 
 ## Scope Check
 

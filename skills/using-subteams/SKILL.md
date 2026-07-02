@@ -1,7 +1,7 @@
 ---
 name: using-subteams
 description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, planning architecture, or building/editing agents, prompts, skills, and multi-agent systems."
-version: 1.8.0
+version: 1.9.0
 ---
 
 # Using Subteams — Orchestrator Meta-Skill
@@ -111,7 +111,7 @@ Before starting any task, scan available skills for relevance.
 
 This is the discovery surface for rule 1 — scan it by relevance. Most specialist skills are invoked by **domain match**, not by being referenced from another skill, so this roster is how you know they exist:
 
-- **Planning & flow:** `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-dev`, `parallel-dispatch`, `using-git-worktrees`, `finishing-branch`, `context-management`
+- **Planning & flow:** `brainstorming`, `writing-plans`, `living-plan`, `executing-plans`, `subagent-driven-dev`, `parallel-dispatch`, `using-git-worktrees`, `finishing-branch`, `context-management`
 - **Quality & review:** `code-review`, `adversarial-testing`, `test-driven-development`, `verification-gate`, `receiving-review`, `cross-review`, `codebase-improvement`, `ui-testing`, `design-qa`, `prompt-evaluation`
 - **Architecture & design:** `clean-architecture`, `conventions-enforcer`, `refactoring`, `service-boundaries`, `api-design`, `database-design`, `design-to-code`, `scaffolding`, `project-scaffold`
 - **Agents & authoring:** `agent-engineering`, `subagent-prompt-design`, `skill-engineering`, `claudemd-engineering`
@@ -124,6 +124,8 @@ This is the discovery surface for rule 1 — scan it by relevance. Most speciali
 
 ## 6. Pipeline Decision
 
+> Autonomy Mode (bounded autonomous execution) is documented in one place — `executing-plans` `## Autonomy Mode`. It is opt-in per grant, never a pipeline default.
+
 Every development task follows one of three pipelines. Choose based on scope and risk.
 
 | Pipeline | Criteria | Steps |
@@ -132,6 +134,13 @@ Every development task follows one of three pipelines. Choose based on scope and
 | **Standard** | 3-8 files, moderate logic, single-module — OR **any change that touches logic** | Plan (brief) → Branch → Implement → **Review (code-reviewer always; + devils-advocate for non-trivial logic — see note)** → Fix → Test → Commit → Merge |
 | **Full** | Cross-module, user-facing, complex business logic | See Full Pipeline below |
 | **Full + Architecture** | New module, structural change, dependency changes, **greenfield** | Full Pipeline + architecture-guard + doc-agent. **Architecture-capture gate (Rule 24):** before IMPLEMENT, `ARCHITECTURE.md`/`CONVENTIONS.md` must be populated via the `brainstorming` capture flow — `scripts/check-arch-docs.sh` passes AND every non-obvious choice traces to an ADR. |
+
+**Risk-triggers select artifact depth, not pipeline depth.** The table above still routes process by scope/logic; file-count only estimates *effort*. Independently, any risk-trigger mandates *writing a contract artifact* — a **light contract** by default, the **full matrix** only for multi-package/TZ work (see `living-plan`) — **without** escalating the pipeline tier. A one-line auth fix stays Standard yet earns a light contract; an 8-file mechanical rename stays Lightweight with none.
+
+- **Risk-triggers, objective** (visible in the diff/command): schema or data-invariant change · public API change · new dependency or stack · destructive migration · security boundary · autonomous execution granted.
+- **Risk-triggers, self-assessed** (judgment): ambiguous intent · large blast radius.
+
+Any one firing → write the artifact.
 
 **The logic line is the hard boundary, and review weight scales with it.** Lightweight is reserved for changes where there is genuinely nothing to reason about. The moment a change alters behavior — a condition, a calculation, control flow, an API shape, a data transformation — it gets reviewed:
 - **Any logic change** → at least **code-reviewer**. No exceptions. "It's a one-line logic fix" is exactly the change that ships bugs unreviewed.
@@ -210,7 +219,7 @@ No review, no plan, no backup — justified ONLY because a mechanical change has
 ### Standard Pipeline
 
 For moderate tasks (3-8 files, business logic, but single-module scope):
-1. Write a brief plan (3-10 bullet points, no spec file needed)
+1. Write a brief plan (3-10 bullet points, no spec file needed). If any risk-trigger fires (Section 6) or the work spans sessions, **also write a light contract** (scope / acceptance criteria / non-goals) per `living-plan` — this adds the artifact ONLY; the pipeline stays Standard, with no Full-pipeline gates.
 2. Create feature branch (`git checkout -b feat/xxx`)
 3. Implement (you or developer agent)
 4. tsc/lint check
@@ -351,6 +360,10 @@ You are not exempt from escalation. When YOU face uncertainty or blockers, raise
 
 **Anti-pattern: "I'll handle it to not bother the user."** This is how silent substitution happens. The user WANTS to be informed about significant decisions. A 30-second question now prevents a 30-minute rework later.
 
+### Autonomy doctrine
+
+Autonomy is never ambient — it is a per-command grant, restated as a run record in the active contract, valid only while that record is fresh. Enforcement is layered and honestly named: the `autonomy-gate` PreToolUse **hook is the enforcement** — it blocks an out-of-scope or cap-exceeding edit before it lands; `scripts/autonomy-check.sh` alone is **checkpoint evidence**, not prevention; the prose controls (re-hydration, kill-switch, self-assessed risk-triggers) are **behavioral protocol**. A configuration without the hook armed is not autonomy — it is "assisted continuation" and must not be described as autonomous. Full mechanics live in `executing-plans` (`## Autonomy Mode`) — the one authoritative home.
+
 ## 10. MCP Server Integration
 
 Optional MCP servers that enhance capabilities. None are required — all skills gracefully degrade without them.
@@ -405,6 +418,7 @@ These are the rationalizations that lead to broken software. When you catch your
 | "I'll just tweak the agent's prompt directly" | Prompts are code. An unevaluated prompt edit is an untested change that fails silently in production. | Apply Section 6.5: prompt-engineer authors, prompt-evaluator validates before shipping. |
 | "The review passed" (no output shown) | You are recalling the process, not proving it. Memory of a gate is not evidence it ran. | Show the evidence (Section 6.6 / verification-gate). No output = not done. |
 | "I'll smooth over the failed/empty tool result — the answer is probably right anyway." | A failed or empty tool told you nothing; "probably right" is a guess wearing a fact's clothes, and it propagates unverified into everything downstream. | State the failure plainly, label the claim UNVERIFIED, and never report a status you did not observe. |
+| "The run is going well, I'll skip the checkpoint gate." | A checkpoint you skip is a claim you cannot back with evidence — and "going well" is exactly the self-assessment autonomy exists to distrust. The deterministic exit code is the only thing separating a bounded run from confidence theater. | Run the checkpoint gate at every milestone. A skipped gate ends the autonomy run and reverts to interactive. |
 
 ## 13. Critical Rules
 

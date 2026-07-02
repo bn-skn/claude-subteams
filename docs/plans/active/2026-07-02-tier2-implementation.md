@@ -30,52 +30,52 @@ DONE when ALL hold, each with observable evidence:
 
 | Pkg | Title | DONE | WIP | TODO | BLOCKED | Acceptance |
 |-----|-------|------|-----|------|---------|-----------|
-| P1 | Task Contract (3a) | 0 | 0 | 6 | 0 | pending |
-| P2 | Risk-trigger governance (3c) | 0 | 0 | 3 | 0 | pending |
-| P3 | Autonomy: record + script + HOOK (3b) | 0 | 0 | 7 | 0 | pending |
-| P4 | session-start resume (3d) | 0 | 0 | 2 | 0 | pending |
-| P5 | SubagentStart rails hook (3e) | 0 | 0 | 3 | 0 | pending |
+| P1 | Task Contract (3a) | 6 | 0 | 0 | 0 | implemented |
+| P2 | Risk-trigger governance (3c) | 3 | 0 | 0 | 0 | implemented |
+| P3 | Autonomy: record + script + HOOK (3b) | 7 | 0 | 0 | 0 | implemented + session-match added |
+| P4 | session-start resume (3d) | 2 | 0 | 0 | 0 | implemented (unset=silent) |
+| P5 | SubagentStart rails hook (3e) | 2 | 1 | 0 | 0 | built; shipped-sentinel pending |
 | P6 | Review/test/security/docs/deploy | 0 | 0 | 6 | 0 | pending |
 
 ---
 
 ## P1 — Task Contract (3a)
 
-- [ ] AC-1: threshold removed/reworded at ALL sites: living-plan SKILL.md L3, L10, L12, **L15 ("when unsure… it probably does not" — replaced: contradicts risk-routing)**, Rule 1 L51; **writing-plans:21 (authoring-time copy — the load-bearing one)**; templates/IMPL-PLAN.md L8; **README.md:152**. New gate: **two artifact weights** — light contract (one screen: scope, acceptance criteria, non-goals; for risk-triggered or multi-session single-feature work) vs full matrix (packages+rollup; genuine multi-package/TZ work). Tiebreak explicit: risk-trigger wins for WRITING the artifact; process depth stays per pipeline tier. 4 worked examples calibrate the boundary. Anti-bureaucracy guard retained for trivial tasks — TODO
-- [ ] AC-2: write-once acceptance criteria + append-only `REVISED:` notes in living-plan Lifecycle + template. REVISED line changing scope/acceptance MUST carry an operator-ack token (quoted operator message) — the audit anchor. Template gains delimited **operator-owned** (criteria, grant) vs **agent-owned** (progress, checkpoints) sections — TODO
-- [ ] AC-3: subagent-driven-dev plan-of-record upkeep (mirror executing-plans L16) in Step 2 cycle + Verification Rules — TODO
-- [ ] AC-4: check-plan.sh REVISED **conditional** format+anchor check (validates only existing `REVISED:` lines; zero-REVISED plans still exit 0; scope/acceptance REVISED without ack-token → fail) — TODO
-- [ ] AC-5: code-review skill: contract path in `Rails:`, review diff against WRITTEN criteria (original + REVISED), not paraphrase — TODO
-- [ ] AC-6: run-record **schema pinned as deliverable BEFORE parser** (below) — template comment documents it — TODO
+- [x] AC-1: threshold removed/reworded at ALL sites: living-plan SKILL.md L3, L10, L12, **L15 ("when unsure… it probably does not" — replaced: contradicts risk-routing)**, Rule 1 L51; **writing-plans:21 (authoring-time copy — the load-bearing one)**; templates/IMPL-PLAN.md L8; **README.md:152**. New gate: **two artifact weights** — light contract (one screen: scope, acceptance criteria, non-goals; for risk-triggered or multi-session single-feature work) vs full matrix (packages+rollup; genuine multi-package/TZ work). Tiebreak explicit: risk-trigger wins for WRITING the artifact; process depth stays per pipeline tier. 4 worked examples calibrate the boundary. Anti-bureaucracy guard retained for trivial tasks — DONE (implemented; pending review/tests)
+- [x] AC-2: write-once acceptance criteria + append-only `REVISED:` notes in living-plan Lifecycle + template. REVISED line changing scope/acceptance MUST carry an operator-ack token (quoted operator message) — the audit anchor. Template gains delimited **operator-owned** (criteria, grant) vs **agent-owned** (progress, checkpoints) sections — DONE (implemented; pending review/tests)
+- [x] AC-3: subagent-driven-dev plan-of-record upkeep (mirror executing-plans L16) in Step 2 cycle + Verification Rules — DONE (implemented; pending review/tests)
+- [x] AC-4: check-plan.sh REVISED **conditional** format+anchor check (validates only existing `REVISED:` lines; zero-REVISED plans still exit 0; scope/acceptance REVISED without ack-token → fail) — DONE (implemented; pending review/tests)
+- [x] AC-5: code-review skill: contract path in `Rails:`, review diff against WRITTEN criteria (original + REVISED), not paraphrase — DONE (implemented; pending review/tests)
+- [x] AC-6: run-record **schema pinned as deliverable BEFORE parser** (below) — template comment documents it — DONE (implemented; pending review/tests)
 
 **Run-record schema (line-oriented, grep/awk only, NO jq; lives in the active IMPL-PLAN inside `<!-- autonomy-run:begin/end -->` markers):**
 `AUTONOMY_GRANT:` (verbatim operator text, 1 line) · `AUTONOMY_CRITERIA_SNAPSHOT:` (N lines, immutable copy at grant — anti-goalpost-drift) · `AUTONOMY_SCOPE:` (comma-separated globs) · `AUTONOMY_BASE_COMMIT:` (sha) · `AUTONOMY_SESSION:` · `AUTONOMY_GRANTED_EPOCH:` / `AUTONOMY_EXPIRES_EPOCH:` (max TTL; expiry IS the wall-clock bound) · `AUTONOMY_MAX_FILES/LINES/TASKS:` (per-interval) · `AUTONOMY_BUDGET_FILES/TASKS:` (aggregate) · `AUTONOMY_CHECKPOINT:` lines **appended by autonomy-check.sh itself** (script-authored, not agent-authored — closes the self-graded-counter hole).
 
 ## P2 — Risk-trigger governance (3c)
 
-- [ ] AC-7: using-subteams §6 criteria: risk-triggers as depth selectors (schema/data-invariant, public API, new dependency/stack, destructive migration, security boundary, ambiguous intent, autonomous execution, large blast radius); file-count → effort only. Objective vs self-assessed triggers labeled honestly — TODO
-- [ ] AC-8: Standard step 1 routes risk-triggered work to a **light contract** (not full matrix, not Full-pipeline gates — adds ONLY the artifact) — TODO
-- [ ] AC-9: living-plan added to §5 Specialist Catalog; using-subteams frontmatter version bumped — TODO
+- [x] AC-7: using-subteams §6 criteria: risk-triggers as depth selectors (schema/data-invariant, public API, new dependency/stack, destructive migration, security boundary, ambiguous intent, autonomous execution, large blast radius); file-count → effort only. Objective vs self-assessed triggers labeled honestly — DONE (implemented; pending review/tests)
+- [x] AC-8: Standard step 1 routes risk-triggered work to a **light contract** (not full matrix, not Full-pipeline gates — adds ONLY the artifact) — DONE (implemented; pending review/tests)
+- [x] AC-9: living-plan added to §5 Specialist Catalog; using-subteams frontmatter version bumped — DONE (implemented; pending review/tests)
 
 ## P3 — Autonomy (3b): record + script + hook
 
-- [ ] AC-10: executing-plans Step 4 mode-aware + Red Flag L113 + ALWAYS-block consistency, in lockstep — TODO
-- [ ] AC-11: `## Autonomy Mode` section (inline; split-trigger documented: if file >200 lines or section >40% → Tier 3 dedicated skill): activation contract, failure classes (cap-exceeded & out-of-scope = operator-decision-required, STRUCTURAL via hook; reviewer-disagreement = end-of-run), verifiability precondition, kill-switch + re-hydration as labeled behavioral protocol, banner isolating section from interactive readers. using-subteams gets a POINTER (one authoritative home) — TODO
-- [ ] AC-12: `scripts/autonomy-check.sh` per architecture-guard interface: args like check-plan.sh; deps git/grep/awk ONLY; env gate first (unset → exit 3); plan selection (0 or >1 active records → exit 4); freshness (expiry epoch, session match, base commit exists — else exit 4 fail-closed, distinct from violation); scope eval = `git diff --name-only $BASE` ∪ `git ls-files --others --exclude-standard`, `--name-status` for renames, glob match (violation → exit 2); caps per-interval + aggregate budget from script-authored checkpoint lines; **fail-closed everywhere: 2/3/4 all mean STOP, only 0 proceeds** (R2 wording folded in); non-git → exit 4; multi-instance: other live instances in coord.sh roster → exit 4 ineligible (single-writer) — TODO
-- [ ] AC-13: **`hooks/autonomy-gate` (PreToolUse, matcher Edit|Write|Bash, async:false):** env unset → instant exit 0 (zero manual-mode impact); env set + fresh record → runs autonomy-check.sh, exit 2/3/4 → `permissionDecision: deny` with reason; no active record → exit 0 (autonomy not in progress); registered in hooks.json — TODO
-- [ ] AC-14: env honestly framed: the HOOK is enforcement; script alone = checkpoint evidence; skill text says exactly this — TODO
-- [ ] AC-15: using-subteams autonomy doctrine paragraph + Red Flags row; "assisted continuation" naming rule recorded for configs without the hook — TODO
-- [ ] AC-16: checkpoint gate: each autonomy checkpoint carries ≥1 deterministic exit code (autonomy-check.sh and/or tests); wired into Autonomy Mode + verification-gate cross-ref — TODO
+- [x] AC-10: executing-plans Step 4 mode-aware + Red Flag L113 + ALWAYS-block consistency, in lockstep — DONE (implemented; pending review/tests)
+- [x] AC-11: `## Autonomy Mode` section (inline; split-trigger documented: if file >200 lines or section >40% → Tier 3 dedicated skill): activation contract, failure classes (cap-exceeded & out-of-scope = operator-decision-required, STRUCTURAL via hook; reviewer-disagreement = end-of-run), verifiability precondition, kill-switch + re-hydration as labeled behavioral protocol, banner isolating section from interactive readers. using-subteams gets a POINTER (one authoritative home) — DONE (implemented; pending review/tests)
+- [x] AC-12: `scripts/autonomy-check.sh` per architecture-guard interface: args like check-plan.sh; deps git/grep/awk ONLY; env gate first (unset → exit 3); plan selection (0 or >1 active records → exit 4); freshness (expiry epoch, session match, base commit exists — else exit 4 fail-closed, distinct from violation); scope eval = `git diff --name-only $BASE` ∪ `git ls-files --others --exclude-standard`, `--name-status` for renames, glob match (violation → exit 2); caps per-interval + aggregate budget from script-authored checkpoint lines; **fail-closed everywhere: 2/3/4 all mean STOP, only 0 proceeds** (R2 wording folded in); non-git → exit 4; multi-instance: other live instances in coord.sh roster → exit 4 ineligible (single-writer) — DONE (implemented; pending review/tests)
+- [x] AC-13: **`hooks/autonomy-gate` (PreToolUse, matcher Edit|Write|Bash, async:false):** env unset → instant exit 0 (zero manual-mode impact); env set + fresh record → runs autonomy-check.sh, exit 2/3/4 → `permissionDecision: deny` with reason; no active record → exit 0 (autonomy not in progress); registered in hooks.json — DONE (implemented; pending review/tests)
+- [x] AC-14: env honestly framed: the HOOK is enforcement; script alone = checkpoint evidence; skill text says exactly this — DONE (implemented; pending review/tests)
+- [x] AC-15: using-subteams autonomy doctrine paragraph + Red Flags row; "assisted continuation" naming rule recorded for configs without the hook — DONE (implemented; pending review/tests)
+- [x] AC-16: checkpoint gate: each autonomy checkpoint carries ≥1 deterministic exit code (autonomy-check.sh and/or tests); wired into Autonomy Mode + verification-gate cross-ref — DONE (implemented; pending review/tests)
 
 ## P4 — session-start resume (3d)
 
-- [ ] AC-17: active-plans block upgraded: ≤3 plans × 1 line (name, age days, next non-DONE, BLOCKED count) + single cached check-plan.sh verdict; recommend-not-command; echo-only — TODO
-- [ ] AC-18: autonomy line worded capability-only: "autonomy gate env: set/unset (an active run still requires a fresh contract record)" — TODO
+- [x] AC-17: active-plans block upgraded: ≤3 plans × 1 line (name, age days, next non-DONE, BLOCKED count) + single cached check-plan.sh verdict; recommend-not-command; echo-only — DONE (implemented; pending review/tests)
+- [x] AC-18: autonomy line worded capability-only: "autonomy gate env: set/unset (an active run still requires a fresh contract record)" — DONE (implemented; pending review/tests)
 
 ## P5 — SubagentStart rails hook (3e)
 
-- [ ] AC-19: `hooks/subagent-rails`: fires FOR subagents (**guard polarity: never a presence-based skip — coord-notify's guard is the INVERSE**); static plugin-authored text only (rails pointer + 1-line honesty reminder); silent-fail — TODO
-- [ ] AC-20: hooks.json: `"SubagentStart"`, matcher `""`, async:false, timeout 5000 — TODO
+- [x] AC-19: `hooks/subagent-rails`: fires FOR subagents (**guard polarity: never a presence-based skip — coord-notify's guard is the INVERSE**); static plugin-authored text only (rails pointer + 1-line honesty reminder); silent-fail — DONE (implemented; pending review/tests)
+- [x] AC-20: hooks.json: `"SubagentStart"`, matcher `""`, async:false, timeout 5000 — DONE (implemented; pending review/tests)
 - [ ] AC-21: shipped-hook sentinel re-test capturing RAW payload keys (agent_id/agent_type presence on 2.1.197) → recorded in ADR-006 amendment — TODO
 
 ## P6 — Review / test / security / docs / deploy

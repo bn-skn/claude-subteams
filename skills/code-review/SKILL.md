@@ -111,6 +111,10 @@ Context:
 Adding rate limiting to the login endpoint to prevent brute-force attacks.
 Approach: token bucket algorithm with Redis backing store.
 
+Rails:
+- Active contract: docs/plans/active/IMPL-PLAN-<slug>.md — review the diff against the WRITTEN
+  acceptance criteria (original criteria + any REVISED: lines), never a paraphrase or a memory of intent.
+
 Focus areas:
 1. Race condition in token bucket increment (concurrent requests)
 2. Session token generation — is it cryptographically secure?
@@ -132,6 +136,7 @@ Known risks:
 3. **Focus areas** — specific concerns ranked by risk (most dangerous first)
 4. **Test status** — pass/fail counts, coverage on changed files
 5. **Known risks** — trade-offs you made, areas where you are uncertain
+6. **Rails / contract** — path to the active plan-of-record; the reviewer verifies the diff against the written acceptance criteria (original + `REVISED:` lines), not a restatement. No contract present → say so; never invent criteria.
 
 **Auto-scan commands to include:**
 ```bash

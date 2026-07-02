@@ -48,7 +48,8 @@ For each task:
 4. **Dispatch code quality reviewer subagent** — is the code well-built?
    - If no: implementer fixes, quality reviewer re-reviews
    - If yes: mark task complete
-5. Move to next task
+5. **Update the plan-of-record:** if a living plan-of-record exists (`docs/plans/active/IMPL-PLAN-*.md`, see the `living-plan` skill), flip the matching acceptance criterion's status (TODO → WIP → DONE, or BLOCKED / TBD where apt) and recompute its Rollup row as the task closes; validate with `scripts/check-plan.sh` before declaring the plan done. This skill is a plan executor too — the matrix must stay in lockstep, not die because `subagent-driven-dev` was chosen over `executing-plans`.
+6. Move to next task
 
 ### Step 3: Final Review
 
@@ -89,6 +90,7 @@ When a subagent reports BLOCKED:
 2. Run the tests yourself — do not accept "tests pass" without running them
 3. Verify no unintended changes to files outside scope
 4. Confirm the implementation matches the spec (that is what the spec reviewer does)
+5. If a living plan-of-record exists, confirm its matching criterion + Rollup row were updated for this task — `scripts/check-plan.sh` output is the evidence, not memory.
 
 ## Two-Stage Review
 

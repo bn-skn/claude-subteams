@@ -1,0 +1,67 @@
+#!/bin/bash
+# PreToolUse hook — autonomy scope/cap enforcement gate (Tier 2 bounded autonomy).
+# Fires before Edit/Write/Bash. Inert (2-line exit) when CLAUDE_SUBTEAMS_AUTONOMY is
+# unset — manual mode is completely unaffected; the env check is the FIRST thing this
+# hook does, before touching stdin/disk. Delegates the actual scope/cap arithmetic to
+# scripts/autonomy-check.sh (read-only invocation, no --checkpoint) so there is exactly
+# one source of truth for the caps math.
+#
+# NEVER invoke `claude` or anything that itself triggers PreToolUse from this hook —
+# that would deadlock the tool-call pipeline (plan R5).
+#
+# Silent-fail: any internal error here falls through to exit 0 (never break a
+# session) — nothing sensitive is logged, stdout only carries the deny JSON.
+
+EVENT="${1:-}"
+[ "$EVENT" = "PreToolUse" ] || exit 0
+
+# FIRST check, before any other work: env gate. Manual mode pays only this line.
+[ -n "${CLAUDE_SUBTEAMS_AUTONOMY:-}" ] || exit 0
+
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || exit 0
+CHECK_SCRIPT="${HOOK_DIR}/../scripts/autonomy-check.sh"
+[ -x "$CHECK_SCRIPT" ] || exit 0
+
+PROJECT_DIR="$PWD"
+
+# Quick pre-check: no active run record at all → autonomy not in progress, allow.
+ACTIVE_DIR="${PROJECT_DIR}/docs/plans/active"
+HAS_RECORD=0
+if [ -d "$ACTIVE_DIR" ]; then
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if grep -qF -- '<!-- autonomy-run:begin -->' "$f" 2>/dev/null; then
+      HAS_RECORD=1
+      break
+    fi
+  done < <(find "$ACTIVE_DIR" -maxdepth 1 -type f -name 'IMPL-PLAN-*.md' 2>/dev/null)
+fi
+[ "$HAS_RECORD" -eq 1 ] || exit 0
+
+# Session id from the hook stdin JSON (anti-replay: the record must belong to THIS
+# session). tty-guarded so a manual CLI invocation never hangs on a missing pipe.
+SESSION_ID=""
+if [ ! -t 0 ]; then
+  INPUT=$(cat 2>/dev/null || printf '{}')
+  if command -v jq >/dev/null 2>&1; then
+    SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+  else
+    SESSION_ID=$(printf '%s' "$INPUT" | awk 'match($0, /"session_id"[[:space:]]*:[[:space:]]*"[^"]*"/) { s=substr($0, RSTART, RLENGTH); gsub(/.*:[[:space:]]*"/, "", s); gsub(/"$/, "", s); print s; exit }')
+  fi
+fi
+
+if [ -n "$SESSION_ID" ]; then
+  OUTPUT=$("$CHECK_SCRIPT" "$PROJECT_DIR" "--session=$SESSION_ID" 2>&1)
+else
+  OUTPUT=$("$CHECK_SCRIPT" "$PROJECT_DIR" 2>&1)
+fi
+RC=$?
+[ "$RC" -eq 0 ] && exit 0
+
+# 1/2/3/4 (any non-zero here) all mean STOP — deny with the script's own message.
+REASON=$(printf '%s\n' "$OUTPUT" | awk 'NF{line=$0} END{print line}')
+[ -n "$REASON" ] || REASON="[autonomy-check] blocked (exit $RC), no message captured."
+ESC=$(printf '%s' "$REASON" | awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); print }')
+
+printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[autonomy-gate] %s"}}\n' "$ESC"
+exit 0

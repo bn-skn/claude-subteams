@@ -77,6 +77,29 @@ check_plan() {
     esac
   done < "$file"
   [ "$bad" -eq 0 ] && echo "  checklist items: all carry a status token."
+
+  # 4. REVISED lines (append-only revision notes) are CONDITIONAL: a plan with zero
+  #    REVISED lines still passes untouched. Any REVISED line present must carry
+  #    exactly three ' — '-separated parts: `REVISED: <what> — <why> — <ack>` (the
+  #    third part is the operator-ack quote). Only the shape is checked here — no
+  #    inference about whether a given REVISED changes scope/acceptance.
+  local rline rlineno=0 rcount=0 rbad=0
+  while IFS= read -r rline || [ -n "$rline" ]; do
+    rlineno=$((rlineno + 1))
+    if printf '%s' "$rline" | grep -qE '^[[:space:]]*REVISED:'; then
+      rcount=$((rcount + 1))
+      local rparts
+      rparts=$(printf '%s' "$rline" | awk -F' — ' '{print NF}')
+      if [ "$rparts" -ne 3 ]; then
+        echo "  MALFORMED REVISED (line $rlineno): expected 'REVISED: <what> — <why> — <ack>' (3 parts, found $rparts): ${rline#"${rline%%[![:space:]]*}"}"
+        rbad=1
+        FAILED=1
+      fi
+    fi
+  done < "$file"
+  if [ "$rcount" -gt 0 ] && [ "$rbad" -eq 0 ]; then
+    echo "  REVISED lines: all $rcount well-formed."
+  fi
 }
 
 for f in "${PLANS[@]}"; do

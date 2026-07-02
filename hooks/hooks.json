@@ -27,6 +27,26 @@
           "async": false,
           "timeout": 5000
         }]
+      },
+      {
+        "matcher": "Edit|Write|Bash",
+        "hooks": [{
+          "type": "command",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/autonomy-gate",
+          "async": false,
+          "timeout": 15000
+        }]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [{
+          "type": "command",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-rails",
+          "async": false,
+          "timeout": 5000
+        }]
       }
     ],
     "PostToolUse": [{
