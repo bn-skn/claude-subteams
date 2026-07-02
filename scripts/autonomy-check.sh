@@ -18,6 +18,14 @@
 # Deps: git, grep, awk ONLY (no jq — must run in every plugin-consumer repo without
 # imposing a new dependency).
 #
+# Scope glob semantics: bash case-patterns — `*` crosses `/`, so `src/*` matches the
+# WHOLE subtree (recursive), not just direct children. Write scopes accordingly.
+# The active record file itself is auto-exempt from scope (script-managed).
+# Honesty note: prior AUTONOMY_CHECKPOINT lines feed the aggregate budget; an agent
+# DELETING them to reset the budget is not structurally prevented — that residual
+# trust is the documented "script-authored assumption" (per-interval caps are always
+# recomputed from git and cannot be spoofed).
+#
 # Exit 0 — proceed: env set, exactly one fresh record found, in scope, under caps.
 # Exit 1 — usage error (bad arguments).
 # Exit 2 — VIOLATION (operator-decision-required): an out-of-scope path, or a
@@ -138,6 +146,19 @@ fi
 MAX_FILES="${CLAUDE_SUBTEAMS_AUTONOMY_MAX_FILES:-${AUTONOMY_MAX_FILES:-10}}"
 MAX_LINES="${CLAUDE_SUBTEAMS_AUTONOMY_MAX_LINES:-${AUTONOMY_MAX_LINES:-400}}"
 
+# Fail-closed: a cap/budget that is present but not a plain number can never mean
+# "unbounded" — a garbled record is exit 4 (cannot evaluate), same as a bad epoch.
+_require_numeric() { # name value — empty is allowed (defaults/skips handle it)
+  case "$2" in
+    '') : ;;
+    *[!0-9]*) msg "$1 ('$2') is not a plain number — cannot evaluate."; exit 4 ;;
+  esac
+}
+_require_numeric MAX_FILES "$MAX_FILES"
+_require_numeric MAX_LINES "$MAX_LINES"
+_require_numeric AUTONOMY_BUDGET_FILES "$AUTONOMY_BUDGET_FILES"
+_require_numeric AUTONOMY_BUDGET_TASKS "$AUTONOMY_BUDGET_TASKS"
+
 # 4. Freshness.
 case "$AUTONOMY_EXPIRES_EPOCH" in
   ''|*[!0-9]*) msg "AUTONOMY_EXPIRES_EPOCH ('$AUTONOMY_EXPIRES_EPOCH') is not a valid epoch — cannot evaluate."; exit 4 ;;
@@ -188,9 +209,14 @@ CHANGED_FILES=$(
 )
 
 IFS=',' read -r -a SCOPE_GLOBS <<< "$AUTONOMY_SCOPE"
+# The active record file is auto-exempt: --checkpoint writes to it every interval,
+# so it always differs from base. Exempting it is safe under the stated model (an
+# agent editing the plan file is the accepted "script-authored assumption" caveat).
+RECORD_REL="${RECORD_FILE#"$PROJECT_DIR"/}"
 VIOLATIONS=""
 while IFS= read -r path; do
   [ -n "$path" ] || continue
+  [ "$path" = "$RECORD_REL" ] && continue
   MATCHED=0
   for glob in "${SCOPE_GLOBS[@]}"; do
     glob="${glob# }"; glob="${glob% }"

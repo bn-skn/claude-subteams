@@ -63,6 +63,8 @@ When — and only when — an autonomy run is granted, the active plan carries a
     AUTONOMY_CHECKPOINT: <appended by scripts/autonomy-check.sh itself — never by the agent>
     <!-- autonomy-run:end -->
 
+**Scope semantics:** globs are bash case-patterns — `*` crosses `/`, so `src/*` covers the whole subtree. The record file itself is auto-exempt (the checkpoint script writes to it). A cap or budget that is present but non-numeric fails closed (cannot evaluate), never "unbounded".
+
 **Ownership:** grant, criteria snapshot, scope, expiry, and caps are **operator-owned** — the agent copies them in verbatim at grant and never edits them mid-run. The `AUTONOMY_CHECKPOINT:` lines are **script-authored**: `scripts/autonomy-check.sh` appends them, closing the self-graded-counter hole — the agent cannot write its own progress evidence. Absent a fresh record, execution is interactive. Full activation contract and enforcement layers live in `executing-plans` (`## Autonomy Mode`).
 
 ## 4. Validation
