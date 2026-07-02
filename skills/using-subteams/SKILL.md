@@ -124,13 +124,13 @@ This is the discovery surface for rule 1 — scan it by relevance. Most speciali
 
 ## 6. Pipeline Decision
 
-> Autonomy Mode (bounded autonomous execution) is documented in one place — `executing-plans` `## Autonomy Mode`. It is opt-in per grant, never a pipeline default.
+> Autonomy Mode (bounded autonomous execution — drift-containment, not a sandbox against a shell-equipped agent; see ADR-007) is documented in one place — `executing-plans` `## Autonomy Mode`. It is opt-in per grant, never a pipeline default.
 
 Every development task follows one of three pipelines. Choose based on scope and risk.
 
 | Pipeline | Criteria | Steps |
 |----------|----------|-------|
-| **Lightweight** | < 3 files AND **zero logic** — purely mechanical (rename, typo, import, comment, formatting, string/const tweak with no behavior change) | Implement → tsc/lint → done. **No review only because there is nothing to reason about.** |
+| **Lightweight** | **zero logic** — purely mechanical, any file count (rename, typo, import, comment, formatting, string/const tweak with no behavior change) | Implement → tsc/lint → done. **No review only because there is nothing to reason about.** |
 | **Standard** | 3-8 files, moderate logic, single-module — OR **any change that touches logic** | Plan (brief) → Branch → Implement → **Review (code-reviewer always; + devils-advocate for non-trivial logic — see note)** → Fix → Test → Commit → Merge |
 | **Full** | Cross-module, user-facing, complex business logic | See Full Pipeline below |
 | **Full + Architecture** | New module, structural change, dependency changes, **greenfield** | Full Pipeline + architecture-guard + doc-agent. **Architecture-capture gate (Rule 24):** before IMPLEMENT, `ARCHITECTURE.md`/`CONVENTIONS.md` must be populated via the `brainstorming` capture flow — `scripts/check-arch-docs.sh` passes AND every non-obvious choice traces to an ADR. |
@@ -209,7 +209,7 @@ The docs are populated by the orchestrator in-context during `brainstorming` (Ar
 
 ### Lightweight Pipeline
 
-For lightweight tasks (< 3 files, **zero logic** — purely mechanical), the pipeline is:
+For lightweight tasks (**zero logic** — purely mechanical, any file count), the pipeline is:
 1. Implement (you or developer agent)
 2. tsc/lint check
 3. Commit
@@ -362,7 +362,7 @@ You are not exempt from escalation. When YOU face uncertainty or blockers, raise
 
 ### Autonomy doctrine
 
-Autonomy is never ambient — it is a per-command grant, restated as a run record in the active contract, valid only while that record is fresh. Enforcement is layered and honestly named: the `autonomy-gate` PreToolUse **hook is the enforcement** — it blocks an out-of-scope or cap-exceeding file-writing edit (Edit/Write/MultiEdit/NotebookEdit) before it lands, and denies edits to the run record itself; a Bash mutation has no reliable pre-hoc target, so it is caught post-hoc on the next call, not prevented — stated plainly, not oversold. `scripts/autonomy-check.sh` alone is **checkpoint evidence**, not prevention; the prose controls (re-hydration, kill-switch, self-assessed risk-triggers) are **behavioral protocol**. A configuration without the hook armed is not autonomy — it is "assisted continuation" and must not be described as autonomous. Full mechanics live in `executing-plans` (`## Autonomy Mode`) — the one authoritative home.
+Autonomy is never ambient — it is a per-command grant, restated as a run record in the active contract, valid only while that record is fresh. Enforcement is layered and honestly named: the `autonomy-gate` PreToolUse **hook is the enforcement** — it blocks an out-of-scope or cap-exceeding file-writing edit (Edit/Write/MultiEdit/NotebookEdit, both covered — the hook reads `notebook_path` for NotebookEdit) before it lands, canonicalizing both the target and the record path so a relative/`../`/symlink-alias trick cannot dodge it, and denies edits to the run record itself; a Bash mutation has no reliable pre-hoc target for arbitrary side effects, so it is caught post-hoc on the next call, not prevented — stated plainly, not oversold. The hook does add a narrow, **best-effort** pre-hoc pattern-match that denies a Bash command referencing the record's filename or the literal `autonomy-run` marker, but this is a string match, not sandboxing — it raises the bar, it does not close the Bash-record-write vector. `scripts/autonomy-check.sh` alone is **checkpoint evidence**, not prevention; the prose controls (re-hydration, kill-switch, self-assessed risk-triggers) are **behavioral protocol**. A configuration without the hook armed is not autonomy — it is "assisted continuation" and must not be described as autonomous. Full mechanics live in `executing-plans` (`## Autonomy Mode`) — the one authoritative home.
 
 ## 10. MCP Server Integration
 

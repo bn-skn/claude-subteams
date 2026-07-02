@@ -21,7 +21,19 @@
 #                 an out-of-scope write is caught before it lands). Read-only — this
 #                 flag never writes anything; it only widens the set of paths checked
 #                 against AUTONOMY_SCOPE. Bash has no reliable single target, so the
-#                 caller never passes --pending for Bash — that stays post-hoc only.
+#                 caller never passes --pending for Bash — that stays post-hoc only
+#                 (the autonomy-gate hook does a separate, best-effort pattern-match
+#                 on the Bash command text for record-write detection — see the
+#                 hook's own header comment; that is NOT this flag).
+#
+# G1 (path canonicalization): --pending is resolved with `_canon_path` (realpath -m,
+# GNU; readlink -f fallback; raw-string degrade if neither exists) BEFORE it is
+# relativized against the repo root, so a relative path or a `../` round-trip cannot
+# dodge scope or falsely collide with the record-file exemption. The record file's
+# own path (RECORD_REL) is resolved through the identical pipeline for the same
+# reason. A --pending path whose resolved form lands outside the repo root is
+# rejected outright as out-of-scope (exit 2) rather than left to an incidental glob
+# mismatch.
 #
 # Deps: git, grep, awk ONLY (no jq — must run in every plugin-consumer repo without
 # imposing a new dependency).
@@ -66,6 +78,22 @@ usage_err() {
   exit 1
 }
 
+# G1: canonicalize a path — realpath -m (GNU, tolerates missing components,
+# resolves symlinks and `../`) preferred; readlink -f fallback if realpath is
+# absent; if neither binary exists, OR the resolution call itself fails/produces
+# no output, degrade to the raw string as-is (documented, best-effort-only branch —
+# see the header comment for the same tradeoff hooks/autonomy-gate accepts).
+_canon_path() { # path -> canonicalized path, or the raw string if resolution fails
+  local p="$1" out=""
+  [ -n "$p" ] || { printf '%s' ''; return; }
+  if command -v realpath >/dev/null 2>&1; then
+    out=$(realpath -m -- "$p" 2>/dev/null)
+  elif command -v readlink >/dev/null 2>&1; then
+    out=$(readlink -f -- "$p" 2>/dev/null)
+  fi
+  printf '%s' "${out:-$p}"
+}
+
 PROJECT_DIR="."
 CHECKPOINT=0
 CALLER_SESSION=""
@@ -105,6 +133,10 @@ if [ -z "$REPO_ROOT" ]; then
   exit 4
 fi
 PROJECT_DIR="$REPO_ROOT"
+# G1: canonical form of the repo root, used as the comparison basis for --pending
+# and the record-file exemption below — both must be relativized against the SAME
+# resolved root, or a symlinked/relative repo path could desync the two.
+PROJECT_DIR_CANON=$(_canon_path "$PROJECT_DIR")
 
 # 3. Locate the run record: exactly one active IMPL-PLAN carrying a record block.
 # Oversized candidates are skipped WITHOUT being grep'd (DoS guard, C11).
@@ -244,21 +276,38 @@ fi
 
 # 11. --pending=<path> (C12/B4): fold a not-yet-written path into the changed-file
 # set BEFORE scope evaluation, so the hook can deny an out-of-scope write before it
-# lands. Accepts either an absolute path under PROJECT_DIR or one already relative
-# to it; anything else (e.g. outside the repo) is left as-is and will simply fail
-# to match any scope glob, which is the safe default.
+# lands. G1: resolved with `_canon_path` (handles a relative path, a `../`
+# round-trip, or a symlink alias — closes the "dress the pending path up so it
+# doesn't textually match the record/scope" bypass) and THEN relativized against
+# the canonical repo root. A resolved path that lands OUTSIDE the repo root is
+# rejected outright here — exit 2, out-of-scope — rather than left to an
+# incidental glob mismatch further down.
 PENDING_REL=""
 if [ -n "$PENDING_PATH" ]; then
-  PENDING_REL="${PENDING_PATH#"$PROJECT_DIR"/}"
+  case "$PENDING_PATH" in
+    /*) PENDING_ABS="$PENDING_PATH" ;;
+    *) PENDING_ABS="$PROJECT_DIR/$PENDING_PATH" ;;
+  esac
+  PENDING_CANON=$(_canon_path "$PENDING_ABS")
+  case "$PENDING_CANON" in
+    "$PROJECT_DIR_CANON"/*) PENDING_REL="${PENDING_CANON#"$PROJECT_DIR_CANON"/}" ;;
+    "$PROJECT_DIR_CANON") PENDING_REL="." ;;
+    *)
+      msg "pending path '$PENDING_PATH' resolves to '$PENDING_CANON', which is outside the repository root ($PROJECT_DIR_CANON) — out of scope."
+      exit 2
+      ;;
+  esac
 fi
 
 # 12. Scope evaluation: union of diff-vs-base + untracked, both sides of a rename,
 # plus the pre-hoc pending path if given. core.quotePath=false (C8) so unicode
 # paths compare equal to scope globs and the record-file exemption; --end-of-options
-# (C7) stops a hostile-looking BASE_COMMIT from being parsed as a git option.
-DIFF_NAMES=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --name-only --end-of-options "$AUTONOMY_BASE_COMMIT" 2>/dev/null)
+# (C7) stops a hostile-looking BASE_COMMIT from being parsed as a git option; the
+# trailing `--` disambiguates revision vs pathspec (G6 hygiene, no paths follow it
+# here — an explicit terminator regardless).
+DIFF_NAMES=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --name-only --end-of-options "$AUTONOMY_BASE_COMMIT" -- 2>/dev/null)
 UNTRACKED_FILES=$(git -C "$PROJECT_DIR" -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null)
-RENAME_NAMES=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --name-status --end-of-options "$AUTONOMY_BASE_COMMIT" 2>/dev/null \
+RENAME_NAMES=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --name-status --end-of-options "$AUTONOMY_BASE_COMMIT" -- 2>/dev/null \
   | awk -F'\t' '$1 ~ /^R/ { print $2; print $3 }')
 
 CHANGED_FILES=$(
@@ -275,7 +324,15 @@ IFS=',' read -r -a SCOPE_GLOBS <<< "$AUTONOMY_SCOPE"
 # it always differs from base. Exempting it is safe under the stated model (an
 # agent editing the plan file is the accepted "script-authored assumption" caveat).
 # It is also excluded from FILES_COUNT (C4) so the cap reflects real work files.
-RECORD_REL="${RECORD_FILE#"$PROJECT_DIR"/}"
+# G1: relativized through the SAME canonicalization pipeline as PENDING_REL above,
+# so a canonicalized pending path that genuinely resolves to the record cannot
+# fail to match it (nor can an unrelated path falsely collide with it) due to the
+# two sides being relativized differently.
+RECORD_CANON=$(_canon_path "$RECORD_FILE")
+case "$RECORD_CANON" in
+  "$PROJECT_DIR_CANON"/*) RECORD_REL="${RECORD_CANON#"$PROJECT_DIR_CANON"/}" ;;
+  *) RECORD_REL="${RECORD_FILE#"$PROJECT_DIR"/}" ;;
+esac
 VIOLATIONS=""
 NONEXEMPT_COUNT=0
 while IFS= read -r path; do
@@ -305,17 +362,30 @@ fi
 # 13. Caps: TOTAL-RUN, cumulative from AUTONOMY_BASE_COMMIT — recomputed fresh from
 # git on every call (C3: no per-interval/aggregate split, no budget/tasks fields).
 FILES_COUNT="$NONEXEMPT_COUNT"
-SHORTSTAT=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --shortstat --end-of-options "$AUTONOMY_BASE_COMMIT" 2>/dev/null)
-INSERTIONS=$(printf '%s' "$SHORTSTAT" | awk '{ for(i=1;i<=NF;i++) if ($i ~ /^insertion/) print $(i-1) }')
-DELETIONS=$(printf '%s' "$SHORTSTAT" | awk '{ for(i=1;i<=NF;i++) if ($i ~ /^deletion/) print $(i-1) }')
-INSERTIONS="${INSERTIONS:-0}"
-DELETIONS="${DELETIONS:-0}"
-TRACKED_LINES=$((INSERTIONS + DELETIONS))
-# shortstat only covers tracked diffs — it misses untracked new files entirely
-# (C5). Sum their line counts separately (read-only; no `git add -N`).
+# G5: LINES is computed over the CHANGED_FILES set MINUS the record file — NOT a
+# whole-repo --shortstat. A whole-repo shortstat would silently count the record's
+# own diff (an appended AUTONOMY_CHECKPOINT line, an AC status flip) against the
+# agent's line budget even though that same file is already exempt from scope and
+# FILES_COUNT — a run whose only change is the record's own bookkeeping must report
+# lines=0, not false-block on it.
+TRACKED_NONRECORD=()
+while IFS= read -r p; do
+  [ -n "$p" ] || continue
+  [ "$p" = "$RECORD_REL" ] && continue
+  TRACKED_NONRECORD+=("$p")
+done <<< "$DIFF_NAMES"
+TRACKED_LINES=0
+if [ "${#TRACKED_NONRECORD[@]}" -gt 0 ]; then
+  NUMSTAT=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --numstat --end-of-options "$AUTONOMY_BASE_COMMIT" -- "${TRACKED_NONRECORD[@]}" 2>/dev/null)
+  TRACKED_LINES=$(printf '%s\n' "$NUMSTAT" | awk -F'\t' '
+    NF>=2 { if ($1 ~ /^[0-9]+$/) a+=$1; if ($2 ~ /^[0-9]+$/) d+=$2 }
+    END { print a+d+0 }')
+fi
+# Untracked new files have no diff at all (C5) — summed separately via wc -l, same
+# record exclusion applied.
 UNTRACKED_LINES=0
 if [ -n "$UNTRACKED_FILES" ]; then
-  UNTRACKED_LINES=$(printf '%s\n' "$UNTRACKED_FILES" | awk 'NF' | while IFS= read -r uf; do
+  UNTRACKED_LINES=$(printf '%s\n' "$UNTRACKED_FILES" | awk 'NF' | awk -v rec="$RECORD_REL" '$0 != rec' | while IFS= read -r uf; do
     [ -f "$PROJECT_DIR/$uf" ] && wc -l < "$PROJECT_DIR/$uf"
   done | awk '{s+=$1} END{print s+0}')
 fi
