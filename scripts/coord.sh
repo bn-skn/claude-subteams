@@ -106,7 +106,7 @@ COMMIT_LOCK="$ROOT/commit.lock"
 # ---- Atomic init: mkdir is the create guard; never truncate an existing ledger. ----
 cmd_init() {
   mkdir -p "$INBOX" 2>/dev/null
-  ( flock 9
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     [ -s "$INSTANCES" ] || echo '{}' > "$INSTANCES"
     [ -s "$CLAIMS" ]    || echo '{}' > "$CLAIMS"
   ) 9>"$LOCK"
@@ -157,14 +157,16 @@ _alive() {  # _alive <id>
 # worktree is an unconditional dead signal. PID reuse (a recycled pid landing on an
 # unrelated live process) is an accepted rare gap on a single host with 2-3 instances.
 _reap_locked() {
-  local ids id
-  ids=$(jq -r 'keys[]' "$INSTANCES" 2>/dev/null)
-  for id in $ids; do
+  local id
+  # instances.json is an untrusted boundary (an operator or bug could hand-edit a key with
+  # whitespace/glob chars): read keys line-by-line so no word-splitting or glob expansion.
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
     if ! _alive "$id"; then
       _jq_write "$INSTANCES" --arg i "$id" 'del(.[$i])'
       _jq_write "$CLAIMS" --arg i "$id" 'with_entries(select(.value.by != $i))'
     fi
-  done
+  done < <(jq -r 'keys[]' "$INSTANCES" 2>/dev/null)
   # Prune orphan claims: any claim whose holder is no longer a live registered instance.
   # CRITICAL: if instances.json is unparseable, ABORT the prune — never treat a parse
   # failure as "no live instances", which would silently wipe every claim.
@@ -198,7 +200,7 @@ cmd_register() {
     pid="$PPID"; trusted=false                      # no claude ancestor → TTL fallback
   fi
   cmd_init
-  ( flock 9
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     _jq_write "$INSTANCES" --arg i "$id" --arg pid "$pid" --arg wt "$wt" \
       --arg br "$br" --arg role "$role" --arg tr "$trusted" --arg now "$(_now)" \
       '.[$i] = {pid:($pid|tonumber), pid_trusted:($tr=="true"), worktree:$wt, branch:$br, role:$role, started:($now|tonumber), heartbeat:($now|tonumber)}'
@@ -208,8 +210,9 @@ cmd_register() {
 cmd_deregister() {
   local id=""; [ "${1:-}" = "--id" ] && id="${2:-}"
   [ -n "$id" ] || return 2
+  _valid_id "$id" || { echo "[coord] deregister: invalid --id '$id'" >&2; return 2; }
   [ -f "$INSTANCES" ] || return 0
-  ( flock 9
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     _jq_write "$INSTANCES" --arg i "$id" 'del(.[$i])'
     _jq_write "$CLAIMS" --arg i "$id" 'with_entries(select(.value.by != $i))'
   ) 9>"$LOCK"
@@ -241,7 +244,7 @@ cmd_heartbeat() {
     pid="$PPID"; trusted=false
   fi
   cmd_init
-  ( flock 9
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     _jq_write "$INSTANCES" --arg i "$id" --arg pid "$pid" --arg wt "$wt" \
       --arg br "$br" --arg tr "$trusted" --arg now "$(_now)" \
       'if .[$i] then .[$i].heartbeat = ($now|tonumber)
@@ -251,13 +254,17 @@ cmd_heartbeat() {
 
 cmd_roster() {
   [ -f "$INSTANCES" ] || { echo "(no instances)"; return 0; }
-  ( flock 9; _reap_locked ) 9>"$LOCK"
-  local n; n=$(jq 'length' "$INSTANCES" 2>/dev/null || echo 0)
-  echo "Live instances ($n):"
-  jq -r 'to_entries[] | "  - \(.key)  pid=\(.value.pid)  branch=\(.value.branch)  worktree=\(.value.worktree)"' "$INSTANCES" 2>/dev/null
+  # Reap AND read inside ONE locked section: a register/deregister landing between reap and
+  # read would otherwise make the printed roster stale (autonomy-check.sh trusts this roster).
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
+    _reap_locked
+    local n; n=$(jq 'length' "$INSTANCES" 2>/dev/null || echo 0)
+    echo "Live instances ($n):"
+    jq -r 'to_entries[] | "  - \(.key)  pid=\(.value.pid)  branch=\(.value.branch)  worktree=\(.value.worktree)"' "$INSTANCES" 2>/dev/null
+  ) 9>"$LOCK"
 }
 
-cmd_reap() { cmd_init; ( flock 9; _reap_locked ) 9>"$LOCK"; }
+cmd_reap() { cmd_init; ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }; _reap_locked ) 9>"$LOCK"; }
 
 # atomic claim-or-reject. exit 0 = claimed (by me/new); exit 3 = held by another live instance.
 cmd_claim() {
@@ -269,7 +276,7 @@ cmd_claim() {
   _valid_id "$id" || { echo "[coord] claim: invalid --id '$id'" >&2; return 2; }
   cmd_init
   local rc=0
-  ( flock 9
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     _reap_locked
     # The claimant MUST be a currently-registered live instance, else the claim provides
     # no exclusion (orphan-prune would wipe it) — fail LOUDLY rather than silently void.
@@ -299,7 +306,7 @@ cmd_release() {
   esac; done
   [ -n "$id" ] || return 2
   [ -f "$CLAIMS" ] || return 0
-  ( flock 9
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     if [ "$all" -eq 1 ]; then
       _jq_write "$CLAIMS" --arg i "$id" 'with_entries(select(.value.by != $i))'
     else
@@ -327,7 +334,8 @@ cmd_send() {
   local line
   line=$(jq -nc --arg f "$from" --arg m "$msg" --arg now "$(_now)" '{from:$f, at:($now|tonumber), msg:$m}')
   # per-recipient inbox; flock the inbox file so concurrent senders don't interleave.
-  ( flock 9; printf '%s\n' "$line" >> "$INBOX/$to.jsonl" ) 9>"$INBOX/$to.jsonl.lock"
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
+    printf '%s\n' "$line" >> "$INBOX/$to.jsonl" ) 9>"$INBOX/$to.jsonl.lock"
 }
 
 cmd_recv() {
@@ -349,7 +357,7 @@ cmd_recv() {
     return 0
   fi
   [ -f "$box" ] || { echo "(no messages)"; return 0; }
-  ( flock 9
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     if [ -s "$box" ]; then
       # Tolerant parse: `fromjson?` skips any malformed line instead of aborting the
       # whole read (a single bad line must not silently swallow the rest of the inbox).
@@ -365,7 +373,7 @@ cmd_commit_lock() {
   [ "${1:-}" = "--" ] && shift
   [ $# -gt 0 ] || { echo "[coord] commit-lock: expected -- CMD..." >&2; return 2; }
   cmd_init
-  ( flock 9; "$@" ) 9>"$COMMIT_LOCK"
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }; "$@" ) 9>"$COMMIT_LOCK"
 }
 
 cmd_notify_due() {
@@ -381,7 +389,10 @@ cmd_notify_due() {
   local box="$INBOX/$id.jsonl"
   [ -s "$box" ] || { echo 0; return 0; }
   cmd_init
-  ( flock 9
+  # Lock the SAME per-inbox file send/recv use (not $LOCK): notify-due reads this id's inbox,
+  # so it must be mutually exclusive with a send appending to it / a recv clearing it. Only
+  # this single inbox is touched, so there is no multi-lock ordering / deadlock concern.
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     mkdir -p "$ROOT/notify" 2>/dev/null
     local marker="$ROOT/notify/$id.last" newest last count
     newest=$(jq -rR 'fromjson? | .at' "$box" 2>/dev/null | sort -n | tail -1)
@@ -395,7 +406,7 @@ cmd_notify_due() {
     else
       echo 0
     fi
-  ) 9>"$LOCK"
+  ) 9>"$INBOX/$id.jsonl.lock"
 }
 
 main() {

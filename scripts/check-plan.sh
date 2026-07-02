@@ -45,12 +45,16 @@ check_plan() {
   local file="$1"
   echo "[check-plan] Checking: $file"
 
-  # 0. Size guard (D2/M3): never parse a plan file larger than 1MB. Skipped
-  #    without a pass/fail verdict — validation is inconclusive, not a violation.
+  # 0. Size guard (D2/M3): never parse a plan file larger than 1MB. An
+  #    unvalidatable plan is a FAILURE, not a pass — the header contract is
+  #    "Exit 0 = every IMPL-PLAN is valid", and a file we refused to parse was
+  #    never shown valid. Set FAILED=1 so exit is non-zero even when this is the
+  #    only plan (AC8); keep the SKIPPED diagnostic.
   local fsize
   fsize=$(wc -c < "$file" 2>/dev/null || echo 0)
   if [ "$fsize" -gt 1048576 ]; then
-    echo "  SKIPPED: file exceeds 1MB ($fsize bytes) — not parsed (DoS guard)."
+    echo "  SKIPPED: file exceeds 1MB ($fsize bytes) — not parsed (DoS guard); treated as FAIL (unvalidatable)."
+    FAILED=1
     return
   fi
 

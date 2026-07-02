@@ -43,15 +43,18 @@
 # not file_path. Both are read; whichever is non-empty is used as the effective
 # target for the record-edit deny AND the pre-hoc scope check.
 #
-# Bash record-write pattern-match (G4, BEST-EFFORT — raises the bar, does not close
-# the vector): when tool_name is Bash, the command text is checked for the active
-# record's basename or the literal "autonomy-run" marker string; a match is denied.
-# This is a plain substring/glob match on the command string — it catches the
-# obvious case (`sed -i ... IMPL-PLAN-*.md`, `echo >> ...`) but CANNOT catch
-# indirection via variables, python/perl/base64, heredocs, or other unrecognized
-# shell constructions. It is documented and MUST be read as partial mitigation,
-# not a guarantee — the residual (a determined agent rewriting the record via an
-# unrecognized shell construction) is a deferred operator decision, not solved here.
+# Bash record-reference deny (G4/AC9, BEST-EFFORT — raises the bar, does not close
+# the vector): when tool_name is Bash and the command text references the active
+# record (its basename or the literal "autonomy-run" marker), the command is DENIED
+# outright — no read/write classification. A classifier that tried to allow reads
+# was found (cross-model Codex review) to be trivially bypassable via command-
+# chaining (`cat /dev/null; mv payload <record>` — the leading `cat` latches
+# read-only, the second command writes) and strictly worse than a blanket deny, so
+# the blanket deny stands. To READ the record mid-run, use the Read tool, not Bash.
+# This still CANNOT catch a write that never names the record (variable/base64/heredoc
+# indirection) — that residual is the documented, deferred operator decision, not
+# solved here. It is partial mitigation against casual/named record edits, not a
+# sandbox against a determined agent (see ADR-007).
 #
 # Silent-fail: any internal error here falls through to exit 0 (never break a
 # session) — nothing sensitive is logged, stdout only carries the deny JSON. The
@@ -171,6 +174,13 @@ TARGET_PATH="$FILE_PATH"
 TARGET_CANON=""
 [ -n "$TARGET_PATH" ] && TARGET_CANON=$(_canon_path "$TARGET_PATH")
 
+# AC10: mirror autonomy-check.sh's C11 DoS guard — this pre-scan `grep`s every
+# active IMPL-PLAN on EVERY matching PreToolUse, so a huge plan file would make an
+# otherwise-cheap hook expensive per tool call. Size-check with `wc -c` (a stat,
+# not a full read) and skip the grep on anything bigger. Same constant/value as
+# autonomy-check.sh for consistency.
+MAX_RECORD_BYTES=1048576   # 1 MB
+
 # Quick pre-check: no active run record at all -> autonomy not in progress, allow.
 # Same pass also detects (B3) whether TARGET_PATH IS one of those record files
 # (G1: compared canonicalized-vs-canonicalized), and collects each record's
@@ -178,10 +188,20 @@ TARGET_CANON=""
 ACTIVE_DIR="${PROJECT_DIR}/docs/plans/active"
 HAS_RECORD=0
 RECORD_HIT=0
+OVERSIZED_SEEN=0
 RECORD_BASENAMES=()
 if [ -d "$ACTIVE_DIR" ]; then
   while IFS= read -r f; do
     [ -n "$f" ] || continue
+    # AC10: skip the grep on an oversized candidate. It cannot be confirmed as a
+    # record here, so record OVERSIZED_SEEN and let autonomy-check.sh (which has
+    # the same guard and fails closed on an oversized-only set) be the authority —
+    # never take the fast "no record -> allow" shortcut past an unscanned file.
+    FSIZE=$(wc -c < "$f" 2>/dev/null || echo 0)
+    if [ "$FSIZE" -gt "$MAX_RECORD_BYTES" ]; then
+      OVERSIZED_SEEN=1
+      continue
+    fi
     if grep -qF -- '<!-- autonomy-run:begin -->' "$f" 2>/dev/null; then
       HAS_RECORD=1
       RECORD_BASENAMES+=("${f##*/}")
@@ -192,7 +212,12 @@ if [ -d "$ACTIVE_DIR" ]; then
     fi
   done < <(find "$ACTIVE_DIR" -maxdepth 1 -type f -name 'IMPL-PLAN-*.md' 2>/dev/null)
 fi
-[ "$HAS_RECORD" -eq 1 ] || exit 0
+# AC10: fast allow-shortcut ONLY when we scanned every candidate and found no
+# record. An oversized (unscanned) candidate keeps us going — hand off to
+# autonomy-check.sh, which fails closed on it (exit 4 -> deny below).
+if [ "$HAS_RECORD" -ne 1 ] && [ "$OVERSIZED_SEEN" -ne 1 ]; then
+  exit 0
+fi
 
 # Deny-JSON builder (B5): jq when present (correctly escapes everything); the awk
 # fallback additionally strips control chars [\001-\037] (not just backslash/quote)
@@ -217,23 +242,26 @@ if [ "$RECORD_HIT" -eq 1 ]; then
   _deny "the active autonomy run record is not editable during a run — end the run to change scope/caps"
 fi
 
-# G4 (BEST-EFFORT, see header comment): a Bash command whose text references an
-# active record's basename, or the literal "autonomy-run" marker, is denied. Plain
-# substring match on the command string — not sandboxing, not exhaustive.
+# G4/AC9 (BEST-EFFORT, see header comment): any Bash command that references the
+# active record (its basename or the literal "autonomy-run" marker) is DENIED. We do
+# NOT try to distinguish a read from a write on arbitrary shell text — a read/write
+# classifier was tried and cross-model review (Codex) found it trivially bypassable
+# (`cat /dev/null; mv payload <record>` latches read-only on the leading `cat`, then
+# writes via the second command), and STRICTLY WORSE than a blanket deny. So the
+# blanket deny stands: it errs safe and cannot be defeated by command-chaining. To
+# READ the record mid-run, use the Read tool, not Bash. This still does not catch a
+# write that never names the record (variable/base64 indirection) — that residual is
+# the documented, deferred operator decision, unchanged.
 if [ "$TOOL_NAME" = "Bash" ] && [ -n "$CMD_TEXT" ]; then
+  _refs_record=0
   for _bn in "${RECORD_BASENAMES[@]:-}"; do
     [ -n "$_bn" ] || continue
-    case "$CMD_TEXT" in
-      *"$_bn"*)
-        _deny "the autonomy run record must not be modified during a run — end the run to change scope/caps (Bash write to the record blocked)"
-        ;;
-    esac
+    case "$CMD_TEXT" in *"$_bn"*) _refs_record=1 ;; esac
   done
-  case "$CMD_TEXT" in
-    *autonomy-run*)
-      _deny "the autonomy run record must not be modified during a run — end the run to change scope/caps (Bash write to the record blocked)"
-      ;;
-  esac
+  case "$CMD_TEXT" in *autonomy-run*) _refs_record=1 ;; esac
+  if [ "$_refs_record" -eq 1 ]; then
+    _deny "the autonomy run record must not be touched via Bash during a run — read it with the Read tool, and end the run to change scope/caps"
+  fi
 fi
 
 # B4: fold the pending target into the pre-hoc scope check for file-writing tools

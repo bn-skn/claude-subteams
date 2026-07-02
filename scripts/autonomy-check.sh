@@ -259,18 +259,34 @@ fi
 # session that was granted the run; any OTHER live instance in the roster means the
 # single-writer invariant no longer holds — fail closed.
 if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ]; then
+  # This is the ONE guard whose entire purpose is to fail CLOSED: unless we can
+  # POSITIVELY confirm this session is the sole live instance, we stop (exit 4) —
+  # we never proceed on an inability to determine. coord.sh missing/not-executable,
+  # jq absent, a not-a-git-repo or lock error, or any non-zero `roster` exit all mean
+  # "could not determine" and are treated identically. A successful `coord.sh roster`
+  # ALWAYS prints at least a header line ("Live instances (N):" or "(no instances)"),
+  # so empty output on a zero exit is itself indeterminate → also fail closed.
   SELF_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || SELF_DIR=""
   COORD="${SELF_DIR}/coord.sh"
-  if [ -n "$SELF_DIR" ] && [ -x "$COORD" ]; then
-    ROSTER=$("$COORD" roster 2>/dev/null)
-    SELF_ID="${AUTONOMY_SESSION:0:8}"
-    OTHER=$(printf '%s\n' "$ROSTER" | awk -v self="$SELF_ID" '
-      /^[[:space:]]*-[[:space:]]/ { if ($2 != self) { if (out != "") out = out ","; out = out $2 } }
-      END { print out }')
-    if [ -n "$OTHER" ]; then
-      msg "other live instance(s) on this repo ($OTHER) — single-writer required for autonomy, cannot evaluate."
-      exit 4
-    fi
+  if [ -z "$SELF_DIR" ] || [ ! -x "$COORD" ]; then
+    msg "multi-instance mode but coord.sh is missing or not executable (looked in '${SELF_DIR:-?}') — cannot confirm single-writer, cannot evaluate."
+    exit 4
+  fi
+  if ! ROSTER=$("$COORD" roster 2>/dev/null); then
+    msg "multi-instance mode but 'coord.sh roster' errored (jq missing, not a git repo, or lock failure) — cannot confirm single-writer, cannot evaluate."
+    exit 4
+  fi
+  if [ -z "$ROSTER" ]; then
+    msg "multi-instance mode but 'coord.sh roster' produced no output — cannot confirm single-writer, cannot evaluate."
+    exit 4
+  fi
+  SELF_ID="${AUTONOMY_SESSION:0:8}"
+  OTHER=$(printf '%s\n' "$ROSTER" | awk -v self="$SELF_ID" '
+    /^[[:space:]]*-[[:space:]]/ { if ($2 != self) { if (out != "") out = out ","; out = out $2 } }
+    END { print out }')
+  if [ -n "$OTHER" ]; then
+    msg "other live instance(s) on this repo ($OTHER) — single-writer required for autonomy, cannot evaluate."
+    exit 4
   fi
 fi
 
@@ -305,10 +321,25 @@ fi
 # (C7) stops a hostile-looking BASE_COMMIT from being parsed as a git option; the
 # trailing `--` disambiguates revision vs pathspec (G6 hygiene, no paths follow it
 # here — an explicit terminator regardless).
-DIFF_NAMES=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --name-only --end-of-options "$AUTONOMY_BASE_COMMIT" -- 2>/dev/null)
-UNTRACKED_FILES=$(git -C "$PROJECT_DIR" -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null)
-RENAME_NAMES=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --name-status --end-of-options "$AUTONOMY_BASE_COMMIT" -- 2>/dev/null \
-  | awk -F'\t' '$1 ~ /^R/ { print $2; print $3 }')
+# AC3: each git invocation's exit status is checked explicitly. Under `set -uo
+# pipefail` (no -e) a FAILED git call otherwise yields an empty string, silently
+# read as "0 changed files / 0 lines" — scope and cap checks would then PASS on a
+# git error. An EMPTY-but-successful result (genuinely no changes) still proceeds;
+# only a NON-ZERO git exit fails closed. pipefail makes the awk-piped case below
+# surface git's failure too (rightmost non-zero status wins).
+if ! DIFF_NAMES=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --name-only --end-of-options "$AUTONOMY_BASE_COMMIT" -- 2>/dev/null); then
+  msg "git diff --name-only against base failed — cannot evaluate (a git error is not an empty changeset)."
+  exit 4
+fi
+if ! UNTRACKED_FILES=$(git -C "$PROJECT_DIR" -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null); then
+  msg "git ls-files --others failed — cannot evaluate (a git error is not an empty changeset)."
+  exit 4
+fi
+if ! RENAME_NAMES=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --name-status --end-of-options "$AUTONOMY_BASE_COMMIT" -- 2>/dev/null \
+  | awk -F'\t' '$1 ~ /^R/ { print $2; print $3 }'); then
+  msg "git diff --name-status against base failed — cannot evaluate (a git error is not an empty changeset)."
+  exit 4
+fi
 
 CHANGED_FILES=$(
   {
@@ -376,7 +407,11 @@ while IFS= read -r p; do
 done <<< "$DIFF_NAMES"
 TRACKED_LINES=0
 if [ "${#TRACKED_NONRECORD[@]}" -gt 0 ]; then
-  NUMSTAT=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --numstat --end-of-options "$AUTONOMY_BASE_COMMIT" -- "${TRACKED_NONRECORD[@]}" 2>/dev/null)
+  # AC3: a failed numstat must not silently read as 0 lines (which would pass the cap).
+  if ! NUMSTAT=$(git -C "$PROJECT_DIR" -c core.quotePath=false diff --numstat --end-of-options "$AUTONOMY_BASE_COMMIT" -- "${TRACKED_NONRECORD[@]}" 2>/dev/null); then
+    msg "git diff --numstat against base failed — cannot evaluate (a git error is not zero lines)."
+    exit 4
+  fi
   TRACKED_LINES=$(printf '%s\n' "$NUMSTAT" | awk -F'\t' '
     NF>=2 { if ($1 ~ /^[0-9]+$/) a+=$1; if ($2 ~ /^[0-9]+$/) d+=$2 }
     END { print a+d+0 }')

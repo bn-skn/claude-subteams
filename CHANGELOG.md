@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.28.0] - 2026-07-02
+
+Shell-layer hardening from a full health audit of 1.27.0 (9 agents + Codex GPT-5.5). Codex found 1 CRITICAL + 7 HIGH + 2 MEDIUM in the shell scripts and hooks; all are fixed and locked in by a 55-case adversarial regression suite. Reviewed by code-reviewer + devils-advocate + a Codex cross-model pass.
+
+### Security
+- **coord.sh flock success now checked (CRITICAL).** Every `( flock 9 … ) 9>"$LOCK"` critical section aborts with a diagnosed `exit 5` if the lock is not acquired — previously an `flock` failure (missing binary, unwritable lock) let the body run **unlocked**, silently breaking the atomicity the whole file assumes.
+- **autonomy-check.sh single-writer gate fails CLOSED (HIGH).** In multi-instance mode, coord.sh missing/non-executable, a non-zero `roster` exit, or empty roster output now all `exit 4` (STOP) instead of silently no-op'ing as if no peer existed — this is the one check whose entire purpose is to fail closed, and it did the opposite.
+- **autonomy-check.sh git exit codes no longer swallowed (HIGH).** `git diff/ls-files/numstat` failures inside `$(…)` were read as "0 files / 0 lines" (scope/cap checks passing on a git error). Each is now exit-code-checked and fails closed on a real git failure; an empty-but-successful result still proceeds.
+- **coord.sh deregister path-traversal closed (HIGH).** `cmd_deregister` now `_valid_id`-validates `--id` before using it as an inbox path, matching every sibling command.
+- **coord.sh _reap_locked word-splitting fixed (HIGH).** jq keys iterated via `while IFS= read -r` (was unquoted `for`), so a hand-edited instances.json key with whitespace/glob chars can't skip a reap.
+- **coord.sh roster read made atomic (HIGH).** Reap + length + roster print now happen in one `flock` section — no stale-roster window for the single-writer check to trust.
+- **coord.sh notify-due lock aligned (HIGH).** notify-due now takes the per-inbox lock that send/recv use (was the shared `$LOCK`), so it actually excludes a concurrent send. No new deadlock (single lock per critical section, verified).
+- **check-plan.sh oversized plan is a FAILURE (HIGH).** A >1 MB IMPL-PLAN sets `FAILED=1` (non-zero exit) instead of printing SKIPPED and passing green, honoring the "Exit 0 = every plan valid" contract.
+- **autonomy-gate Bash record-guard reverted to blanket-deny (MEDIUM, regression fix).** The 1.27.0 read/write classifier was shown by cross-model review to be trivially bypassable (`cat /dev/null; mv payload <record>` latched read-only on the leading `cat`, then wrote via the second command; `sort -o`/`uniq` wrote without a `>`), and strictly worse than the prior deny-all. Any Bash command referencing the run record is now denied outright — read it with the Read tool. Still best-effort against indirection that never names the record (documented residual, ADR-007).
+- **autonomy-gate pre-scan DoS guard (MEDIUM).** The per-tool-call `grep` over active plan files now stat-guards with `MAX_RECORD_BYTES`; an `OVERSIZED_SEEN` flag prevents the size-skip from opening a new fail-open (an unscanned oversized file no longer takes the "no record → allow" shortcut — it hands off to the fail-closed script).
+
+### Changed
+- **`session-end-reminder` downgraded from blocking to a non-blocking, model-visible reminder.** The hook fires on `Stop` — which is **per assistant turn, not end-of-session** (the filename is a misnomer, kept for wiring stability). It used `exit 2` to *block* the turn until docs were written, coercing the model mid-work every turn. It now emits a single `{"decision":"approve","systemMessage":"…"}` JSON on stdout and `exit 0`: never blocks, and (unlike a bare `printf`+exit 0, which on Stop is transcript-only) the reminder actually reaches the model. All the doc-classification logic (Case A–D, breaking signals, doc-map freshness, escape hatch) is preserved; only enforcement→reminder and the delivery channel changed. The dead `/tmp` counter/HEAD-hash blocking machinery is removed. See [ADR-008](docs/adr/008-session-end-reminder-nonblocking.md).
+- **`pre-commit-gate` no longer sources nvm on every Bash call.** nvm is sourced only inside the `git commit` → tsconfig branch, so `ls`/`cat`/`grep`/etc. early-exit without the ~190–220 ms nvm tax (measured); the compilation check is otherwise unchanged.
+
+### Notes
+- Deferred (documented, not blocking): AC3 could halt a run on a transient `.git/index.lock` — accepted (fail-closed asymmetry favors a re-invocation over an off-cap run); hooks.json's unquoted `${CLAUDE_PLUGIN_ROOT}` command path is accepted-residual (install paths under `~/.claude/plugins/` have no spaces — contingent on install location). Pre-existing, orthogonal items filed to BACKLOG: single-writer check doesn't require self in roster; unchecked sequential `_jq_write` in coord.sh; unlocked `recv --count` peek.
+
 ## [1.27.0] - 2026-07-02
 
 ### Added

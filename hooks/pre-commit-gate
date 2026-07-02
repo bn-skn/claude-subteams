@@ -2,10 +2,6 @@
 # PreToolUse hook for Bash — checks git commit commands
 # Runs compilation check and warns about large files
 
-# Source nvm if available (hooks run in minimal shell without .bashrc)
-export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
 # Check jq availability
 if ! command -v jq &>/dev/null; then
   exit 0
@@ -26,6 +22,11 @@ ERRORS=""
 
 # Stack-agnostic compilation check
 if [ -f "tsconfig.json" ]; then
+  # Source nvm if available (hooks run in minimal shell without .bashrc) — only
+  # needed here, inside the git-commit branch, so non-commit calls never pay for it.
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
   if command -v npx &>/dev/null; then
     if ! TSC_OUTPUT=$(npx tsc --noEmit 2>&1); then
       ERRORS="[subteams:pre-commit-gate] TypeScript compilation failed:\n$TSC_OUTPUT\n\nFix compilation errors before committing."
