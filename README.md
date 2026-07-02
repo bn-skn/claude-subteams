@@ -149,8 +149,8 @@ All 55 skills (auto-loaded on demand by description match; `using-subteams` load
 | agents | `subagent-prompt-design` | Design subagent prompts: minimal context, restricted tools, standardized output, explicit handoff. |
 | planning | `brainstorming` | Explores intent and requirements before any implementation. For greenfield/structural work, captures decisions as ADRs and projects them into `ARCHITECTURE.md`/`CONVENTIONS.md` (gated by `check-arch-docs.sh`). |
 | planning | `writing-plans` | Turn a spec into a step-by-step implementation plan before touching code. |
-| planning | `living-plan` | Single multi-level plan-of-record (package → acceptance criterion → status) for multi-package/contracted work. Validated by `check-plan.sh`. |
-| execution | `executing-plans` | Execute a written plan with subagent orchestration and quality gates. |
+| planning | `living-plan` | The single plan-of-record every actor reads/writes, in two weights — a light contract (scope / acceptance criteria / non-goals) for risk-triggered or multi-session work, or a full package → criterion → status matrix for multi-package/contracted work. Write-once acceptance criteria; validated by `check-plan.sh`. |
+| execution | `executing-plans` | Execute a written plan with subagent orchestration and quality gates. Home of Autonomy Mode — bounded autonomous execution, opt-in per grant, gated by the `autonomy-gate` hook on a fresh contract record. Contains agent *drift* off scope; not a sandbox against a shell-equipped agent (see ADR-007). |
 | execution | `subagent-driven-dev` | Fresh subagent per independent task with two-stage review. |
 | execution | `parallel-dispatch` | Run 2+ independent tasks concurrently without shared state or sequential dependencies. |
 | execution | `finishing-branch` | Decide how to integrate completed work — merge, PR, or cleanup. |

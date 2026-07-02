@@ -71,8 +71,14 @@ At each milestone (every 3-5 tasks or batch boundary):
 1. Summarize what was completed
 2. Show test results (total passing/failing)
 3. List any concerns or deviations from plan
+
+**Interactive mode (default):**
 4. Ask user: "Continue with next batch, or review changes first?"
 5. Wait for user response before proceeding
+
+**Autonomy mode (explicit grant + fresh run record ONLY — see `## Autonomy Mode`):**
+4. Run the non-blocking **evidence checkpoint**: `scripts/autonomy-check.sh` (≥1 deterministic exit code); record the script-authored `AUTONOMY_CHECKPOINT:` line.
+5. Continue to the next batch **unless a blocker class fires** (cap-exceeded / out-of-scope — structurally blocked by the `autonomy-gate` hook before the edit; or external-evidence-required). No human pause mid-run.
 
 ### Step 5: Complete Development
 
@@ -80,6 +86,39 @@ After all tasks complete and all gates pass:
 - Announce: "I'm using the finishing-branch skill to complete this work."
 - **REQUIRED SUB-SKILL:** Use claude-subteams:finishing-branch
 - Follow that skill to verify tests, present options, execute choice
+
+## Autonomy Mode
+
+> **This section applies ONLY inside an explicitly granted autonomy run. Interactive readers: skip it — nothing here changes the default ask-and-wait flow.**
+
+Autonomy is the manual pipeline minus the human pause, plus bounded, evidence-carrying checkpoints. It is never ambient.
+
+**Activation contract.** A run is autonomous only when BOTH hold: (1) the operator grants it explicitly **in the current message**, and (2) a run record is written into the active contract (`living-plan` §3a: grant, criteria snapshot, scope, base commit, session, expiry, caps). No record, a stale/expired one, or a session mismatch → interactive: ask and wait. **Never continue on a remembered grant.**
+
+**Enforcement layers (honestly labeled):**
+- **HOOK = enforcement.** `autonomy-gate` (PreToolUse) blocks an out-of-scope or cap-exceeding edit *before* it lands for the file-writing tools (Edit/Write/MultiEdit/NotebookEdit — it resolves `tool_input.file_path`, or `tool_input.notebook_path` for NotebookEdit, and pre-checks it against scope before the edit runs; both the target path and the record path it's compared against are canonicalized — `realpath -m`/`readlink -f` — so a relative path, a `../` round-trip, or a symlink alias cannot dodge the record-edit deny). For **Bash it is post-hoc only for arbitrary side effects**: there is no single reliable target to pre-check, so a Bash-caused violation is caught on the *next* gate call (the diff vs base already shows it), not before the command runs — do not read this as pre-hoc-blocking arbitrary Bash side effects. The hook additionally does a narrow, **BEST-EFFORT** pre-hoc pattern-match on the Bash command text for the record's own filename or the literal `autonomy-run` marker and denies a match — this raises the bar, it does NOT close the general Bash-record-write vector (indirection via variables, python/base64, heredocs, or other unrecognized shell constructions still evades it; that residual is a deferred operator decision, not solved). The run record itself is not agent-editable while a run is active — the hook denies any edit targeting it. Inert when `CLAUDE_SUBTEAMS_AUTONOMY` is unset.
+- **`scripts/autonomy-check.sh` = checkpoint evidence**, not prevention — it evaluates scope/caps and, via `scripts/autonomy-check.sh --checkpoint`, appends the script-authored `AUTONOMY_CHECKPOINT:` audit line (nothing derives caps from it — caps are total-run, cumulative from the base commit, recomputed fresh from git every call).
+- **Prose = behavioral protocol** (re-hydration, kill-switch, self-assessed risk-triggers): posture, not structure. Do not mistake it for a gate.
+
+**Verifiability precondition.** A task with no external verifier — a deterministic exit code (tests/lint) or, for high-stakes runs, the rare Codex adversary anchored to the written criteria — is **not eligible** for autonomy. Run it interactively.
+
+**Checkpoint.** Every milestone in autonomy is a **non-blocking evidence checkpoint**: run `scripts/autonomy-check.sh --checkpoint` (≥1 deterministic exit code), which records the script-authored audit line, and **continue unless a blocker class fires**. The exit code is the gate, not your judgment.
+
+**Failure classes:**
+
+| Class | Trigger | Action |
+|-------|---------|--------|
+| operator-decision-required (STRUCTURAL) | cap-exceeded OR out-of-scope path — caught by the hook before the edit for file-writing tools; at the next checkpoint for Bash side effects | STOP; hand to operator |
+| external-evidence-required | a material claim needs a verifier not yet run | run it; if impossible, STOP |
+| reviewer-disagreement | **END-OF-RUN only** — no mid-run reviewer dispatch | surface at run end |
+| local-fixable | error the run can resolve itself, with evidence | fix, re-verify, continue |
+| informational | note, no decision | log, continue |
+
+**Kill-switch & re-hydration (behavioral protocol).** Any operator message mid-run = an immediate operator-decision-required checkpoint at the next tool boundary. On any compaction / context loss, re-read the contract + rails before the next action; if the grant+scope record is not recoverable verbatim, revert to interactive.
+
+**Env / caps.** `CLAUDE_SUBTEAMS_AUTONOMY` (gate on/off) · total-run, cumulative-from-base `CLAUDE_SUBTEAMS_AUTONOMY_MAX_FILES/LINES` (default 10/400). Grant expiry is the wall-clock bound.
+
+*Split-trigger: if this file exceeds 200 lines or this section exceeds 40% of it, extract Autonomy Mode into a dedicated `autonomous-execution` skill (Tier 3).*
 
 ## When to Stop and Escalate
 
@@ -110,14 +149,14 @@ After all tasks complete and all gates pass:
 - Skip quality gates between tasks
 - Force through a gate failure more than 3 times
 - Dispatch parallel subagents that edit the same files
-- Proceed past a milestone without user acknowledgment
+- (Interactive mode) Proceed past a milestone without user acknowledgment. In an autonomy run the milestone is instead a non-blocking evidence checkpoint (see `## Autonomy Mode`) — you continue unless a blocker class fires.
 
 **ALWAYS:**
 - Build dependency graph before executing
 - Use git worktrees for parallel isolation
 - Run compilation + review + tests after every task
 - Escalate to user after 3 gate failures
-- Summarize progress at milestone checkpoints
+- Checkpoint at every milestone — interactively: summarize + ask + wait; in an autonomy run: the evidence checkpoint (deterministic exit code + script-authored record). Never skip the checkpoint in either mode.
 
 ## Integration
 

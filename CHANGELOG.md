@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.27.0] - 2026-07-02
+
+### Added
+- **Task Contract — the plan-of-record in two weights** (Tier 2 of the planning/autonomy/honesty modernization, spec `docs/specs/2026-07-01-planning-autonomy-honesty-design.md`). `living-plan` now routes by a **light contract** (scope / acceptance criteria / non-goals — for risk-triggered or multi-session single-feature work) vs the **full package→criterion→status matrix** (multi-package / TZ-with-acceptance). The old "≥2 packages only" threshold is gone; a **risk-trigger mandates writing the artifact, not a deeper pipeline** (tiebreak explicit, 4 worked examples). **Write-once acceptance criteria:** originals are immutable after approval; changes append as `REVISED: <what> — <why> — "<operator-ack quote>"` lines (ack required on scope/acceptance change), validated (format only) by `check-plan.sh`. `subagent-driven-dev` now keeps the matrix in lockstep (previously it did not, so the plan died when that executor was chosen). Reviewers review the diff against the **written** criteria via the brief's `Rails:` field.
+- **Risk-trigger governance** (`using-subteams` §6): eight risk-triggers (six objective — schema/data-invariant, public API, new dependency/stack, destructive migration, security boundary, autonomous execution; two self-assessed — ambiguous intent, large blast radius) select **artifact depth**, while file-count is demoted to an effort estimate. Standard-pipeline risk work gets a light contract without escalating to Full-pipeline gates.
+- **Scoped autonomy — `## Autonomy Mode`** in `executing-plans`, enforced by a new **`autonomy-gate` PreToolUse hook** + **`scripts/autonomy-check.sh`**. Opt-in per grant via `CLAUDE_SUBTEAMS_AUTONOMY` (inert when unset); a per-grant run record (in the active plan, between `<!-- autonomy-run:begin/end -->` markers) carries scope globs, base commit, session, expiry, and total-run caps (`CLAUDE_SUBTEAMS_AUTONOMY_MAX_FILES/LINES`). The gate structurally blocks, before the edit lands, out-of-scope or cap-exceeding writes (canonical-path matched against `../`/relative/symlink spellings) and edits to the run record itself; milestones become non-blocking evidence checkpoints. See [ADR-007](docs/adr/007-autonomy-enforcement-architecture.md).
+  - **Honest scope (not oversold):** bounded autonomy **contains an agent that drifts off its granted scope** — the common failure mode — and is **NOT a sandbox against an agent that deliberately rewrites its own grant via shell** (a Bash-equipped agent can write any file; the gate's Bash record-write block is best-effort pattern-matching, not a guarantee). Grant autonomy accordingly. The adversary-resistant path (harness-env grant fingerprint) is deferred to Tier 3.
+- **`subagent-rails` SubagentStart hook** — injects static rails pointer + honesty reminder into every spawned subagent (delivery empirically confirmed on CLI 2.1.197; static plugin text only, never repo content). See [ADR-006](docs/adr/006-subagent-rails-hook-deferred.md) amendment.
+- **`session-start` resume** — lists up to 3 active plans (name, age, next non-DONE criterion, BLOCKED count) + a `check-plan.sh` verdict, recommend-not-command; repo-controlled plan text is truncated + control-char/backtick-stripped + framed as untrusted (prompt-injection hygiene).
+
+### Changed
+- `check-plan.sh` gains a conditional `REVISED:`-line format check (zero-REVISED plans still pass) and a 1 MB size guard; de-forked to a single awk pass per plan.
+- `living-plan` / `writing-plans` / `orchestrator-briefing` / `IMPL-PLAN.md` template updated for the two-weight model and the run-record schema (one key per line).
+
+### Security
+- Hardening from a two-round, five-agent adversarial review (code-reviewer, architecture-guard, devils-advocate, security-auditor, Codex): fixed dead-on-arrival hook wiring (missing event arg); killed a run-record field-forgery vector (multi-key line splitter removed); canonical-path matching closes record-edit bypass via `../`/relative/symlink; `autonomy-gate` resolves repo-root so it cannot fail open from a subdirectory; deny-JSON built via `jq` (control-char safe); `AUTONOMY_BASE_COMMIT` charset-validated + `--end-of-options`; 1 MB DoS guards on all plan/record parsers. 142 adversarial tests green.
+
 ## [1.26.0] - 2026-07-01
 
 ### Added

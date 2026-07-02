@@ -1,0 +1,33 @@
+#!/bin/bash
+# SubagentStart hook — static rails-pointer + honesty reminder for every subagent.
+# Guard polarity: this hook fires FOR subagents — it is never skipped on agent_id
+# presence (that would be the INVERSE of coord-notify's guard, which skips ON
+# agent_id presence because coord-notify is orchestrator-only). No opt-in env gate
+# either: rails-pointer + honesty reminder are cheap and safe to always emit.
+#
+# The injected text is STATIC and plugin-authored only — it never embeds file
+# contents (only tells the subagent WHERE to look), so it carries no untrusted data.
+#
+# jq is optional, not required: the payload is fixed text with no characters that
+# need JSON escaping, so the manual fallback is exact either way.
+#
+# Silent-fail: any internal error falls through to exit 0 (never break a session).
+
+EVENT="${1:-}"
+[ "$EVENT" = "SubagentStart" ] || exit 0
+
+# Drain stdin defensively; its content is unused (the context below is fully static).
+cat >/dev/null 2>&1
+
+CTX='[subteams:rails] If present in this project, read docs/CONVENTIONS.md, docs/ARCHITECTURE.md, and the active plan under docs/plans/active/ before editing, and honor the Rails field in your brief if one was given. Honesty: if a tool call fails or a fact is unverified, say so plainly; state only verified facts as fact.'
+
+if command -v jq >/dev/null 2>&1; then
+  OUT=$(jq -nc --arg e "SubagentStart" --arg c "$CTX" '{hookSpecificOutput:{hookEventName:$e, additionalContext:$c}}' 2>/dev/null)
+  if [ -n "$OUT" ]; then
+    printf '%s\n' "$OUT"
+    exit 0
+  fi
+fi
+
+printf '{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":"%s"}}\n' "$CTX"
+exit 0

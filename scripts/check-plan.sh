@@ -45,6 +45,15 @@ check_plan() {
   local file="$1"
   echo "[check-plan] Checking: $file"
 
+  # 0. Size guard (D2/M3): never parse a plan file larger than 1MB. Skipped
+  #    without a pass/fail verdict — validation is inconclusive, not a violation.
+  local fsize
+  fsize=$(wc -c < "$file" 2>/dev/null || echo 0)
+  if [ "$fsize" -gt 1048576 ]; then
+    echo "  SKIPPED: file exceeds 1MB ($fsize bytes) — not parsed (DoS guard)."
+    return
+  fi
+
   # 1. Sentinel must be gone once populated.
   if grep -qF "$SENTINEL" "$file"; then
     echo "  STUB: template sentinel still present (remove it once populated)."
@@ -57,26 +66,62 @@ check_plan() {
     FAILED=1
   fi
 
-  # 3. Every checklist item must carry a recognized status marker.
+  # 3+4. Checklist status markers and REVISED-line shape, in a SINGLE awk pass over
+  #    the file (D2/M3: the previous per-line grep|awk pipeline forked up to 4
+  #    processes per checklist/REVISED line — a fork-storm on a large plan).
   #    Checklist lines look like:  - [ ] ...   or   - [x] ...
-  #    The `|| [ -n "$line" ]` guard processes a final line with no trailing newline.
-  local line lineno=0 bad=0
-  while IFS= read -r line || [ -n "$line" ]; do
-    lineno=$((lineno + 1))
-    case "$line" in
-      *"- ["*"]"*)
-        # Only treat genuine task checkboxes (- [ ] / - [x] / - [X]) as items.
-        if printf '%s' "$line" | grep -qE '^[[:space:]]*-[[:space:]]\[[ xX]\]'; then
-          if ! printf '%s' "$line" | grep -qE "$STATUS_RE"; then
-            echo "  NO STATUS MARKER (line $lineno): ${line#"${line%%[![:space:]]*}"}"
-            bad=1
-            FAILED=1
-          fi
-        fi
+  #    REVISED lines require AT LEAST 3 ' — '-separated parts (D1, code-reviewer +
+  #    Codex): `REVISED: <what> — <why> — <ack>`, allowing the ack quote itself to
+  #    contain ' — ' without being misread as malformed.
+  local awk_out
+  awk_out=$(awk '
+    {
+      line = $0
+      if (line ~ /^[[:space:]]*-[[:space:]]\[[ xX]\]/) {
+        if (line !~ /(—|--|[[:space:]]-[[:space:]])[[:space:]]*(DONE|WIP|TODO|BLOCKED)|TBD/) {
+          trimmed = line
+          sub(/^[[:space:]]+/, "", trimmed)
+          print "STATUSBAD\t" NR "\t" trimmed
+          statusbad++
+        }
+      }
+      if (line ~ /^[[:space:]]*REVISED:/) {
+        revised++
+        parts = split(line, arr, " — ")
+        if (parts < 3) {
+          trimmed = line
+          sub(/^[[:space:]]+/, "", trimmed)
+          print "REVISEDBAD\t" NR "\t" parts "\t" trimmed
+          revisedbad++
+        }
+      }
+    }
+    END { print "SUMMARY\t" (statusbad + 0) "\t" (revised + 0) "\t" (revisedbad + 0) }
+  ' "$file")
+
+  local bad=0 rbad=0 rcount=0
+  while IFS=$'\t' read -r kind a b c; do
+    case "$kind" in
+      STATUSBAD)
+        echo "  NO STATUS MARKER (line $a): $b"
+        bad=1
+        FAILED=1
+        ;;
+      REVISEDBAD)
+        echo "  MALFORMED REVISED (line $a): expected 'REVISED: <what> — <why> — <ack>' (at least 3 parts, found $b): $c"
+        rbad=1
+        FAILED=1
+        ;;
+      SUMMARY)
+        rcount="$b"
         ;;
     esac
-  done < "$file"
+  done <<< "$awk_out"
+
   [ "$bad" -eq 0 ] && echo "  checklist items: all carry a status token."
+  if [ "$rcount" -gt 0 ] && [ "$rbad" -eq 0 ]; then
+    echo "  REVISED lines: all $rcount well-formed."
+  fi
 }
 
 for f in "${PLANS[@]}"; do
