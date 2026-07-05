@@ -230,7 +230,7 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | `PreToolUse` (Edit/Write/MultiEdit/NotebookEdit/Bash) | `autonomy-gate` | Enforces scoped autonomy grants — blocks out-of-scope or cap-exceeding writes and edits to the grant's own run record before they land. Inert unless `CLAUDE_SUBTEAMS_AUTONOMY` is set. Delegates scope/cap checks to `scripts/autonomy-check.sh`. Contains agent drift off scope; not a sandbox against a shell-equipped agent — see [ADR-007](docs/adr/007-autonomy-enforcement-architecture.md). |
 | `SubagentStart` | `subagent-rails` | Injects a static rails pointer + honesty reminder into every spawned subagent. Plugin text only, never repo content. |
 | `PostToolUse` (Edit/Write) | `post-edit-check` | Async check after file edits. |
-| `Stop` | `session-end-reminder` | **Enforces** documentation discipline at end of work. Detects unstaged code changes; if any non-doc files changed without `*.md` updates, blocks Stop with instructions to update the decisions journal. Escalates to the full breaking-change checklist when it detects asymmetric signals (file deletions, schema/migration files) — see the `doc-quality-gate` skill. Counter resets on each new commit; after 2 enforcement attempts per HEAD, allows stop with audit warning. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See "Configuration" below. |
+| `Stop` | `session-end-reminder` | **Advisory** documentation reminder, fired **at most once per session** (marker keyed on `session_id`). Detects unstaged code changes without `*.md` updates and delivers a hybrid, never-blocking notice: a framed advisory to the model via `additionalContext` ("not a task — surface to the user") + one `systemMessage` line to the operator. Escalates the advisory wording on breaking signals (file deletions, schema/migration files) — see the `doc-quality-gate` skill. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See [ADR-009](docs/adr/009-session-end-hybrid-advisory.md) and "Configuration" below. |
 | `UserPromptSubmit` | `user-prompt-check` | Async prompt validation. |
 
 When `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` (see the `multi-instance` skill), additional **opt-in** hooks run — zero effect when unset: `session-start` also registers the instance + injects the roster; `user-prompt-check` / `post-edit-check` also refresh the liveness heartbeat; `coord-notify` (on `UserPromptSubmit` **and** `PostToolUse`) injects a count of unread peer mailbox messages; `coord-session-end` (on `SessionEnd`) deregisters the instance and releases its claims.
@@ -241,20 +241,20 @@ When `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` (see the `multi-instance` skill), additi
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK` | Set to `1` to disable the Stop hook's documentation enforcement. Use for scratch / experimental work where doc updates are deliberately deferred, or in CI / batch contexts where the cycle does not apply. | unset (enforcement active) |
+| `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK` | Set to `1` to silence the Stop hook's documentation advisory entirely. Use for scratch / experimental work where doc updates are deliberately deferred, or in CI / batch contexts where the cycle does not apply. | unset (advisory active) |
 
-### Doc-enforcement details
+### Doc-advisory details
 
-The `session-end-reminder` hook enforces the doc cycle described in the `decision-context` skill. Logic:
+The `session-end-reminder` hook surfaces the doc cycle described in the `decision-context` skill as a **never-blocking advisory, at most once per session** (fire-once marker keyed on the Stop payload's `session_id`; if no usable `session_id` is present, it falls back to firing per turn). Delivery is hybrid: the model receives a framed advisory via `hookSpecificOutput.additionalContext` (opens with "Advisory (not a task — surface to the user, don't act now)", ends on a passivity anchor), and the operator sees one fixed `systemMessage` line. Classification:
 
-- **No changes in working tree** → silent pass.
+- **No changes in working tree** → silent pass (does not consume the once-per-session slot).
 - **Only `*.md` files changed** → silent pass (docs are what changed).
-- **Code + docs both changed** → soft reminder to confirm the Decision-context block is in the journal.
-- **Code changed without any `*.md` updates** → block Stop (`exit 2`) with instructions. After 2 attempts in the same HEAD state, allows stop with audit warning. Counter resets on each new commit.
-- **Not in a git repo** → soft checklist only, no enforcement.
-- **`CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`** → all enforcement bypassed.
+- **Code + docs both changed** → advisory noting the Decision-context block format, sharpened when breaking signals are present.
+- **Code changed without any `*.md` updates** → advisory listing the changed files; escalated wording on breaking signals (deletions, schema/migration files).
+- **Not in a git repo** → soft advisory only, no change detection.
+- **`CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`** → fully silent.
 
-Neutral files that never trigger enforcement: `.gitignore`, `.gitattributes`, `.editorconfig`, lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`, `go.sum`, `poetry.lock`, `uv.lock`, `composer.lock`), `.DS_Store`.
+Neutral files that never trigger the advisory: `.gitignore`, `.gitattributes`, `.editorconfig`, lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`, `go.sum`, `poetry.lock`, `uv.lock`, `composer.lock`), `.DS_Store`.
 
 ## Templates
 

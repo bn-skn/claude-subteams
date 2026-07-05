@@ -5,14 +5,30 @@
 # assistant turn), not end-of-session — the filename is kept for hooks.json
 # wiring stability but the semantics below are per-turn.
 #
-# Delivery: a bare printf + exit 0 on this event is transcript-only — it
-# reaches neither the model nor the operator. The verified non-blocking
-# channel is a single JSON object on stdout, {"decision":"approve",
-# "systemMessage":"<text>"}, then exit 0: doesn't block, and the message is
-# actually seen. Stop does not support additionalContext the way
-# PreToolUse/PostToolUse do, so systemMessage is the right field here. All
-# reminder paths funnel through the _remind() helper below, which emits this
-# JSON (jq when available, hand-escaped fallback otherwise) and exits 0.
+# Delivery: hybrid, advisory-only. On Stop the only decision value that exists
+# is "block" — we never emit a decision field, so nothing here ever blocks or
+# coerces the model. Stop DOES support hookSpecificOutput.additionalContext
+# (text injected into the model's context) in addition to the top-level
+# systemMessage field (text shown to the operator, never seen by the model).
+# When a reminder fires we emit ONE JSON object combining both channels:
+#   {"systemMessage":"<short one-line operator notice>",
+#    "hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"<full
+#    advisory text>"}}
+# then exit 0. All reminder paths funnel through the _remind() helper below,
+# which emits this JSON (jq when available, hand-escaped fallback otherwise),
+# writes the fire-once marker (see below), and exits 0.
+#
+# Fire-once per session: Stop fires every turn, so without a guard the same
+# advisory would repeat every turn for the rest of the session. We extract
+# session_id from the Stop stdin JSON and check/write a marker file at
+# ${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/session-end-marks/<session_id>.
+# If the marker exists we exit 0 silently, before any git work. The marker is
+# only written when a reminder actually fires — silent passes (nothing to
+# report) never consume the once-per-session slot. Markers older than 7 days
+# are opportunistically pruned on runs that get past the escape hatch and the
+# marker-exists early-exit. If session_id cannot be extracted
+# from stdin, we deliberately fall back to firing with no marker at all:
+# availability of the reminder wins over strict once-per-session-ness.
 #
 # Behavior:
 #   - Detects unstaged/uncommitted changes in working tree
@@ -28,67 +44,119 @@
 #   - See the doc-quality-gate skill for the model-side classifier and per-class
 #     doc requirements.
 #   - Known limitation: filenames containing spaces are not fully parsed (uses awk
-#     $NF); the hook fails toward over-reminding, never toward silence.
+#     $NF); the hook fails toward over-reminding, never toward silence — except
+#     the fire-once marker, which intentionally silences repeats within a session.
 #
 # Silent (no reminder, empty stdout) when:
 #   - CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 is set (escape hatch)
+#   - A fire-once marker already exists for this session_id
 #   - No changes in working tree
 #   - Only neutral / lock / config files changed, and no doc-map note pending
 #   - Only docs changed, and no doc-map note pending
-#   (Not in a git repo is NOT silent — it gets its own soft checklist reminder.)
+#   (Not in a git repo is NOT silent — it gets its own soft advisory.)
 #
 # Escape hatch:
 #   - Set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 to silence all reminders.
 #     Use for scratch / experimental work where doc updates are deliberately deferred.
 #
-# Required: jq (hand-escaped fallback if missing), git.
+# Required: jq (hand-escaped fallback if missing), git. Optional: find (marker
+# pruning only — without it markers just accumulate).
 
 # ---- jq detection (for JSON-safe reminder delivery) ----
 HAVE_JQ=0
 command -v jq &>/dev/null && HAVE_JQ=1
 
-# Non-blocking reminder delivery (see header). Escaping mirrors hooks/autonomy-gate's
-# _deny: jq handles arbitrary bytes correctly; the hand-escaped fallback additionally
-# strips control chars [\001-\037] (not just backslash/quote) and turns embedded
-# newlines into literal \n so a hostile file path/message can never break the JSON.
-_remind() { # text -> prints {"decision":"approve","systemMessage":text} JSON, exits 0
-  local msg="$1" out esc
-  if [ "$HAVE_JQ" -eq 1 ]; then
-    out=$(jq -nc --arg msg "$msg" '{decision:"approve",systemMessage:$msg}' 2>/dev/null)
-    if [ -n "$out" ]; then
-      printf '%s\n' "$out"
-      exit 0
-    fi
-  fi
-  esc=$(printf '%s' "$msg" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
-  esc="${esc%\\n}"
-  printf '{"decision":"approve","systemMessage":"%s"}\n' "$esc"
-  exit 0
-}
-
-# Accumulates non-terminal notes (currently: doc-map freshness) so they ride along
-# with whichever terminal reminder ultimately fires, instead of being dropped.
-NOTES=""
+# ---- Read + drain Stop event stdin (hook contract expects stdin consumed;
+# we also need session_id out of it for the fire-once marker) ----
+STDIN_JSON=$(cat 2>/dev/null)
 
 # ---- Escape hatch ----
 if [ "${CLAUDE_SUBTEAMS_SKIP_DOC_CHECK:-0}" = "1" ]; then
   exit 0
 fi
 
-# ---- Drain Stop event input (hook contract expects stdin to be consumed) ----
-cat >/dev/null 2>&1
+# ---- Fire-once-per-session marker setup ----
+# jq preferred for session_id extraction; sed fallback matches
+# "session_id"\s*:\s*"...". If both fail to find one, SESSION_ID stays empty
+# and we deliberately skip the marker entirely (fire every time — see header).
+SESSION_ID=""
+if [ "$HAVE_JQ" -eq 1 ]; then
+  SESSION_ID=$(printf '%s' "$STDIN_JSON" | jq -r '.session_id // empty' 2>/dev/null)
+fi
+if [ -z "$SESSION_ID" ]; then
+  SESSION_ID=$(printf '%s' "$STDIN_JSON" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+fi
 
-# ---- Not in a git repo → soft reminder only ----
+# Reject anything that isn't a plain token (no "/", "..", etc.) before it's used
+# as a marker filename — session_id comes from stdin JSON, so treat a value
+# with path-unsafe characters the same as "couldn't extract one" (fall back to
+# firing with no marker, per header). "." / ".." pass the charset but resolve to
+# directories, so reject them explicitly too.
+if [ -n "$SESSION_ID" ]; then
+  if ! printf '%s' "$SESSION_ID" | grep -qE '^[A-Za-z0-9._-]+$' \
+     || [ "$SESSION_ID" = "." ] || [ "$SESSION_ID" = ".." ]; then
+    SESSION_ID=""
+  fi
+fi
+
+MARK_BASE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/session-end-marks"
+mkdir -p "$MARK_BASE_DIR" 2>/dev/null
+
+MARKER_FILE=""
+if [ -n "$SESSION_ID" ]; then
+  MARKER_FILE="$MARK_BASE_DIR/$SESSION_ID"
+  if [ -f "$MARKER_FILE" ]; then
+    exit 0
+  fi
+fi
+
+# Opportunistic prune of stale markers (errors ignored — best effort only).
+# Runs after the marker-exists early-exit so silent repeat turns skip it.
+find "$MARK_BASE_DIR" -type f -mtime +7 -delete 2>/dev/null
+
+# Short, fixed operator-facing line for every fire (same across all cases —
+# the model gets the full advisory via additionalContext instead).
+USER_LINE="[subteams] Doc-discipline advisory sent to the model (once per session when a session id is available). Silence: CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1"
+
+# Non-blocking reminder delivery (see header). Escaping mirrors hooks/autonomy-gate's
+# _deny: jq handles arbitrary bytes correctly; the hand-escaped fallback additionally
+# strips control chars [\001-\037] (not just backslash/quote) and turns embedded
+# newlines into literal \n so a hostile file path/message can never break the JSON.
+_remind() { # advisory user_line -> prints combined JSON, writes marker, exits 0
+  local advisory="$1" userline="$2" out esc_adv esc_user
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    out=$(jq -nc --arg adv "$advisory" --arg user "$userline" \
+      '{systemMessage:$user, hookSpecificOutput:{hookEventName:"Stop", additionalContext:$adv}}' 2>/dev/null)
+    if [ -n "$out" ]; then
+      printf '%s\n' "$out"
+      _mark_session
+      exit 0
+    fi
+  fi
+  esc_adv=$(printf '%s' "$advisory" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
+  esc_adv="${esc_adv%\\n}"
+  esc_user=$(printf '%s' "$userline" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
+  esc_user="${esc_user%\\n}"
+  printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"%s"}}\n' "$esc_user" "$esc_adv"
+  _mark_session
+  exit 0
+}
+
+# Writes the fire-once marker, if a session_id was available (see header).
+_mark_session() {
+  if [ -n "$MARKER_FILE" ]; then
+    : > "$MARKER_FILE" 2>/dev/null
+  fi
+}
+
+# Accumulates non-terminal notes (currently: doc-map freshness) so they ride along
+# with whichever terminal reminder ultimately fires, instead of being dropped.
+NOTES=""
+
+# ---- Not in a git repo → soft advisory only ----
 if ! git rev-parse --git-dir &>/dev/null; then
-  MSG=$(
-    printf '[subteams] Session ending. Quick checklist:\n'
-    printf '  - BACKLOG.md updated? (completed tasks marked done)\n'
-    printf '  - CHANGELOG.md updated? (if features/fixes shipped)\n'
-    printf '  - SYSTEM.md / decisions journal entry added? (for non-trivial changes)\n'
-    printf '  - Descriptive docs still accurate? (top of SYSTEM.md or equivalent)\n'
-    printf '  - Active plan moved to completed/? (if feature finished)\n'
-  )
-  _remind "${NOTES}${MSG}"
+  MSG="[subteams] Advisory (not a task — surface to the user, don't act now): session ending outside a git repo, so no change detection ran. If docs were touched, the usual suspects are BACKLOG / CHANGELOG / SYSTEM (decisions journal) and any active plan — nothing to do here unless the user wants it."
+  _remind "${NOTES}${MSG}" "$USER_LINE"
 fi
 
 # ---- Get changed files in working tree (tracked + untracked) ----
@@ -193,10 +261,9 @@ fi
 # otherwise classified — including the Case A/B "silent" paths, so it's never dropped.
 if [ "$NEW_DOC_NO_MAP" -eq 1 ]; then
   NOTES="${NOTES}$(
-    printf '[subteams] New doc(s) added under docs/specs|adr, but the doc map (%s) was not updated:\n' "$DOC_MAP"
+    printf "[subteams] Advisory (not a task — surface to the user, don't act now): new doc(s) under docs/specs|adr, but the doc map (%s) wasn't updated this session:\n" "$DOC_MAP"
     printf '%s\n' "$NEW_DOC_FILES" | sed 's/^/  - /'
-    printf 'Add an entry to %s so the index does not lag the new doc.\n' "$DOC_MAP"
-    printf '(See claude-subteams:doc-quality-gate section 2.5.)\n'
+    printf "The index may lag the new file(s) — mention it to the user; don't update the map yourself mid-turn. Reference: claude-subteams:doc-quality-gate §2.5.\n"
   )
 "
 fi
@@ -231,7 +298,7 @@ done <<< "$CHANGED_FILES"
 # doc-map note is pending.
 if [ "$CODE_COUNT" -eq 0 ] && [ "$DOC_COUNT" -eq 0 ]; then
   if [ -n "$NOTES" ]; then
-    _remind "$NOTES"
+    _remind "$NOTES" "$USER_LINE"
   fi
   exit 0
 fi
@@ -240,93 +307,57 @@ fi
 # spec was added without a doc-map (INDEX.md) update.
 if [ "$CODE_COUNT" -eq 0 ]; then
   if [ -n "$NOTES" ]; then
-    _remind "$NOTES"
+    _remind "$NOTES" "$USER_LINE"
   fi
   exit 0
 fi
 
 # Case C: Code + docs both changed
 if [ "$DOC_COUNT" -gt 0 ]; then
-  # Breaking signals present AND CHANGELOG not updated → reminder, non-blocking
+  # Breaking signals present AND CHANGELOG not updated → advisory, non-blocking
   if [ "$BREAKING_SIGNALS" -eq 1 ] && [ "$CHANGELOG_UPDATED" -eq 0 ]; then
     MSG=$(
-      printf '[subteams:session-end-reminder] Breaking/architectural signals detected — .md files updated but CHANGELOG.md is missing.\n\n'
-      printf 'Signal files (breaking/architectural):\n'
-      printf '%s\n' "$SIGNAL_FILES"
-      printf 'These changes need more than a generic .md touch:\n'
-      printf '  1. CHANGELOG.md updated with this change.\n'
-      printf '  2. Descriptive section of SYSTEM.md (or equivalent) overwritten — not appended.\n'
-      printf '  3. Decision-context block (Decision / Why / Alternatives / Risks / Linked).\n'
-      printf '  4. If a contract or integration broke: migration guide in the docs.\n'
-      printf '  5. Consider running the doc-agent (claude-subteams:doc-agent) for a breaking-change freshness audit.\n'
-      printf '     See claude-subteams:doc-quality-gate skill for the full breaking-change checklist.\n\n'
-      printf 'Escape hatch: set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 if this reminder is wrong for this session.\n'
+      printf "[subteams] Advisory (not a task — surface to the user, don't act now): breaking/architectural signals detected and .md files were updated, but CHANGELOG.md wasn't:\n"
+      printf '%s' "$SIGNAL_FILES"
+      printf "A generic .md touch may not cover this — the breaking-change checklist (decision-context block, overwritten descriptive section, migration guide if a contract broke) is in claude-subteams:doc-quality-gate. Mention it to the user; don't run doc-agent on your own."
     )
-    _remind "${NOTES}${MSG}"
+    _remind "${NOTES}${MSG}" "$USER_LINE"
   fi
 
-  # Breaking signals present AND CHANGELOG updated → soft reminder mentioning checklist
+  # Breaking signals present AND CHANGELOG updated → soft advisory mentioning checklist
   if [ "$BREAKING_SIGNALS" -eq 1 ] && [ "$CHANGELOG_UPDATED" -eq 1 ]; then
     MSG=$(
-      printf '[subteams] Session ending. Code + docs both changed (CHANGELOG updated) — good.\n'
-      printf 'Breaking/architectural signals detected:\n'
+      printf "[subteams] Advisory (not a task — surface to the user, don't act on it yourself): code + docs changed, CHANGELOG updated — good. Breaking/architectural signals were seen:\n"
       printf '%s' "$SIGNAL_FILES"
-      printf 'Reminder: verify the breaking-change checklist is complete.\n'
-      printf '  - Decision-context block (Decision / Why / Alternatives / Risks / Linked)\n'
-      printf '  - Descriptive section overwritten (not appended)\n'
-      printf '  - Migration guide if a contract or integration broke\n'
-      printf '  - Doc-agent audit recommended (claude-subteams:doc-agent)\n'
-      printf '(See claude-subteams:doc-quality-gate skill for full requirements.)\n'
+      printf "If the user wants to confirm completeness, the breaking-change checklist is in claude-subteams:doc-quality-gate — point them to it rather than running it yourself. No action required now."
     )
-    _remind "${NOTES}${MSG}"
+    _remind "${NOTES}${MSG}" "$USER_LINE"
   fi
 
-  # Standard Case C: no breaking signals → soft reminder, no block
-  MSG=$(
-    printf '[subteams] Session ending. Code + docs both changed — good.\n'
-    printf 'Reminder: ensure non-trivial decisions have a Decision context block in the journal.\n'
-    printf '(See decision-context skill for format.)\n'
-  )
-  _remind "${NOTES}${MSG}"
+  # Standard Case C: no breaking signals → soft advisory, no block
+  MSG="[subteams] Advisory (not a task): code + docs both changed — expected end state. If any non-trivial decision lacks a Decision-context block, the format is in claude-subteams:decision-context. Nothing to do now."
+  _remind "${NOTES}${MSG}" "$USER_LINE"
 fi
 
-# Case D: Code changed WITHOUT any doc updates → reminder, non-blocking
+# Case D: Code changed WITHOUT any doc updates → advisory, non-blocking
 if [ "$BREAKING_SIGNALS" -eq 1 ]; then
   # Escalated message for breaking/architectural changes
   MSG=$(
-    printf '[subteams:session-end-reminder] Breaking/architectural signals detected — code changed without any documentation updates.\n\n'
-    printf 'Breaking/architectural signal files:\n'
-    printf '%s\n' "$SIGNAL_FILES"
-    printf 'All changed code files (no .md files updated):\n'
-    printf '%s\n' "$CODE_LIST"
-    printf 'Before wrapping up, consider:\n'
-    printf '  1. Decision-context block with Alternatives + Risks in the decisions journal\n'
-    printf '     (docs/SYSTEM.md or equivalent). Format: Decision / Why / Alternatives / Risks / Linked.\n'
-    printf '  2. CHANGELOG.md updated with this change.\n'
-    printf '  3. Descriptive section of SYSTEM.md (or equivalent) overwritten — not appended.\n'
-    printf '  4. If a contract or integration broke: migration guide in the docs.\n'
-    printf '  5. Run the doc-agent (claude-subteams:doc-agent) for a breaking-change freshness audit.\n'
-    printf '     See claude-subteams:doc-quality-gate skill for the full breaking-change checklist.\n\n'
-    printf 'Escape hatch: set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 if this reminder is wrong for this session.\n'
+    printf "[subteams] Advisory (not a task — surface to the user, don't act now): breaking/architectural signals detected and code changed with no .md updates.\n"
+    printf 'Signal files:\n'
+    printf '%s' "$SIGNAL_FILES"
+    printf 'All changed code (no docs):\n'
+    printf '%s' "$CODE_LIST"
+    printf "The full breaking-change checklist (decision-context block, CHANGELOG, overwritten descriptive section, migration guide) is in claude-subteams:doc-quality-gate — don't start writing docs or run doc-agent mid-turn; raise it with the user."
   )
 else
   # Standard Case D message
   MSG=$(
-    printf '[subteams:session-end-reminder] Code changed without documentation updates.\n\n'
-    printf 'Files changed (no .md files updated):\n'
-    printf '%s\n' "$CODE_LIST"
-    printf 'Before wrapping up, consider:\n'
-    printf '  1. Add a "Decision context" block to the project decisions journal\n'
-    printf '     (docs/SYSTEM.md or equivalent) for any non-trivial change.\n'
-    printf '     Format: Decision / Why / Alternatives / Risks / Linked.\n'
-    printf '     See the decision-context skill for full format and examples.\n'
-    printf '  2. If the change affected the descriptive part of the docs (top of\n'
-    printf '     SYSTEM.md or equivalent), update that section by overwriting it —\n'
-    printf '     stale descriptive docs are worse than missing ones.\n'
-    printf '  3. For cosmetic-only changes (whitespace, typos, patch bumps) — docs are\n'
-    printf '     probably not needed for these specific files.\n\n'
-    printf 'Escape hatch: set CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1 if this reminder is wrong for this session.\n'
+    printf "[subteams] Advisory (not a task — surface to the user, don't act now): code changed, no .md updates.\n"
+    printf 'Changed files:\n'
+    printf '%s' "$CODE_LIST"
+    printf "If any of these are non-trivial, a Decision-context block (format: claude-subteams:decision-context) and an overwritten descriptive section may be worth it later; cosmetic-only changes (whitespace, typos, patch bumps) don't need docs. Nothing to do now."
   )
 fi
 
-_remind "${NOTES}${MSG}"
+_remind "${NOTES}${MSG}" "$USER_LINE"

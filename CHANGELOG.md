@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.29.0] - 2026-07-05
+
+### Changed
+- **`session-end-reminder` rebuilt as hybrid advisory, fire-once per session.** The 1.28.0 delivery premise was wrong: per the official hooks docs, `systemMessage` is shown to the **operator only** — the model never saw the 1.28.0 reminder at all (and `decision:"approve"` does not exist on Stop; only `"block"` does). The hook now emits one JSON object combining `hookSpecificOutput.additionalContext` (model-visible advisory) and `systemMessage` (one fixed operator line), with no `decision` field — nothing ever blocks. A marker file keyed on the Stop payload's `session_id` (sanitized, under `${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/session-end-marks/`) makes the reminder fire **at most once per session**; silent passes don't consume the slot; markers older than 7 days are pruned; a missing/unsafe `session_id` falls back to firing every turn (availability over strict once-ness). The marker doubles as loop protection for the extra model turn `additionalContext` provokes. All model-facing texts were rewritten from imperative numbered checklists to framed advisories ("Advisory (not a task — surface to the user, don't act now) … Nothing to do now") — engineered against the observed failure mode where the model launched unsolicited doc work in response to the old texts; validated by a prompt-evaluator simulation pass (incl. an adversarial filename-as-instruction case), with two RISK phrasings patched pre-merge. Classification logic (Cases A–D, breaking signals, doc-map NOTES, neutral filtering, `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`) is unchanged. See [ADR-009](docs/adr/009-session-end-hybrid-advisory.md).
+
+### Fixed
+- **ADR-006 and ADR-008 status lines de-staled.** ADR-006's headline still read "hook deferred" although its own amendment records the `subagent-rails` hook as shipped (1.27.0); ADR-008's session-end half is now explicitly marked superseded by ADR-009. Status lines point to the governing amendment/ADR so a skim can't pick up the stale picture.
+- **CHEATSHEET version drift** (said 1.27.0 while the plugin was at 1.28.0).
+
 ## [1.28.0] - 2026-07-02
 
 Shell-layer hardening from a full health audit of 1.27.0 (9 agents + Codex GPT-5.5). Codex found 1 CRITICAL + 7 HIGH + 2 MEDIUM in the shell scripts and hooks; all are fixed and locked in by a 55-case adversarial regression suite. Reviewed by code-reviewer + devils-advocate + a Codex cross-model pass.

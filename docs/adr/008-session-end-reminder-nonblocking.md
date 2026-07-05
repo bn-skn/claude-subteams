@@ -1,6 +1,6 @@
 # ADR-008: session-end-reminder is a non-blocking systemMessage reminder; the Bash record-guard is blanket-deny
 
-**Status:** accepted
+**Status:** accepted — the session-end-reminder half is superseded by [ADR-009](009-session-end-hybrid-advisory.md) (2026-07-05): the premise that `systemMessage` reaches the model was wrong (it is operator-only per the official hooks docs), and delivery moved to hybrid `additionalContext` + `systemMessage`, fire-once per session. The Bash record-guard half stands.
 **Date:** 2026-07-02
 
 ## Context
