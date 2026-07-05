@@ -1,6 +1,6 @@
 # ADR-006: Rails delivery ships via the briefing channel; the SubagentStart hook is deferred with recorded constraints
 
-**Status:** accepted
+**Status:** accepted — superseded in part by the 2026-07-02 amendment below: the deferral is over, the `SubagentStart` hook (`hooks/subagent-rails`) shipped in Tier 2 / v1.27.0 and is registered in `hooks.json`. The title reflects the original Tier 1 decision and is kept for link stability.
 **Date:** 2026-07-01
 
 ## Context
