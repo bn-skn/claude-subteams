@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.30.0] - 2026-07-06
+
+### Changed
+- **`session-end-reminder`: fire-once granularity is now per *changeset*, not per session.** The session marker stores the bare list of undocumented (non-doc) changed files at the last fire, written atomically; the reminder re-fires only when the current set contains a file the stored set lacks AND the marker is older than the cooldown (default 45 min, `CLAUDE_SUBTEAMS_DOC_REMIND_COOLDOWN_MIN`). A shrinking set never re-fires; short sessions behave exactly like 1.29.0; day-long sessions no longer go blind after the first advisory. NOTES-only / not-a-git fires write an empty set and don't self-repeat (accepted; can delay the first real code advisory by up to one cooldown window — still strictly better than 1.29.0's whole-session silence). Every failure mode (missing `find`, partial marker write, unparseable cooldown) degrades toward re-reminding, never toward false silence.
+- **Standing doc-hygiene recommendation appended to all six terminal advisories** (operator request — the useful spirit of the pre-1.28 blocking hook without the coercion): "Standing recommendation: when the current piece of work wraps up, offer the user a doc update (decisions journal, CHANGELOG, descriptive sections) rather than starting one unprompted." Offer-framing first, no leading imperative (prompt-evaluator hardening); evaluator passed all six variants post-append including repeated-delivery accumulation. Operator `systemMessage` line updated to match the new semantics. See [ADR-009](docs/adr/009-session-end-hybrid-advisory.md) amendment 2026-07-06.
+
 ## [1.29.0] - 2026-07-05
 
 ### Changed
