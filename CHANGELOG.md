@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.31.0] - 2026-07-06
+
+Planning-depth work on `brainstorming` (unchanged since 1.18.0): the stack becomes a consciously *compared* decision, and rejected options now survive in the durable ADR. Scope was cut from 5 proposed changes to 2 by a four-critic plan review (Claude + Codex/GPT reviewers and devil's-advocates) applying the 1.28.0 audit verdict "subtract, don't add" — a spec template, a mechanical spec gate, and an interview-rule de-dup were all rejected with reasons. Authored by prompt-engineer, validated by prompt-evaluator against artifact predicates, reviewed by code-reviewer. See [ADR-010](docs/adr/010-stack-as-compared-decision-and-adr-alternatives.md).
+
+### Added
+- **`brainstorming`: the stack is now a compared decision, not a gathered constraint.** A **Stack Decision** step (checklist item 4 + a dedicated section) fires on greenfield OR a live stack decision — where "live" weighs task fit, team familiarity, ops cost, and ecosystem maturity, explicitly NOT the bypassable "does the current stack technically work." It emits an observable Stack Decision block (2-3 candidates, the chosen stack, one-line reason each rejected candidate lost); when the stack is genuinely fixed, the skip must be stated, not silent. The chosen stack is recorded as an ADR via `adr-tracker` **decoupled from** the greenfield/structural Architecture Capture gate — so a stack pick in a non-greenfield project has somewhere to land, while a logic-only feature that adds one library gets an ADR and is NOT dragged into `ARCHITECTURE.md`/`CONVENTIONS.md` population. Honesty invariant: the stack ADR is `proposed` until the user approves, `accepted` only after.
+- **`Alternatives considered` section in the ADR contract.** Rejected options now live in the durable ADR that `architecture-guard` reads as truth, not only in the ephemeral `decision-context` journal block. Added to all four copies of the format — `templates/adr-template.md`, the adr-tracker format block, the Example ADR, and the Creation Checklist — plus a Red Flag for a missing / `N/A` Alternatives, and a reconciliation line naming the ADR section canonical and the decision-context field its lightweight companion.
+
+### Changed
+- **Architecture Capture step 1 honesty invariant harmonized.** The generic arch-choice ADR-creation bullet said status `accepted` "the instant a choice is settled" — during the interview, before design approval, contradicting both the new Stack Decision lifecycle and step 2's own "each accepted ADR" (which runs post-approval). Now `proposed` at capture, `accepted` only on approval, for ALL architectural choices — a latent inconsistency, not just a stack one — with an anti-duplicate reminder to reuse an existing Stack Decision ADR, and the ADR field list updated to include Alternatives.
+- **`brainstorming` Spec Self-Review** gained two checks: non-goals stated explicitly, and (if a stack decision was made) the spec links to its ADR. Genuine unknowns route to an "Open Questions" prose heading — the arch-doc-only `**TBD — unresolved**` marker is deliberately kept out of spec context.
+
 ## [1.30.0] - 2026-07-06
 
 ### Changed

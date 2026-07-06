@@ -25,7 +25,7 @@ You MUST create a task for each of these items and complete them in order:
 1. **Explore project context** — check files, docs, recent commits
 2. **Offer visual companion** (if topic will involve visual questions) — this is its own message, not combined with a clarifying question. See the Visual Companion section below.
 3. **Interview the user** — phased questioning to build full understanding (see Interview Process below)
-4. **Propose 2-3 approaches** — with trade-offs and your recommendation
+4. **Propose 2-3 approaches** — with trade-offs and your recommendation. When the stack is a live decision, do the same for the stack: compare 2-3 candidates and emit a **Stack Decision** block (see Exploring Approaches → Stack Decision). If the stack is fixed, state why.
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
 6. **"What If?" Challenge** — generate 5-10 "what if" questions about the design and present to the user (see below)
 7. **Write design doc** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md` and commit
@@ -98,6 +98,19 @@ If you cannot confidently check all boxes — ask more questions. If you can —
 - Present options conversationally with your recommendation and reasoning
 - Lead with your recommended option and explain why
 
+### Stack Decision
+
+The stack is a decision to compare, not just a constraint to elicit. Run this comparison when the work is **greenfield** OR the stack is a **live decision** — where "live" weighs task fit, team familiarity, ops cost, and ecosystem maturity, NOT merely "does the current stack technically work." That last question is the bypass to avoid: a stack can work and still be a poor fit, costly to operate, or on a dying ecosystem.
+
+- **When it fires:** compare 2-3 stack candidates the way you compare approaches — trade-offs, your recommendation, and why. Emit a short **Stack Decision** block: the candidates, the chosen stack, and the one-line reason each rejected candidate lost.
+- **When it does NOT fire** (stack genuinely fixed — platform mandate, hard integration constraint, or a deliberate choice to stay on the existing stack): say so explicitly and state why. The skip must be observable, not silent.
+
+**Recording it (independent of Architecture Capture):**
+
+- The chosen stack — and any new dependency it brings — is recorded as an **ADR** via the `adr-tracker` skill, which mandates an ADR for any new dependency / technology / framework choice. This happens for ANY stack or dependency decision, in any project, independent of the Architecture Capture branch below.
+- **Status lifecycle (honesty invariant):** write the ADR `proposed` when you recommend the stack; flip it to `accepted` ONLY after the user approves. Never write `accepted` for a stack the user has not yet approved — `architecture-guard` reads ADR-backed docs as truth, and a premature `accepted` poisons it.
+- **A logic-only feature that adopts one new library gets an ADR — nothing more.** The full `docs/ARCHITECTURE.md` / `docs/CONVENTIONS.md` population runs ONLY for genuinely greenfield or structural work, under the separate Architecture Capture gate below; do not drag a logic-only feature into it. When that gate does run, it reuses this same stack ADR (already `accepted` post-approval) — do not create a second one.
+
 ## Presenting the Design
 
 - Once you believe you understand what you are building, present the design
@@ -149,7 +162,7 @@ Present these questions to the user. Discuss any that surface real concerns. Adj
 **Flow:**
 
 1. **During the interview** — the instant an architectural choice is settled (stack, framework, data store, layer boundary, dependency direction, external integration, deviation from convention), capture it immediately, while the rationale is fresh:
-   - Create an ADR via the `adr-tracker` skill: `docs/adr/NNN-title.md`, status `accepted`, with Context / Decision / Consequences.
+   - Create an ADR via the `adr-tracker` skill: `docs/adr/NNN-title.md`, status `proposed` — flipped to `accepted` only when the user approves the design (never mark a choice `accepted` before approval; same honesty invariant as Stack Decision) — with Context / Decision / Alternatives / Consequences. (If a Stack Decision ADR already exists for this stack, reuse it — do not create a second.)
    - Add a `decision-context` block (Decision / Why / Alternatives / Risks / Linked) to the session journal as the lightweight companion record.
 2. **After the design is approved** — YOU, in-context, populate the docs from those captured records:
    - `docs/ARCHITECTURE.md`: fill the real layers, components, data flow, and a `## Decision Records` section listing each accepted ADR as `- [ADR-NNN: Title](adr/NNN-title.md)`.
@@ -176,6 +189,8 @@ Present these questions to the user. Discuss any that surface real concerns. Adj
 2. **Internal consistency:** Do any sections contradict each other? Does the architecture match the feature descriptions?
 3. **Scope check:** Is this focused enough for a single implementation plan, or does it need decomposition?
 4. **Ambiguity check:** Could any requirement be interpreted two different ways? If so, pick one and make it explicit.
+5. **Non-goals stated?** Does the spec say explicitly what is NOT in scope? Implicit scope is a top source of downstream disagreement — make exclusions explicit. State genuine unknowns as prose under an "Open Questions" heading, not as TBD/placeholder tokens (see item 1).
+6. **Stack decision linked?** If a stack decision was made (see Exploring Approaches → Stack Decision), does the spec link to its ADR (`docs/adr/NNN-title.md`)?
 
 Fix any issues inline. No need to re-review — just fix and move on.
 

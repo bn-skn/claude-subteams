@@ -47,6 +47,11 @@ Why are we making this decision? What is the problem or opportunity?
 What did we choose?
 (1 sentence -- be specific)
 
+## Alternatives considered
+
+What else was evaluated, and why was each rejected?
+(one line per alternative -- "N/A" is a smell when a real decision was made)
+
 ## Consequences
 
 What are the trade-offs?
@@ -55,6 +60,8 @@ What are the trade-offs?
 - **Negative:** What we lose or accept as cost
 - **Neutral:** What changes but is neither good nor bad
 ```
+
+The `Alternatives considered` section is the durable, authoritative record of what was rejected and why. It is the ADR counterpart to the lightweight `Alternatives` field in a `decision-context` journal block: the journal block is the session companion, this ADR section is canonical -- keep the two consistent.
 
 ## Storage and Numbering
 
@@ -81,10 +88,11 @@ proposed --> accepted --> [superseded | deprecated]
 2. [ ] Write a clear, descriptive title (not "Database Decision" but "Use PostgreSQL for User Data")
 3. [ ] Context explains the problem in 2-3 sentences
 4. [ ] Decision is a single, specific sentence
-5. [ ] Consequences list at least one positive and one negative trade-off
-6. [ ] Status is set to "proposed" or "accepted"
-7. [ ] Date is set to today
-8. [ ] File saved in `docs/adr/` with correct numbering
+5. [ ] Alternatives considered lists what else was evaluated and why each was rejected (not "N/A" for a real decision)
+6. [ ] Consequences list at least one positive and one negative trade-off
+7. [ ] Status is set to "proposed" or "accepted"
+8. [ ] Date is set to today
+9. [ ] File saved in `docs/adr/` with correct numbering
 
 ## Example ADR
 
@@ -103,6 +111,11 @@ PostgreSQL is too heavy for a desktop application.
 ## Decision
 
 Use SQLite with WAL (Write-Ahead Logging) mode for all local data storage.
+
+## Alternatives considered
+
+- PostgreSQL -- rejected: too heavy to bundle and operate for a single-user desktop app.
+- Plain JSON file -- rejected: no concurrent read-during-write, corrupts under the sync workload.
 
 ## Consequences
 
@@ -125,5 +138,6 @@ Use SQLite with WAL (Write-Ahead Logging) mode for all local data storage.
 - Architectural decision made without an ADR -- create one retroactively
 - ADR with vague context ("we needed something better") -- be specific about the problem
 - ADR missing consequences -- every decision has trade-offs, document them
+- ADR missing alternatives considered -- every real decision beat some option; record what and why
 - Reusing or deleting ADR numbers -- numbers are permanent
 - Multiple accepted ADRs that contradict each other -- supersede the older one

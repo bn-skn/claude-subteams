@@ -11,6 +11,10 @@ Why this decision is needed (2-3 sentences).
 
 What we chose (1 sentence).
 
+## Alternatives considered
+
+What else was evaluated and why rejected (one line each; "N/A" is a smell when a real decision was made).
+
 ## Consequences
 
 - Pro: ...
