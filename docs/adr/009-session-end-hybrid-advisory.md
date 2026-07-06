@@ -1,6 +1,6 @@
 # ADR-009: session-end-reminder becomes hybrid advisory (additionalContext to the model + systemMessage to the operator), fire-once per session
 
-**Status:** accepted
+**Status:** accepted — fire-once granularity revised by the 2026-07-06 amendment below (once per *changeset*, not once per session; v1.30.0)
 **Date:** 2026-07-05
 
 ## Context
@@ -34,3 +34,14 @@ Validation: code-reviewer approved (no critical/important findings); prompt-eval
 
 - Supersedes the delivery half of [ADR-008](008-session-end-reminder-nonblocking.md).
 - BACKLOG "session-end-reminder systemMessage rendering" spot-check → resolved by documentation verification (user-only surface), closed by this redesign.
+
+## Amendment — 2026-07-06 (v1.30.0): once per changeset + standing doc-hygiene recommendation
+
+Operator feedback after one day live: once-per-session can go blind in long sessions (the operator's bot sessions run up to ~24h) — an advisory consumed in the morning silences genuinely new undocumented work in the evening. Per-turn firing stays rejected (each fire costs an extra model turn; habituation kills the signal). Revised to **once per changeset**:
+
+- The marker now stores the bare list of non-doc changed files at the last fire (empty for NOTES-only / not-a-git fires) instead of being an empty flag. Written atomically (tmp + `mv -f`).
+- The marker-exists early-exit is gone; classification always runs. Before firing, `_remind()` gates: marker fresh (younger than the cooldown — default 45 min, `CLAUDE_SUBTEAMS_DOC_REMIND_COOLDOWN_MIN`, validated positive integer) → silent; no file in the current set that the stored set lacks → silent; otherwise fire and overwrite the marker with the current set. A shrinking set (files got documented/committed) never re-fires; a missing `find` degrades to "cooldown elapsed" — the fail-toward-reminding direction.
+- Known accepted consequences: NOTES-only / not-a-git advisories don't repeat on their own (empty current set can never contain a new file); a NOTES-only fire can delay the first real code advisory by up to one cooldown window — still strictly better than the 1.29.0 baseline, where any first fire silenced the whole session. No upper bound on the cooldown by choice: a huge value just degrades to once-per-session.
+- **Standing recommendation restored** (the useful spirit of the pre-1.28 blocking hook, minus the coercion): every terminal advisory now ends with "Standing recommendation: when the current piece of work wraps up, offer the user a doc update (decisions journal, CHANGELOG, descriptive sections) rather than starting one unprompted." Leads with the offer-framing, not an imperative, on prompt-evaluator advice; the evaluator passed all six variants post-append, including repeated-delivery accumulation.
+
+Validation: developer smoke suite (8 scenarios: first fire, same-state silence, fresh-marker suppression, aged re-fire, shrinking set, cooldown override, no-session_id fallback) + orchestrator re-run after review fixes; code-reviewer approve (no critical/important; atomic write and explicit empty-list arg adopted from its suggestions); prompt-evaluator PASS on the appended sentence and the updated operator line.
