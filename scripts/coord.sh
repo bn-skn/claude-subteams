@@ -30,8 +30,12 @@
 #   heartbeat --id ID [--pid P --worktree P --branch B]  refresh liveness; re-register if reaped
 #   roster                             list live instances (reaps dead first)
 #   reap                               remove dead instances + release their claims
-#   claim     --id ID PATH             atomic claim-or-reject (exit 0 ok, 3 rejected)
-#   release   --id ID [PATH | --all]   release one or all of an instance's claims
+#   claim     --id ID PATH...          atomic claim-or-reject, all-or-nothing across the
+#                                      batch (exit 0 = all claimed, 3 = >=1 held by a peer;
+#                                      1 = internal jq/ledger failure, nothing written)
+#   release   --id ID [PATH... | --all]  release listed (or all) of an instance's claims
+#                                      (a file literally named '--all' can't be released
+#                                      by name — the flag wins; pathological, documented)
 #   claims                             list current claims
 #   send      --from ID --to ID MSG    append MSG to recipient inbox
 #   recv      --id ID [--count]         print + clear own inbox (--count: peek count, no clear)
@@ -65,6 +69,17 @@ _now() { date +%s; }
 # Identity sanity: ids and inbox targets become filenames and jq keys — reject anything
 # that could traverse the coord dir or break the ledger. Session-hash ids are [a-f0-9].
 _valid_id() { printf '%s' "${1:-}" | grep -qE '^[A-Za-z0-9._-]+$'; }
+
+# Reject empty paths and paths with embedded newlines: plist building is line-based
+# (jq -R), a newline would silently split one path into two ledger keys.
+_valid_paths() {  # _valid_paths <cmd-name> <path>...
+  local cmd="$1" p; shift
+  for p in "$@"; do
+    case "$p" in
+      ''|*$'\n'*) echo "[coord] $cmd: empty path or path with newline rejected" >&2; return 2;;
+    esac
+  done
+}
 
 # Resolve the long-lived instance process pid: walk up the parent chain from <start>
 # (default $PPID) until a persistent agent process is found. Hooks (and this script)
@@ -266,15 +281,20 @@ cmd_roster() {
 
 cmd_reap() { cmd_init; ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }; _reap_locked ) 9>"$LOCK"; }
 
-# atomic claim-or-reject. exit 0 = claimed (by me/new); exit 3 = held by another live instance.
+# atomic claim-or-reject, one or more paths per call. exit 0 = ALL claimed (by me/new);
+# exit 3 = at least one held by another live instance (then NOTHING is claimed — all-or-nothing,
+# so a partially-claimed batch can never masquerade as success).
 cmd_claim() {
-  local id="" path=""
+  local id=""; local -a paths=()
   while [ $# -gt 0 ]; do case "$1" in
-    --id) id="$2"; shift 2;; *) path="$1"; shift;;
+    --id) id="$2"; shift 2;; *) paths+=("$1"); shift;;
   esac; done
-  [ -n "$id" ] && [ -n "$path" ] || { echo "[coord] claim: --id and PATH required" >&2; return 2; }
+  [ -n "$id" ] && [ "${#paths[@]}" -gt 0 ] || { echo "[coord] claim: --id and at least one PATH required" >&2; return 2; }
   _valid_id "$id" || { echo "[coord] claim: invalid --id '$id'" >&2; return 2; }
+  _valid_paths claim "${paths[@]}" || return 2
   cmd_init
+  local plist
+  plist=$(printf '%s\n' "${paths[@]}" | jq -R . | jq -sc .) || return 1
   local rc=0
   ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     _reap_locked
@@ -284,35 +304,41 @@ cmd_claim() {
       echo "[coord] claim: instance '$id' is not registered (run register first)." >&2
       exit 4
     fi
-    local by; by=$(jq -r --arg p "$path" '.[$p].by // empty' "$CLAIMS" 2>/dev/null)
-    if [ -n "$by" ] && [ "$by" != "$id" ]; then
+    local conflicts
+    conflicts=$(jq -r --argjson ps "$plist" --arg id "$id" \
+      'to_entries[] | select(.key as $k | $ps | index($k)) | select(.value.by != $id)
+       | "[coord] '\''\(.key)'\'' is claimed by '\''\(.value.by)'\'' — coordinate or wait."' \
+      "$CLAIMS" 2>/dev/null)
+    if [ -n "$conflicts" ]; then
+      printf '%s\n' "$conflicts" >&2
       exit 3   # already held by another (reap already ran, so it's live)
     fi
-    _jq_write "$CLAIMS" --arg p "$path" --arg id "$id" --arg now "$(_now)" \
-      '.[$p] = {by:$id, at:($now|tonumber)}'
+    _jq_write "$CLAIMS" --argjson ps "$plist" --arg id "$id" --arg now "$(_now)" \
+      'reduce $ps[] as $p (.; .[$p] = {by:$id, at:($now|tonumber)})'
   ) 9>"$LOCK"
   rc=$?
-  if [ "$rc" -eq 3 ]; then
-    local holder; holder=$(jq -r --arg p "$path" '.[$p].by // "?"' "$CLAIMS" 2>/dev/null)
-    echo "[coord] '$path' is claimed by '$holder' — coordinate or wait." >&2
-  fi
   return "$rc"
 }
 
 cmd_release() {
-  local id="" path="" all=0
+  local id="" all=0; local -a paths=()
   while [ $# -gt 0 ]; do case "$1" in
-    --id) id="$2"; shift 2;; --all) all=1; shift;; *) path="$1"; shift;;
+    --id) id="$2"; shift 2;; --all) all=1; shift;; *) paths+=("$1"); shift;;
   esac; done
   [ -n "$id" ] || return 2
   [ -f "$CLAIMS" ] || return 0
+  local plist=""
+  if [ "$all" -ne 1 ]; then
+    [ "${#paths[@]}" -gt 0 ] || return 2
+    _valid_paths release "${paths[@]}" || return 2
+    plist=$(printf '%s\n' "${paths[@]}" | jq -R . | jq -sc .) || return 1
+  fi
   ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     if [ "$all" -eq 1 ]; then
       _jq_write "$CLAIMS" --arg i "$id" 'with_entries(select(.value.by != $i))'
     else
-      [ -n "$path" ] || exit 2
-      _jq_write "$CLAIMS" --arg p "$path" --arg i "$id" \
-        'if .[$p].by == $i then del(.[$p]) else . end'
+      _jq_write "$CLAIMS" --argjson ps "$plist" --arg i "$id" \
+        'with_entries(select((.value.by == $i and (.key as $k | $ps | index($k))) | not))'
     fi
   ) 9>"$LOCK"
 }

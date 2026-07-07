@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.31.1] - 2026-07-07
+
+### Fixed
+- **`coord.sh claim`/`release` silently operated on only the LAST path of a multi-path call.** The positional-arg loop overwrote a single `path` variable, so `claim --id X a b c` claimed only `c` — while the session-start protocol line and the multi-instance SKILL both nudge agents to pass lists. Observed in production (claudebot, 2 live instances): a day of batch claims each protected one file, with no error. Both commands now collect paths into an array. `claim` is **all-or-nothing across the batch**: any path held by a live peer → exit 3, *nothing* is claimed, and every conflict is named on stderr (printed from under the flock, against the post-reap ledger). `release` drops every listed path owned by the caller, skipping peers' claims. Each batch is a single `_jq_write` (one atomic rename), so a partially-applied batch can never appear on disk. Exit-code contract (0/2/3/4/5) preserved; rc=1 (internal jq/ledger failure, nothing written) now documented in the usage header.
+- **Path validation:** empty paths and paths with embedded newlines are rejected with rc=2 (`_valid_paths`) — the old single-path code rejected empty loudly, and the new line-based plist build would have split a newline path into two ledger keys. A file literally named `--all` still can't be released by name (flag wins) — pathological, documented in the header.
+- **`marketplace.json` version de-staled** (sat at 1.30.0 through the 1.31.0 release; both files now 1.31.1).
+
+Docs updated to the new contract: usage header, multi-instance SKILL §3.1/§3.3 (`<path> [<path>...]`, all-or-nothing note), session-start protocol line. Verified by a 30-case isolated suite (multi-claim, idempotent re-claim, batch conflict incl. position-0 (jq `index()==0` truthiness), foreign-claim preservation on mixed release, `--all`, arg errors, quote-in-path JSON safety, empty/newline rejection) — all green; reviewed by code-reviewer (pass, suggestions applied).
+
 ## [1.31.0] - 2026-07-06
 
 Planning-depth work on `brainstorming` (unchanged since 1.18.0): the stack becomes a consciously *compared* decision, and rejected options now survive in the durable ADR. Scope was cut from 5 proposed changes to 2 by a four-critic plan review (Claude + Codex/GPT reviewers and devil's-advocates) applying the 1.28.0 audit verdict "subtract, don't add" — a spec template, a mechanical spec gate, and an interview-rule de-dup were all rejected with reasons. Authored by prompt-engineer, validated by prompt-evaluator against artifact predicates, reviewed by code-reviewer. See [ADR-010](docs/adr/010-stack-as-compared-decision-and-adr-alternatives.md).

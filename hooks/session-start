@@ -98,7 +98,7 @@ if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ] && command -v jq >/dev/null 
     _mi_n=$(printf '%s\n' "$_mi_roster" | grep -c '^  - ')
     echo "[subteams:multi-instance] Active — you are instance '$_mi_id'; $_mi_n live instance(s) on this repo."
     printf '%s\n' "$_mi_roster"
-    echo "Protocol (see the multi-instance skill): claim a file before editing it (coord.sh claim --id $_mi_id <path>); do NOT edit a file another live instance has claimed; commit under the commit-lock; send/receive handoffs via the mailbox. Claims are advisory — they bind cooperating instances, not external editors."
+    echo "Protocol (see the multi-instance skill): claim files before editing them (coord.sh claim --id $_mi_id <path> [<path>...], all-or-nothing per call); do NOT edit a file another live instance has claimed; commit under the commit-lock; send/receive handoffs via the mailbox. Claims are advisory — they bind cooperating instances, not external editors."
     if [ "${GIT_OPTIONAL_LOCKS:-}" != "0" ]; then
       echo "[subteams:multi-instance] Tip: export GIT_OPTIONAL_LOCKS=0 to avoid stale .git/index.lock from background git polling across worktrees."
     fi
