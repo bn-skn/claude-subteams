@@ -60,6 +60,8 @@ Dispatch the FULL critic set in parallel — both model families together — fo
 
 Run all four by default. Do NOT drop GPT critics to conserve quota — full coverage is the point of cross-review; the user has opted into it.
 
+**Reviewer-name rule (harness quirk):** in harnesses where a custom spawn name overrides `agent_type` in the hook payload (observed in teammate mode), the review-gate matches a reviewer by the substring `code-reviewer` — so spawn review agents with no custom name, or a name containing `code-reviewer`. An unrelated custom name hides the review from the gate.
+
 ### 3.2 Merge Results
 
 1. Collect all findings. Normalize severity to the unified scale from Section 2 before comparing.

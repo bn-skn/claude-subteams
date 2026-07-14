@@ -107,6 +107,40 @@ Screenshots are expensive in context. Rules:
 - Scroll behavior: sticky headers, infinite scroll, anchors
 - Animations: don't block interaction, respect prefers-reduced-motion
 
+## Testing Mode: scenario (default) vs monkey
+
+You run in one of two modes. **Default is scenario-based** — everything above. Switch to **monkey** ONLY when the brief says `mode: monkey`.
+
+**Scenario mode — where scenarios come from.** If the active IMPL-PLAN carries a `## User Stories` section (see writing-plans), read your scenarios from it: each story ("As <role>, I want <action>, so that <value>" + its acceptance criterion) becomes a flow to drive and assert. No User Stories section → derive scenarios from the brief as before.
+
+### Mode: monkey
+
+Chaotic, "village-idiot" traversal of the interface — you poke it the way a confused or hostile user would, and watch what breaks. This is fuzzing the UI, not verifying a spec.
+
+**Tooling — same as always: Playwright CLI via Bash, headless.** NOT agent-browser. NOT computer-use / MCP. One browser process, launched `headless`, closed when the timebox ends (VPS has 3.8 GB — never leave Chromium resident).
+
+**What you do (randomized):**
+- Click random interactive elements — buttons, links, toggles, menu items — in no sensible order.
+- Feed fields garbage and boundary input: empty, whitespace, 10k-char strings, emoji, `<script>`/SQL-looking payloads, negative and huge numbers, wrong types.
+- Double- and triple-submit forms; click submit before fields settle.
+- Navigate back/forward mid-flow; reload on half-filled state.
+- Resize the viewport to 320 / 768 / 1280 and keep poking.
+- Spam Enter, and Tab-then-Enter, on focused and unfocused elements.
+
+**What you collect** (this is the point — the interface should survive nonsense without erroring):
+- console errors (`page.on('console', ...)` filtered to `error`),
+- unhandled promise rejections (`page.on('pageerror', ...)`),
+- failed network requests (`page.on('requestfailed', ...)`) and 5xx responses. **Classify 4xx separately:** a 4xx on garbage input is usually the server correctly rejecting nonsense — report it as validation-observed, not as an issue; a 4xx on a legitimate action, or any 5xx / console error / unhandled rejection, is a defect,
+- a screenshot **only on an anomaly** — one of the above firing, or a visibly broken layout. Follow the Screenshot Strategy token rules: save to `screenshots/`/`test-results/`, report the path, do not inline.
+
+**Reproducibility (required).** Seed the randomness from a fixed value (log the seed), or record the exact ordered action list you took, and put it in the report. A monkey finding nobody can reproduce is noise.
+
+**Timebox.** 3-5 minutes of activity per page/route; move on or stop when it elapses. Do not loop forever chasing a green run — absence of anomalies within the box is a clean pass.
+
+**Report contract (monkey):**
+- `issues-found` — for each: severity, the console/rejection/network signal captured, and the seed or ordered repro steps.
+- `clean pass` — routes exercised, action count, seed/action-log, and "no console errors, rejections, or failed requests observed in the timebox".
+
 ## Output Contract
 
 ```

@@ -39,3 +39,23 @@
   - [ ] AC-2: <acceptance criterion> — TODO — blocker: <text> — owner: <agent/human>
 
 <!-- Repeat per package. A package is DONE only when all its acceptance criteria are DONE. -->
+
+<!--
+  OPTIONAL SECTIONS — risk-triggered, NOT default ceremony (see the writing-plans skill).
+  Include a section ONLY when its trigger fires; delete the ones that do not apply.
+  Not user-facing + no schema change + no API change → include NONE of these.
+
+  ## User Stories            (trigger: user-facing feature)
+  - As <role>, I want <action>, so that <value>.
+    - Acceptance: <observable criterion>
+  (The ui-tester reads these as scenarios in scenario mode — keep them concrete.)
+
+  ## Data Design             (trigger: database schema change — see database-design skill)
+  - Tables/fields: <changes>
+  - Indexes: <added/removed>
+  - Migration: forward <...> · rollback <...>
+
+  ## Interface Contract      (trigger: new/changed public API — see api-design skill)
+  - Contract source of truth: docs/openapi.yaml (link the endpoints; do not restate inline)
+  - Changes: <endpoints / shapes added or altered>
+-->

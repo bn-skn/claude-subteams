@@ -10,8 +10,10 @@ fi
 INPUT=$(cat)
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
-# Only act on commands containing git commit (skip echo/printf/comments)
-if ! printf '%s\n' "$COMMAND" | grep -qE '\bgit\s+commit\b'; then
+# Only act on commands containing git commit (skip echo/printf/comments).
+# Allows an intervening `-C <path>` so `git -C /other/repo commit` isn't
+# missed — the review gate below needs to see these to resolve TARGET_DIR.
+if ! printf '%s\n' "$COMMAND" | grep -qE '\bgit\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
   exit 0
 fi
 if printf '%s\n' "$COMMAND" | grep -qE '^\s*(echo|printf|#)'; then
@@ -20,7 +22,9 @@ fi
 
 ERRORS=""
 
-# Stack-agnostic compilation check
+# Stack-agnostic compilation check — intentionally cwd-scoped (the session's
+# active project), NOT TARGET_DIR: compiling a best-effort-resolved foreign
+# repo would add noise; the review gate below is what goes cross-repo.
 if [ -f "tsconfig.json" ]; then
   # Source nvm if available (hooks run in minimal shell without .bashrc) — only
   # needed here, inside the git-commit branch, so non-commit calls never pay for it.
@@ -50,6 +54,66 @@ elif [ -f "go.mod" ]; then
   fi
 fi
 
+# P1.33: resolve the repo the commit actually targets. PreToolUse runs in the
+# session's cwd, but the command may act on a different repo via
+# `cd X && git commit` or `git -C X commit` — a bare `git diff --cached` below
+# would then check the wrong repo's staging area (post-1.32 finding, see
+# docs/plans/2026-07-13-subteams-1.32-research.md). Extraction is best-effort:
+# prefer `git -C <path>` on the commit statement itself, else the last `cd
+# <path>` before it (split on && / ;). ~ and $HOME expand; any other $ or `
+# in the path is an unresolvable substitution and we fall back to cwd rather
+# than guess. Relative paths resolve against the session cwd.
+TARGET_DIR="$PWD"
+COMMIT_STMT=""
+LAST_CD=""
+
+# Extract the argument after a prefix (`cd ` / `git -C `): a quoted span wins
+# over whitespace-splitting, so `cd "/path with space"` resolves whole instead
+# of truncating at the space (review finding F2 — a truncated prefix that
+# happens to be a real repo would silently point the gate at the WRONG repo).
+_arg_after() { # $1=line  $2=extended-regex prefix
+  printf '%s\n' "$1" | sed -nE "s/.*${2}\"([^\"]+)\".*/\1/p" | head -1 | grep . \
+  || printf '%s\n' "$1" | sed -nE "s/.*${2}'([^']+)'.*/\1/p" | head -1 | grep . \
+  || printf '%s\n' "$1" | sed -nE "s/.*${2}(\S+).*/\1/p" | head -1
+}
+
+while IFS= read -r STMT; do
+  [ -z "$STMT" ] && continue
+  if printf '%s\n' "$STMT" | grep -qE '^\s*cd\s+\S'; then
+    LAST_CD=$(_arg_after "$STMT" '^\s*cd\s+')
+  fi
+  if printf '%s\n' "$STMT" | grep -qE '\bgit\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
+    COMMIT_STMT="$STMT"
+    break
+  fi
+done < <(printf '%s\n' "$COMMAND" | sed -E 's/&&|;/\n/g')
+
+RAW_TARGET=""
+if [ -n "$COMMIT_STMT" ] && printf '%s\n' "$COMMIT_STMT" | grep -qE '\bgit\s+-C\s+\S'; then
+  RAW_TARGET=$(_arg_after "$COMMIT_STMT" '\bgit\s+-C\s+')
+elif [ -n "$LAST_CD" ]; then
+  RAW_TARGET="$LAST_CD"
+fi
+
+if [ -n "$RAW_TARGET" ]; then
+  RAW_TARGET="${RAW_TARGET%\"}"; RAW_TARGET="${RAW_TARGET#\"}"
+  RAW_TARGET="${RAW_TARGET%\'}"; RAW_TARGET="${RAW_TARGET#\'}"
+  case "$RAW_TARGET" in
+    '~'|'~/'*) RAW_TARGET="$HOME${RAW_TARGET#\~}" ;;
+    '$HOME'|'$HOME/'*) RAW_TARGET="$HOME${RAW_TARGET#\$HOME}" ;;
+  esac
+  case "$RAW_TARGET" in
+    *'$'*|*'`'*) RAW_TARGET="" ;;
+  esac
+  case "$RAW_TARGET" in
+    /*|"") : ;;
+    *) RAW_TARGET="$PWD/$RAW_TARGET" ;;
+  esac
+  if [ -n "$RAW_TARGET" ] && [ -d "$RAW_TARGET" ]; then
+    TARGET_DIR="$RAW_TARGET"
+  fi
+fi
+
 # P3.1 review gate: staged code changes require a code-reviewer subagent to
 # have run this session. hooks/subagent-rails writes the marker on
 # SubagentStart when agent_type matches code-reviewer/gpt-code-reviewer; we
@@ -62,7 +126,7 @@ if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ]; then
   SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
   if [ -n "$SID" ] && printf '%s' "$SID" | grep -qE '^[A-Za-z0-9._-]+$' \
      && [ "$SID" != "." ] && [ "$SID" != ".." ]; then
-    STAGED=$(git diff --cached --name-only 2>/dev/null)
+    STAGED=$(git -C "$TARGET_DIR" diff --cached --name-only 2>/dev/null)
     NEUTRAL_RE='^(\.gitignore|\.editorconfig|\.gitattributes|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|composer\.lock)$|(^|/)\.DS_Store$'
     HAS_CODE=0
     while IFS= read -r f; do
@@ -89,12 +153,17 @@ fi
 # review signal ("still one semantic unit?"), never as a verdict.
 # 400 vs the 300 review threshold in prose: deliberately coarser — the hook is
 # a last-resort net, review owns the 300 line; avoids mechanical noise.
-REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD")
+# REPO_ROOT and the staged-file list are resolved against TARGET_DIR (see
+# above) — the repo the commit actually targets, not necessarily cwd. Staged
+# paths from `git diff --cached` are always relative to the repo root, so
+# file checks below join against REPO_ROOT rather than assuming cwd == root.
+REPO_ROOT=$(git -C "$TARGET_DIR" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$TARGET_DIR")
 LARGE_FILES=""
 if [ ! -f "$REPO_ROOT/CONVENTIONS.md" ]; then
-  LARGE_FILES=$(git diff --cached --name-only 2>/dev/null | while IFS= read -r f; do
-    if [ -f "$f" ] && printf '%s\n' "$f" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
-      LINES=$(wc -l < "$f")
+  LARGE_FILES=$(git -C "$TARGET_DIR" diff --cached --name-only 2>/dev/null | while IFS= read -r f; do
+    FULL="$REPO_ROOT/$f"
+    if [ -f "$FULL" ] && printf '%s\n' "$f" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
+      LINES=$(wc -l < "$FULL")
       if [ "$LINES" -gt 400 ]; then
         echo "  $f ($LINES lines)"
       fi

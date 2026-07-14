@@ -68,6 +68,8 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 
 **Cross-model note:** the two GPT critics are OPTIONAL — they augment the Claude critics when Codex is available (see Full Pipeline Step 6 and the `cross-review` skill). If Codex is down, the pipeline runs Claude-only and never blocks.
 
+**Reviewer-name rule (harness quirk):** in harnesses where spawning an agent with a custom name replaces `agent_type` with that name in the hook payload (observed in teammate mode), the review-gate detects a reviewer by substring-matching `code-reviewer` — so spawn review agents **either with no custom name, or with a name that contains `code-reviewer`**. A reviewer spawned under an unrelated custom name leaves the gate unable to see that review ran.
+
 ## 3. Scope Detection
 
 Before applying any development skill, classify the task. This is not optional.

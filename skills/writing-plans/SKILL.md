@@ -153,6 +153,16 @@ Every plan MUST include a Risks & Nuances section after the task list:
 
 If you cannot identify ANY risks — you have not thought hard enough. Re-read the plan and consider: what if the network is down? What if the data is malformed? What if two users do this simultaneously? What if the dependency changes its API?
 
+## Optional Sections (risk-triggered — not default ceremony)
+
+Three sections are added to the plan ONLY when a specific risk-trigger fires. They are not written by default: a change that is not user-facing, touches no schema, and adds no API gets **none** of them. Do not pad a plan with empty stubs — omit the section entirely when its trigger is absent.
+
+- **`## User Stories`** — write when the feature is **user-facing**. One story per user-visible behavior: `As <role>, I want <action>, so that <value>`, each with its own acceptance criterion. This section doubles as the test spec: the ui-tester reads it as scenarios in its default (scenario) mode, so vague stories produce vague tests.
+- **`## Data Design`** — write when the change **alters the database schema**. Cover affected tables/fields, indexes, and the migration (forward + rollback). Follow the `database-design` skill for modeling guidelines.
+- **`## Interface Contract`** — write when the change **introduces or changes a public API**. Reference the contract in `docs/openapi.yaml` (the source of truth), and follow the `api-design` skill. Do not restate the whole spec inline — link it.
+
+When in doubt **about the trigger itself** — is this feature user-facing? does this change touch the schema? — treat that one section as required (the same bias-toward-review the pipeline uses). General uncertainty about the task is NOT a trigger and never justifies adding all three. Never invent a trigger to justify a section the task does not need.
+
 ## Remember
 - Exact file paths always
 - Complete code in every step — if a step changes code, show the code

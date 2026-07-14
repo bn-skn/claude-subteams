@@ -110,7 +110,7 @@ Autonomy is the manual pipeline minus the human pause, plus bounded, evidence-ca
 |-------|---------|--------|
 | operator-decision-required (STRUCTURAL) | cap-exceeded OR out-of-scope path — caught by the hook before the edit for file-writing tools; at the next checkpoint for Bash side effects | STOP; hand to operator |
 | external-evidence-required | a material claim needs a verifier not yet run | run it; if impossible, STOP |
-| reviewer-disagreement | **END-OF-RUN only** — no mid-run reviewer dispatch | surface at run end |
+| reviewer-disagreement | **END-OF-RUN only as a blocking gate** — task-level review still runs per the pipeline (the review floor holds inside autonomy); what is deferred is *resolving reviewer disagreements* as a mid-run blocking checkpoint | batch unresolved disagreements, surface at run end |
 | local-fixable | error the run can resolve itself, with evidence | fix, re-verify, continue |
 | informational | note, no decision | log, continue |
 
