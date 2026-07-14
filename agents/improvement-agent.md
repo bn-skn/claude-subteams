@@ -37,7 +37,7 @@ Run these checks systematically:
 
 **Complexity & Size**
 ```bash
-# Files over 200 lines (god files)
+# Size signal: files past the review threshold (default 300) — check cohesion, not just length
 find src/ -name '*.ts' -o -name '*.tsx' | xargs wc -l | sort -rn | head -20
 
 # TODO/FIXME/HACK count
@@ -150,7 +150,7 @@ Date: [YYYY-MM-DD]
 
 ### Metrics Snapshot
 - Total source files: X
-- Files > 200 lines: X
+- Files past size threshold (default 300; cohesion check pending): X
 - TODO/FIXME count: X
 - Outdated dependencies: X
 - Known vulnerabilities: X

@@ -1,23 +1,47 @@
 #!/bin/bash
-# SubagentStart hook — static rails-pointer + honesty reminder for every subagent.
+# SubagentStart hook — static rails-pointer + honesty reminder for every subagent,
+# plus (P3.1) a review-marker write when the spawned subagent is a code reviewer.
 # Guard polarity: this hook fires FOR subagents — it is never skipped on agent_id
 # presence (that would be the INVERSE of coord-notify's guard, which skips ON
 # agent_id presence because coord-notify is orchestrator-only). No opt-in env gate
 # either: rails-pointer + honesty reminder are cheap and safe to always emit.
 #
-# The injected text is STATIC and plugin-authored only — it never embeds file
-# contents (only tells the subagent WHERE to look), so it carries no untrusted data.
+# The injected additionalContext is STATIC and plugin-authored only — it never
+# embeds file contents (only tells the subagent WHERE to look), so it carries
+# no untrusted data.
 #
-# jq is optional, not required: the payload is fixed text with no characters that
-# need JSON escaping, so the manual fallback is exact either way.
+# P3.1 review marker: if this subagent's agent_type matches code-reviewer or
+# gpt-code-reviewer (substring match — also catches plugin-scoped names like
+# "claude-subteams:code-reviewer"), write a marker file at
+# ${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/review-marks/<session_id>.
+# hooks/pre-commit-gate checks for that marker before allowing a `git commit`
+# that touches code files. Best-effort: requires jq and a usable session_id;
+# if either is missing we simply skip marking (fail toward NOT recording a
+# review, never toward a false claim that one happened) — the injected
+# additionalContext below is emitted unconditionally either way.
 #
 # Silent-fail: any internal error falls through to exit 0 (never break a session).
 
 EVENT="${1:-}"
 [ "$EVENT" = "SubagentStart" ] || exit 0
 
-# Drain stdin defensively; its content is unused (the context below is fully static).
-cat >/dev/null 2>&1
+INPUT=$(cat 2>/dev/null)
+
+if command -v jq >/dev/null 2>&1; then
+  SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+  # agent_type is the documented SubagentStart field (code.claude.com/docs/en/hooks,
+  # verified 2026-07-14; plugin-scoped form "claude-subteams:code-reviewer").
+  # .subagent_type kept as a defensive fallback for older CLI payloads.
+  AGENT_TYPE=$(printf '%s' "$INPUT" | jq -r '.agent_type // .subagent_type // empty' 2>/dev/null)
+  if [ -n "$SID" ] && printf '%s' "$SID" | grep -qE '^[A-Za-z0-9._-]+$' \
+     && [ "$SID" != "." ] && [ "$SID" != ".." ] \
+     && printf '%s' "$AGENT_TYPE" | grep -qi 'code-reviewer'; then
+    MARK_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/review-marks"
+    mkdir -p "$MARK_DIR" 2>/dev/null
+    : > "$MARK_DIR/$SID" 2>/dev/null
+    find "$MARK_DIR" -type f -mtime +7 -delete 2>/dev/null
+  fi
+fi
 
 CTX='[subteams:rails] If present in this project, read docs/CONVENTIONS.md, docs/ARCHITECTURE.md, and the active plan under docs/plans/active/ before editing, and honor the Rails field in your brief if one was given. Honesty: if a tool call fails or a fact is unverified, say so plainly; state only verified facts as fact.'
 

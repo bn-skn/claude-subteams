@@ -5,15 +5,17 @@
 # assistant turn), not end-of-session — the filename is kept for hooks.json
 # wiring stability but the semantics below are per-turn.
 #
-# Delivery: hybrid, advisory-only. On Stop the only decision value that exists
-# is "block" — we never emit a decision field, so nothing here ever blocks or
-# coerces the model. Stop DOES support hookSpecificOutput.additionalContext
-# (text injected into the model's context) in addition to the top-level
-# systemMessage field (text shown to the operator, never seen by the model).
-# When a reminder fires we emit ONE JSON object combining both channels:
-#   {"systemMessage":"<short one-line operator notice>",
-#    "hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"<full
-#    advisory text>"}}
+# Delivery: systemMessage-only, advisory-only (P8,
+# docs/plans/2026-07-13-subteams-1.32-research.md). On Stop the only decision
+# value that exists is "block" — we never emit a decision field, so nothing
+# here ever blocks or coerces the model. Stop also supports
+# hookSpecificOutput.additionalContext (text injected into the MODEL's
+# context), but this hook never uses it: additionalContext on Stop risks
+# either "eating" a final answer the model already wrote (the model responds
+# to the hook instead of to the human) or nudging the model into unrequested
+# work. Every reminder here is for the human operator to act on or ignore, so
+# it goes out on the systemMessage channel only, which the model never sees:
+#   {"systemMessage":"<full advisory text>"}
 # then exit 0. All reminder paths funnel through the _remind() helper below,
 # which emits this JSON (jq when available, hand-escaped fallback otherwise),
 # writes the changeset marker (see below), and exits 0.
@@ -132,10 +134,11 @@ fi
 
 # Opportunistic prune of stale markers (errors ignored — best effort only).
 find "$MARK_BASE_DIR" -type f -mtime +7 -delete 2>/dev/null
+find "${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/session-edits" -type f -mtime +7 -delete 2>/dev/null
 
-# Short, fixed operator-facing line for every fire (same across all cases —
-# the model gets the full advisory via additionalContext instead).
-USER_LINE="[subteams] Doc-discipline advisory sent to the model (re-fires only for new undocumented files after a cooldown). Silence: CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1"
+# Short, fixed operator-facing header line prepended to every fire, ahead of
+# the case-specific advisory body (see _remind).
+USER_LINE="[subteams] Doc-discipline advisory (re-fires only for new undocumented files after a cooldown). Silence: CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1"
 
 # True (0) if MARKER_FILE is younger than COOLDOWN minutes — i.e. the re-fire
 # cooldown has NOT elapsed yet, so the caller must stay silent regardless of
@@ -158,12 +161,13 @@ _has_new_file() {
   printf '%s\n' "$current" | grep -vxFf "$stored_file" | grep -q .
 }
 
-# Non-blocking reminder delivery (see header). Escaping mirrors hooks/autonomy-gate's
-# _deny: jq handles arbitrary bytes correctly; the hand-escaped fallback additionally
+# Non-blocking reminder delivery (see header). systemMessage-only: no
+# additionalContext, ever (P8). Escaping mirrors hooks/autonomy-gate's _deny:
+# jq handles arbitrary bytes correctly; the hand-escaped fallback additionally
 # strips control chars [\001-\037] (not just backslash/quote) and turns embedded
 # newlines into literal \n so a hostile file path/message can never break the JSON.
-_remind() { # advisory user_line code_bare -> prints combined JSON, writes marker, exits 0
-  local advisory="$1" userline="$2" code_bare="${3:-}" out esc_adv esc_user
+_remind() { # advisory user_line code_bare -> prints systemMessage-only JSON, writes marker, exits 0
+  local advisory="$1" userline="$2" code_bare="${3:-}" full out esc_full
 
   # Once-per-changeset gate (see header): only applies when a marker file
   # already exists for this session. First-ever fire in a session, and the
@@ -177,20 +181,21 @@ _remind() { # advisory user_line code_bare -> prints combined JSON, writes marke
     fi
   fi
 
+  full="${userline}
+
+${advisory}"
+
   if [ "$HAVE_JQ" -eq 1 ]; then
-    out=$(jq -nc --arg adv "$advisory" --arg user "$userline" \
-      '{systemMessage:$user, hookSpecificOutput:{hookEventName:"Stop", additionalContext:$adv}}' 2>/dev/null)
+    out=$(jq -nc --arg msg "$full" '{systemMessage:$msg}' 2>/dev/null)
     if [ -n "$out" ]; then
       printf '%s\n' "$out"
       _mark_session "$code_bare"
       exit 0
     fi
   fi
-  esc_adv=$(printf '%s' "$advisory" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
-  esc_adv="${esc_adv%\\n}"
-  esc_user=$(printf '%s' "$userline" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
-  esc_user="${esc_user%\\n}"
-  printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"%s"}}\n' "$esc_user" "$esc_adv"
+  esc_full=$(printf '%s' "$full" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
+  esc_full="${esc_full%\\n}"
+  printf '{"systemMessage":"%s"}\n' "$esc_full"
   _mark_session "$code_bare"
   exit 0
 }
@@ -216,7 +221,7 @@ NOTES=""
 
 # ---- Not in a git repo → soft advisory only ----
 if ! git rev-parse --git-dir &>/dev/null; then
-  MSG="[subteams] Advisory (not a task — surface to the user, don't act now): session ending outside a git repo, so no change detection ran. If docs were touched, the usual suspects are BACKLOG / CHANGELOG / SYSTEM (decisions journal) and any active plan — nothing to do here unless the user wants it. Standing recommendation: when the current piece of work wraps up, offer the user a doc update (decisions journal, CHANGELOG, descriptive sections) rather than starting one unprompted."
+  MSG="[subteams] Session ended outside a git repo — no change detection ran. If docs were touched, the usual places are BACKLOG / CHANGELOG / SYSTEM (decisions journal) and the active plan. If an update is warranted, ask the agent for it."
   _remind "${NOTES}${MSG}" "$USER_LINE" ""
 fi
 
@@ -229,6 +234,40 @@ CHANGED_FILES=$(printf '%s\n' "$PORCELAIN" | awk '{ print $NF }')
 # Nothing changed → silent pass
 if [ -z "$CHANGED_FILES" ]; then
   exit 0
+fi
+
+# ---- P1 per-instance scoping ----
+# hooks/post-edit-check writes every Edit/Write'd file (relpath) into a
+# per-session registry. If that registry exists and is non-empty, restrict
+# PORCELAIN/CHANGED_FILES to the intersection with git status — this session's
+# actual edits — so a reminder never blames another instance's files. Matching
+# is by porcelain's last field ($NF), the same simplistic parsing CHANGED_FILES
+# already used above (renames covered the same way, nothing new there). This
+# narrows the whole downstream classification (Case A-D, signal detection);
+# the separate doc-map freshness check further below intentionally keeps using
+# the unfiltered ALL_PORCELAIN — "did a new spec/ADR appear" isn't an
+# instance-scoped question the way "did I write undocumented code" is.
+# Bash-driven edits (git mv, sed, etc.) never reach post-edit-check and so
+# never land in the registry — accepted degradation (documented there too).
+# If the registry is empty/missing:
+#   - under multi-instance (CLAUDE_SUBTEAMS_MULTI_INSTANCE=1), stay silent —
+#     we can't tell whose changes these are, and silence beats blaming the
+#     wrong instance;
+#   - otherwise, fall through unfiltered (pre-P1 behavior).
+if [ -n "$SESSION_ID" ]; then
+  EDITS_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/session-edits/$SESSION_ID"
+  if [ -s "$EDITS_FILE" ]; then
+    PORCELAIN=$(awk -v edits="$EDITS_FILE" '
+      BEGIN { while ((getline line < edits) > 0) if (line != "") seen[line] = 1 }
+      { f = $NF; if (f in seen) print }
+    ' <<< "$PORCELAIN")
+    CHANGED_FILES=$(printf '%s\n' "$PORCELAIN" | awk '{ print $NF }')
+    if [ -z "$CHANGED_FILES" ]; then
+      exit 0
+    fi
+  elif [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ]; then
+    exit 0
+  fi
 fi
 
 # ---- Detect breaking/architectural file signals ----
@@ -322,9 +361,9 @@ fi
 # otherwise classified — including the Case A/B "silent" paths, so it's never dropped.
 if [ "$NEW_DOC_NO_MAP" -eq 1 ]; then
   NOTES="${NOTES}$(
-    printf "[subteams] Advisory (not a task — surface to the user, don't act now): new doc(s) under docs/specs|adr, but the doc map (%s) wasn't updated this session:\n" "$DOC_MAP"
+    printf "[subteams] New doc(s) under docs/specs|adr, but the doc map (%s) wasn't updated this session:\n" "$DOC_MAP"
     printf '%s\n' "$NEW_DOC_FILES" | sed 's/^/  - /'
-    printf "The index may lag the new file(s) — mention it to the user; don't update the map yourself mid-turn. Reference: claude-subteams:doc-quality-gate §2.5.\n"
+    printf "The index may lag the new file(s) — ask the agent to update the map if you want it current. Reference: claude-subteams:doc-quality-gate §2.5.\n"
   )
 "
 fi
@@ -381,9 +420,9 @@ if [ "$DOC_COUNT" -gt 0 ]; then
   # Breaking signals present AND CHANGELOG not updated → advisory, non-blocking
   if [ "$BREAKING_SIGNALS" -eq 1 ] && [ "$CHANGELOG_UPDATED" -eq 0 ]; then
     MSG=$(
-      printf "[subteams] Advisory (not a task — surface to the user, don't act now): breaking/architectural signals detected and .md files were updated, but CHANGELOG.md wasn't:\n"
+      printf "[subteams] Breaking/architectural signals detected; .md files were updated but CHANGELOG.md wasn't:\n"
       printf '%s' "$SIGNAL_FILES"
-      printf "A generic .md touch may not cover this — the breaking-change checklist (decision-context block, overwritten descriptive section, migration guide if a contract broke) is in claude-subteams:doc-quality-gate. Mention it to the user; don't run doc-agent on your own. Standing recommendation: when the current piece of work wraps up, offer the user a doc update (decisions journal, CHANGELOG, descriptive sections) rather than starting one unprompted."
+      printf "A generic .md touch may not cover this — the breaking-change checklist (decision-context block, overwritten descriptive section, migration guide if a contract broke) lives in claude-subteams:doc-quality-gate. Ask the agent to run it if you want this covered."
     )
     _remind "${NOTES}${MSG}" "$USER_LINE" "$CODE_LIST_BARE"
   fi
@@ -391,15 +430,15 @@ if [ "$DOC_COUNT" -gt 0 ]; then
   # Breaking signals present AND CHANGELOG updated → soft advisory mentioning checklist
   if [ "$BREAKING_SIGNALS" -eq 1 ] && [ "$CHANGELOG_UPDATED" -eq 1 ]; then
     MSG=$(
-      printf "[subteams] Advisory (not a task — surface to the user, don't act on it yourself): code + docs changed, CHANGELOG updated — good. Breaking/architectural signals were seen:\n"
+      printf "[subteams] Code + docs changed, CHANGELOG updated — good. Breaking/architectural signals were seen:\n"
       printf '%s' "$SIGNAL_FILES"
-      printf "If the user wants to confirm completeness, the breaking-change checklist is in claude-subteams:doc-quality-gate — point them to it rather than running it yourself. No action required now. Standing recommendation: when the current piece of work wraps up, offer the user a doc update (decisions journal, CHANGELOG, descriptive sections) rather than starting one unprompted."
+      printf "To double-check completeness, the breaking-change checklist is in claude-subteams:doc-quality-gate — ask the agent for it if needed. No action required."
     )
     _remind "${NOTES}${MSG}" "$USER_LINE" "$CODE_LIST_BARE"
   fi
 
   # Standard Case C: no breaking signals → soft advisory, no block
-  MSG="[subteams] Advisory (not a task): code + docs both changed — expected end state. If any non-trivial decision lacks a Decision-context block, the format is in claude-subteams:decision-context. Nothing to do now. Standing recommendation: when the current piece of work wraps up, offer the user a doc update (decisions journal, CHANGELOG, descriptive sections) rather than starting one unprompted."
+  MSG="[subteams] Code + docs both changed — expected end state. If any non-trivial decision lacks a Decision-context block (format: claude-subteams:decision-context), ask the agent to add one."
   _remind "${NOTES}${MSG}" "$USER_LINE" "$CODE_LIST_BARE"
 fi
 
@@ -407,20 +446,20 @@ fi
 if [ "$BREAKING_SIGNALS" -eq 1 ]; then
   # Escalated message for breaking/architectural changes
   MSG=$(
-    printf "[subteams] Advisory (not a task — surface to the user, don't act now): breaking/architectural signals detected and code changed with no .md updates.\n"
+    printf "[subteams] Breaking/architectural signals detected and code changed with no .md updates.\n"
     printf 'Signal files:\n'
     printf '%s' "$SIGNAL_FILES"
     printf 'All changed code (no docs):\n'
     printf '%s' "$CODE_LIST"
-    printf "The full breaking-change checklist (decision-context block, CHANGELOG, overwritten descriptive section, migration guide) is in claude-subteams:doc-quality-gate — don't start writing docs or run doc-agent mid-turn; raise it with the user. Standing recommendation: when the current piece of work wraps up, offer the user a doc update (decisions journal, CHANGELOG, descriptive sections) rather than starting one unprompted."
+    printf "The full breaking-change checklist (decision-context block, CHANGELOG, overwritten descriptive section, migration guide) is in claude-subteams:doc-quality-gate — ask the agent to run it when this piece of work wraps up."
   )
 else
   # Standard Case D message
   MSG=$(
-    printf "[subteams] Advisory (not a task — surface to the user, don't act now): code changed, no .md updates.\n"
+    printf "[subteams] Code changed, no .md updates.\n"
     printf 'Changed files:\n'
     printf '%s' "$CODE_LIST"
-    printf "If any of these are non-trivial, a Decision-context block (format: claude-subteams:decision-context) and an overwritten descriptive section may be worth it later; cosmetic-only changes (whitespace, typos, patch bumps) don't need docs. Nothing to do now. Standing recommendation: when the current piece of work wraps up, offer the user a doc update (decisions journal, CHANGELOG, descriptive sections) rather than starting one unprompted."
+    printf "If any of these are non-trivial, consider asking the agent for a Decision-context block (format: claude-subteams:decision-context) and a descriptive-section update; cosmetic-only changes (whitespace, typos, patch bumps) don't need docs."
   )
 fi
 

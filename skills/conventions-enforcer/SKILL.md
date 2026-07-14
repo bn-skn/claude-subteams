@@ -27,9 +27,11 @@ Use this skill on project setup, during architecture reviews, and before merging
 
 ### File Size Validation
 
-1. [ ] No file exceeds 200 lines (flag all violations with file path and line count)
-2. [ ] No function exceeds 30 lines
-3. [ ] Flag files between 150-200 lines as warnings (approaching limit)
+Size is a review signal, not a hard limit — cohesion is the primary principle (a file/function = one semantic unit; split along semantic seams, never by a line counter).
+
+1. [ ] Files past the review threshold (project's CONVENTIONS.md, default 300 lines) were checked: "still one responsibility?" — if yes, kept with a one-line justification; if no, split by meaning
+2. [ ] Functions past the threshold (default 80 lines) checked the same way
+3. [ ] No file that changes for unrelated reasons (multiple axes of change / SRP break) — that, not line count, is what marks a god-file
 
 ### Import Direction Validation
 
@@ -116,7 +118,7 @@ Reference the template at `templates/CONVENTIONS.md` for the full starting point
 ## Red Flags
 
 - Project has no CONVENTIONS.md -- generate one immediately
-- Multiple files over 200 lines -- structural debt accumulating
+- Multiple files past the size threshold AND changing for unrelated reasons -- structural debt accumulating
 - Domain importing infrastructure -- architectural violation, fix before proceeding
 - Tests in separate directory tree -- restructure to colocate
 - Inconsistent naming -- pick one convention and enforce everywhere

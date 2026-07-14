@@ -74,7 +74,7 @@ Code review is the last line of defense before code reaches production. This ski
 
 | # | Check | What to Look For |
 |---|-------|-----------------|
-| 4.1 | **Function length** | Over 50 lines? Split it. If you need to scroll to understand a function, it is too long. |
+| 4.1 | **Function length** | Past ~80 lines, check cohesion: still one semantic unit? If it mixes unrelated concerns — split along the seam; a long but cohesive function keeps a one-line justification. |
 | 4.2 | **File length** | Over 300 lines? Extract modules. One file should have one clear responsibility. |
 | 4.3 | **Naming clarity** | `data`, `info`, `result`, `temp` — these say nothing. Names must describe purpose. |
 | 4.4 | **Magic numbers** | Raw numbers in logic (`if (status === 3)`). Use named constants. |

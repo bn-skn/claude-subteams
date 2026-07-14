@@ -12,11 +12,14 @@ src/
   presentation/    # UI, CLI, controllers — depends on application only
 ```
 
-## 2. File Size Limits
+## 2. File Size — cohesion first
 
-1. Max **200 lines** per file. Split if exceeded.
-2. Max **30 lines** per function. Extract helpers if exceeded.
-3. One exported thing per file (class, function, constant, type).
+Size is a review signal, not a hard cap. A file, class, or function is one semantic unit; split along semantic seams, never by a line counter.
+
+1. Review thresholds (tune per project): **300 lines** per file, **80 lines** per function. Crossing one is a prompt to ask "is this still one responsibility?" — not an automatic violation.
+2. If it is still one responsibility, the unit lives at whatever size it needs, with one line of justification. If it is not, split along the seam between responsibilities.
+3. The god-file signal is *changing for unrelated reasons* (multiple axes of change), not line count.
+4. One exported thing per file (class, function, constant, type) — this keeps units cohesive by default.
 
 ## 3. Dependency Direction
 

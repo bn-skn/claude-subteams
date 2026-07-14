@@ -28,7 +28,7 @@
 
 - See `docs/ARCHITECTURE.md` for the full diagram and layer responsibilities.
 - Dependency direction: presentation → application → domain. Infrastructure depends on application + domain. Never the reverse.
-- Max 200 lines per file, 30 lines per function. Split if exceeded.
+- Size: cohesion first — one semantic unit per file/function. Past the review threshold (default 300 lines file / 80 function, see CONVENTIONS.md) ask "still one responsibility?" — justify in one line or split by meaning.
 
 ## Methodology
 

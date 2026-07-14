@@ -50,15 +50,57 @@ elif [ -f "go.mod" ]; then
   fi
 fi
 
-# Check staged files for >200 lines (total file size, not diff)
-LARGE_FILES=$(git diff --cached --name-only 2>/dev/null | while IFS= read -r f; do
-  if [ -f "$f" ] && printf '%s\n' "$f" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
-    LINES=$(wc -l < "$f")
-    if [ "$LINES" -gt 200 ]; then
-      echo "  $f ($LINES lines)"
+# P3.1 review gate: staged code changes require a code-reviewer subagent to
+# have run this session. hooks/subagent-rails writes the marker on
+# SubagentStart when agent_type matches code-reviewer/gpt-code-reviewer; we
+# just check it's there. Escape hatch: CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE=1.
+# Fails open (no block) when session_id can't be read from stdin — we can't
+# prove a review is missing if we can't identify the session, so we don't guess.
+# Coarse-grained by design: "did code-reviewer run at all this session", not
+# "did it review exactly these staged lines" — matches the plan's scope.
+if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ]; then
+  SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+  if [ -n "$SID" ] && printf '%s' "$SID" | grep -qE '^[A-Za-z0-9._-]+$' \
+     && [ "$SID" != "." ] && [ "$SID" != ".." ]; then
+    STAGED=$(git diff --cached --name-only 2>/dev/null)
+    NEUTRAL_RE='^(\.gitignore|\.editorconfig|\.gitattributes|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|composer\.lock)$|(^|/)\.DS_Store$'
+    HAS_CODE=0
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      printf '%s\n' "$f" | grep -qE "$NEUTRAL_RE" && continue
+      printf '%s\n' "$f" | grep -qE '\.md$' && continue
+      HAS_CODE=1
+      break
+    done <<< "$STAGED"
+
+    if [ "$HAS_CODE" -eq 1 ]; then
+      MARK_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/review-marks/$SID"
+      if [ ! -f "$MARK_FILE" ]; then
+        ERRORS="${ERRORS}${ERRORS:+\n}[subteams:pre-commit-gate] Logic changes staged, no code-reviewer run this session — run code-reviewer first, or set CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE=1 to override.\n"
+      fi
     fi
   fi
-done)
+fi
+
+# Size check (P9, cohesion doctrine — mirrors hooks/post-edit-check): when the
+# project has a CONVENTIONS.md at the repo root, size thresholds and the
+# cohesion principle live there and are enforced by review, not this hook.
+# Without CONVENTIONS.md: flag staged code files past 400 lines as a
+# review signal ("still one semantic unit?"), never as a verdict.
+# 400 vs the 300 review threshold in prose: deliberately coarser — the hook is
+# a last-resort net, review owns the 300 line; avoids mechanical noise.
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD")
+LARGE_FILES=""
+if [ ! -f "$REPO_ROOT/CONVENTIONS.md" ]; then
+  LARGE_FILES=$(git diff --cached --name-only 2>/dev/null | while IFS= read -r f; do
+    if [ -f "$f" ] && printf '%s\n' "$f" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
+      LINES=$(wc -l < "$f")
+      if [ "$LINES" -gt 400 ]; then
+        echo "  $f ($LINES lines)"
+      fi
+    fi
+  done)
+fi
 
 if [ -n "$ERRORS" ]; then
   echo -e "$ERRORS"
@@ -66,9 +108,9 @@ if [ -n "$ERRORS" ]; then
 fi
 
 if [ -n "$LARGE_FILES" ]; then
-  echo "[subteams:pre-commit-gate] Warning: these files exceed 200 lines:"
+  echo "[subteams:pre-commit-gate] Size signal — staged files past 400 lines:"
   echo "$LARGE_FILES"
-  echo "Consider splitting them for better maintainability."
+  echo "Check: is each still one semantic unit (cohesion)? If yes, keep with a one-line justification; if no, split along its actual seams."
 fi
 
 exit 0

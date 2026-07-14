@@ -65,11 +65,14 @@ To create a CONVENTIONS.md for a new project, use the template: `templates/CONVE
 
 These apply to CODE files only (not documentation, not config, not generated files).
 
-### Size Limits (defaults — override via CONVENTIONS.md)
+### Size — cohesion first (thresholds default; override via CONVENTIONS.md)
 
-1. **Maximum 200 lines per file.** Files over 200 lines are doing too much.
-2. **Maximum 30 lines per function or method.** Long functions hide complexity.
-3. If a file or function exceeds the limit — split it. No exceptions (see "When to Break the Rules" below).
+Size is a **review signal, not a hard limit.** The primary principle is **cohesion**: a file, class, or function is one semantic unit. Split along semantic seams — never by a line counter.
+
+1. **Default review thresholds: 300 lines per file, 80 lines per function.** A project sets its own in CONVENTIONS.md; those win over these defaults.
+2. **Crossing a threshold is a prompt, not a violation.** It means: stop and ask *"is this still one responsibility?"* If yes — the unit lives at whatever size it needs, with one line of justification (a comment or ADR). If no — split along the seam that separates the responsibilities.
+3. **Cut by meaning, not by count.** Slicing a cohesive 1000-line class into arbitrary fragments to satisfy a number destroys the thing the rule exists to protect. A forced split that fragments one concept is worse than the large file.
+4. **The anti-abuse test.** "Cohesion" never excuses a god-file of unrelated things. The real signal of a god-file is that it *changes for unrelated reasons* (multiple axes of change — an SRP break), not that it is long. Judge by why it changes, not by how many lines it has.
 
 ### Export Rules
 
@@ -106,15 +109,17 @@ A "god-file" is a file that has grown to do too much. These are the most dangero
 
 ### Signs a File Is a God-File
 
+The load-bearing signals are the ones about **why the file changes** — responsibilities, change frequency, coupling. Line count only *hints* at a problem; it never settles it on its own.
+
 | Signal | Threshold |
 |--------|-----------|
-| Line count | Over 200 lines |
+| Responsibilities | Handles 3+ distinct concerns (the primary signal) |
+| Change frequency | Touched by nearly every PR (changes for unrelated reasons) |
 | Import count | Imports 10+ modules |
-| Responsibilities | Handles 3+ distinct concerns |
 | Export count | Exports 3+ things |
-| Change frequency | Touched by nearly every PR |
 | Test difficulty | Tests require extensive mocking |
 | Merge conflicts | Frequently causes merge conflicts |
+| Line count | Past the review threshold — prompts a look, not a verdict |
 
 ### How to Split a God-File (Safely)
 
@@ -156,8 +161,8 @@ If CONVENTIONS.md is missing, invoke `conventions-enforcer` to generate one befo
 ### Manual Checks (Enforcement Checklist)
 
 1. [ ] CONVENTIONS.md exists and is up to date
-2. [ ] All code files are under 200 lines
-3. [ ] All functions are under 30 lines
+2. [ ] Files past the review threshold (default 300 lines / project's CONVENTIONS.md) were checked for "still one responsibility?" and either justified or split by meaning
+3. [ ] Functions past the review threshold (default 80 lines) were checked the same way
 4. [ ] Each file has exactly one export
 5. [ ] Domain imports nothing from other layers
 6. [ ] Application imports only from Domain
@@ -176,10 +181,10 @@ grep -r "from.*infrastructure\|from.*presentation\|from.*application" src/domain
 # Check application layer for forbidden imports
 grep -r "from.*infrastructure\|from.*presentation" src/application/
 
-# Find files over 200 lines
-find src/ -name "*.ts" -exec awk 'END{if(NR>200) print FILENAME": "NR" lines"}' {} \;
+# Find files past the review threshold (default 300 — flags for a look, not a verdict)
+find src/ -name "*.ts" -exec awk 'END{if(NR>300) print FILENAME": "NR" lines — check: still one responsibility?"}' {} \;
 
-# Find functions over 30 lines (approximate)
+# Find long functions to eyeball for cohesion (default threshold 80 lines, approximate)
 grep -n "function\|=>\|method" src/**/*.ts | head -50
 
 # Find files with multiple exports
@@ -242,7 +247,7 @@ Architecture violations don't happen in a single PR. They happen one import at a
 
 | Red Flag | What It Means | Action |
 |----------|---------------|--------|
-| File over 200 lines | God-file forming | Split immediately using the safe split procedure |
+| File past threshold AND changing for unrelated reasons | God-file forming | Split by responsibility using the safe split procedure. (Long but cohesive and single-purpose → not a god-file — justify and keep) |
 | Domain imports infrastructure | Architecture collapse | Extract port, inject implementation |
 | Tests in separate `test/` tree | Testing friction, stale tests | Move next to source files |
 | Multiple exports from one file | File doing too much | Split into one-export-per-file |
@@ -255,13 +260,13 @@ Architecture violations don't happen in a single PR. They happen one import at a
 
 ## When to Break the Rules
 
-Sometimes 250 lines is better than a forced abstraction that splits a cohesive concept into fragments nobody can understand. Sometimes a function needs 35 lines because splitting it creates two functions that only make sense together.
+The cohesion doctrine already builds the escape hatch into the default: a file over the threshold that is genuinely one responsibility lives, with one line of justification. This section is that same judgment, made explicit. A 400-line file that models one cohesive concept beats a forced abstraction that splits it into fragments nobody can follow; a function needs its length when splitting it creates two halves that only make sense together.
 
-**The escape hatch:**
-1. You genuinely believe breaking the rule produces BETTER code than following it.
-2. You document WHY in an Architecture Decision Record (ADR) or a comment.
-3. The violation is reviewed and approved by the architecture guard.
-4. The exception is specific — "this file" or "this function" — not "we don't follow file limits."
+**Keeping a unit past the threshold is justified when:**
+1. You genuinely believe keeping it whole produces BETTER code than splitting it.
+2. You document WHY in one line — an Architecture Decision Record (ADR) or a comment.
+3. The judgment is reviewed by the architecture guard (which scores by axis-of-change, not line count).
+4. The justification is specific — "this file, because X" — not a blanket "we don't watch size."
 
 **What is NOT a valid reason to break rules:**
 - "It's faster to write it this way" — speed of writing is not a quality metric.

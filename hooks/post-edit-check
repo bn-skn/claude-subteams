@@ -7,10 +7,20 @@ fi
 
 INPUT=$(cat)
 
+# Session id (used below for the multi-instance heartbeat and, unconditionally,
+# for the P1 per-instance edit registry). Sanitized before ever touching a
+# filename — mirrors session-end-reminder's guard.
+SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+if [ -n "$SESSION_ID" ]; then
+  if ! printf '%s' "$SESSION_ID" | grep -qE '^[A-Za-z0-9._-]+$' \
+     || [ "$SESSION_ID" = "." ] || [ "$SESSION_ID" = ".." ]; then
+    SESSION_ID=""
+  fi
+fi
+
 # Multi-instance heartbeat (opt-in): refresh this instance's liveness on each edit.
-if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ]; then
-  _hb_sid=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
-  [ -n "$_hb_sid" ] && "${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh" heartbeat --id "${_hb_sid:0:8}" \
+if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ] && [ -n "$SESSION_ID" ]; then
+  "${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh" heartbeat --id "${SESSION_ID:0:8}" \
     --worktree "$PWD" --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" >/dev/null 2>&1
 fi
 
@@ -20,17 +30,51 @@ if [ -z "$FILE_PATH" ] || [ ! -f "$FILE_PATH" ]; then
   exit 0
 fi
 
+# P1 per-instance registry: record every Edit/Write'd file (relpath from repo
+# root) for this session, so session-end-reminder can — when multiple instances
+# run in one worktree — report only on files THIS session actually touched.
+# Always written (not gated on CLAUDE_SUBTEAMS_MULTI_INSTANCE); the reader
+# decides what to do with it. Known gap: Bash-driven edits (git mv, sed, etc.)
+# never go through Edit/Write, so they never reach this hook and never land in
+# the registry — accepted degradation, see session-end-reminder for the
+# fallback behavior when the registry can't cover a change.
+if [ -n "$SESSION_ID" ]; then
+  EDITS_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/session-edits"
+  mkdir -p "$EDITS_DIR" 2>/dev/null
+  REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+  if [ -n "$REPO_ROOT" ]; then
+    case "$FILE_PATH" in
+      "$REPO_ROOT"/*) RELPATH="${FILE_PATH#"$REPO_ROOT"/}" ;;
+      *) RELPATH="$FILE_PATH" ;;
+    esac
+  else
+    RELPATH="$FILE_PATH"
+  fi
+  # Dedup on write: long sessions re-edit the same file many times.
+  grep -qxF "$RELPATH" "$EDITS_DIR/$SESSION_ID" 2>/dev/null \
+    || printf '%s\n' "$RELPATH" >> "$EDITS_DIR/$SESSION_ID" 2>/dev/null
+fi
+
 # Block edits to CLAUDE.md and SKILL.md unless explicitly requested
 BASENAME=$(basename "$FILE_PATH")
 if [ "$BASENAME" = "CLAUDE.md" ] || [ "$BASENAME" = "SKILL.md" ]; then
   echo "[subteams:post-edit-check] Warning: $BASENAME was modified. These are protected files — ensure the user explicitly requested this change."
 fi
 
-# Check file size
+# Check file size — a review signal, not a violation (P9,
+# docs/plans/2026-07-13-subteams-1.32-research.md). Cohesion is the real test:
+# one file = one semantic unit; size is just a nudge to re-check that. A project
+# with its own CONVENTIONS.md owns its thresholds and the cohesion principle
+# there, so this hook stays out of the way entirely when one is present.
+# 400 here vs the 300 review threshold in prose: deliberately coarser — the
+# hook is a last-resort net, review owns the 300 line; avoids mechanical noise.
 if printf '%s\n' "$FILE_PATH" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
-  LINES=$(wc -l < "$FILE_PATH")
-  if [ "$LINES" -gt 200 ]; then
-    echo "[subteams:post-edit-check] Warning: $FILE_PATH is $LINES lines (>200). Consider splitting into smaller modules."
+  CONVENTIONS_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD")
+  if [ ! -f "$CONVENTIONS_ROOT/CONVENTIONS.md" ]; then
+    LINES=$(wc -l < "$FILE_PATH")
+    if [ "$LINES" -gt 400 ]; then
+      echo "[subteams:post-edit-check] $FILE_PATH is $LINES lines. Check: is this still one semantic unit (cohesion), or does it need splitting along its actual seams?"
+    fi
   fi
 fi
 

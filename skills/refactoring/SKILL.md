@@ -17,8 +17,8 @@ Refactoring is restructuring existing code without changing its external behavio
 
 | Signal | Threshold | Action |
 |--------|-----------|--------|
-| **God-file** | File exceeds 200 lines | Extract classes or modules |
-| **God-function** | Function exceeds 50 lines | Extract helper functions |
+| **God-file** | Past size threshold (default 300) AND changes for unrelated reasons | Extract classes or modules along semantic seams |
+| **God-function** | Past ~80 lines AND mixes unrelated concerns | Extract helper functions |
 | **Duplication** | 3+ identical or near-identical blocks | Extract shared function (DRY threshold) |
 | **Circular deps** | Module A imports B, B imports A | Introduce interface or mediator |
 | **Shotgun surgery** | Single change touches 5+ files | Consolidate related logic |
