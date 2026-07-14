@@ -66,7 +66,7 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 
 **Model note:** All agents default to opus except doc-agent, developer, and ui-tester (sonnet). The two GPT critics (#13-14) run as sonnet harnesses that shell out to the Codex CLI (GPT) at high reasoning effort — see the `cross-review` skill for model/effort policy. See model-selection skill for override guidance. When uncertain, ALWAYS choose opus — the cost difference is trivial compared to the cost of a wrong result.
 
-**Cross-model note:** the two GPT critics are OPTIONAL — they augment the Claude critics when Codex is available (see Full Pipeline Step 6 and the `cross-review` skill). If Codex is down, the pipeline runs Claude-only and never blocks.
+**Cross-model note (operator standing preference, 15.07.2026):** when Codex is available, dispatching the GPT critics ALONGSIDE the Claude critics is the **strong default** for any Standard-or-above review — cross-model coverage is a quality floor the operator explicitly asked for, not a luxury. Skip them only when Codex is genuinely unavailable (not on PATH / not authenticated / non-zero exit — then run Claude-only and NEVER block) or the change is trivial-mechanical. See Full Pipeline Step 6 and the `cross-review` skill.
 
 **Reviewer-name rule (harness quirk):** in harnesses where spawning an agent with a custom name replaces `agent_type` with that name in the hook payload (observed in teammate mode), the review-gate detects a reviewer by substring-matching `code-reviewer` — so spawn review agents **either with no custom name, or with a name that contains `code-reviewer`**. A reviewer spawned under an unrelated custom name leaves the gate unable to see that review ran.
 
@@ -236,7 +236,7 @@ For moderate tasks (3-8 files, business logic, but single-module scope):
 2. Create feature branch (`git checkout -b feat/xxx`)
 3. Implement (you or developer agent)
 4. tsc/lint check
-5. Review: **code-reviewer** (correctness, SOLID, security) — always. For non-trivial logic (multi-file, branching, touches a contract/shared state, or any uncertainty), **also devils-advocate** in parallel — dispatch both in one message. Optionally add `gpt-code-reviewer` when Codex is available (see `claude-subteams:cross-review`)
+5. Review: **code-reviewer** (correctness, SOLID, security) — always. For non-trivial logic (multi-file, branching, touches a contract/shared state, or any uncertainty), **also devils-advocate** in parallel — dispatch both in one message. When Codex is available, **add the GPT critics by default** (operator standing preference — equal-rank reviewers, not an extra): `gpt-code-reviewer` alongside code-reviewer, and `gpt-devils-advocate` alongside devils-advocate whenever the latter is dispatched; skip only if Codex is down, and never block on it (see `claude-subteams:cross-review`)
 6. Fix critical findings
 7. Run tests
 8. Commit and merge to main

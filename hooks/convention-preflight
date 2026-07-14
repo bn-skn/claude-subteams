@@ -1,0 +1,144 @@
+#!/bin/bash
+# PreToolUse hook — narrow convention pre-flight for Edit/Write/MultiEdit.
+# Scope, deliberately narrow (docs/plans/2026-07-13-subteams-1.32-research.md,
+# P3.2), do not expand without re-checking with the operator:
+#
+# 1. Autonomy-only. This hook is a no-op in normal (interactive) mode: the
+#    same signal post-edit-check already gives (post-hoc, advisory) would be
+#    duplicated pre-hoc here as noise. It only acts when a bounded-autonomy
+#    run is active (CLAUDE_SUBTEAMS_AUTONOMY set — same env var autonomy-gate
+#    checks). Manual mode pays only the two lines below this comment block.
+# 2. One deny class: growing an already-large code file without acknowledging
+#    it. Code files (ts|js|py|go|rs|java|tsx|jsx):
+#      - Edit/MultiEdit: current on-disk size > 400 lines AND the edit's net
+#        line delta (new_string lines minus old_string lines, summed across
+#        MultiEdit's edits[]) is positive -> deny.
+#      - Write: content being written is itself > 400 lines -> deny (applies
+#        whether creating a new file or overwriting one).
+#    400 is the same coarse threshold post-edit-check and pre-commit-gate use
+#    (deliberately coarser than the 300-line review-signal threshold in prose)
+#    — one shared "grep net", not a new number to keep in sync.
+# 3. What this hook explicitly does NOT do: it does not check import
+#    direction / layering against CONVENTIONS.md — that is not decidable
+#    honestly in generic bash (needs real import resolution) and stays with
+#    architecture-guard. It also does not read CONVENTIONS.md for a
+#    project-specific size override the way post-edit-check/pre-commit-gate
+#    do — this hook is a DENY gate, not an advisory one, so silently
+#    widening its threshold from an untrusted project file is a bigger
+#    consequence than an advisory hook doing the same; out of scope for this
+#    pass. It also does not evaluate semantic correctness ("does this edit
+#    break the logic") — that's code-reviewer + tests, never a hook.
+#
+# Escape hatch: CLAUDE_SUBTEAMS_SKIP_PREFLIGHT=1 -> exit 0 unconditionally.
+#
+# Fail-open, always: missing jq, unreadable/malformed stdin JSON, a tool call
+# with no resolvable file_path, or any internal error all fall through to
+# exit 0 — same doctrine as pre-commit-gate's review gate: we cannot prove a
+# violation, so we do not guess one. Silent-fail: no diagnostics are logged
+# on the fail-open path; stdout only ever carries the deny message when we
+# DO deny.
+
+# 1: autonomy-only, checked first and cheaply — before any stdin/disk work.
+[ -n "${CLAUDE_SUBTEAMS_AUTONOMY:-}" ] || exit 0
+
+# Escape hatch, checked next (still before stdin/disk work).
+[ "${CLAUDE_SUBTEAMS_SKIP_PREFLIGHT:-0}" != "1" ] || exit 0
+
+command -v jq >/dev/null 2>&1 || exit 0
+
+INPUT=$(cat 2>/dev/null)
+[ -n "$INPUT" ] || exit 0
+
+TOOL_NAME=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
+case "$TOOL_NAME" in
+  Edit|Write|MultiEdit) ;;
+  *) exit 0 ;;
+esac
+
+FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+[ -n "$FILE_PATH" ] || exit 0
+
+# Code files only (mirrors post-edit-check's extension set).
+printf '%s\n' "$FILE_PATH" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$' || exit 0
+
+THRESHOLD=400
+
+_deny() { # message -> print it, exit 2 (blocks the tool call)
+  echo "[subteams:convention-preflight] $1 In an autonomous run, split along semantic seams or get operator sign-off (cohesion doctrine). Override: CLAUDE_SUBTEAMS_SKIP_PREFLIGHT=1."
+  exit 2
+}
+
+if [ "$TOOL_NAME" = "Write" ]; then
+  # linecount: split("\n")|length alone overcounts newline-terminated content
+  # by one (cross-model review finding) — subtract the trailing-newline slot.
+  CONTENT_LINES=$(printf '%s' "$INPUT" | jq -r '
+    (.tool_input.content // "") as $c |
+    if $c == "" then 0
+    else ($c | split("\n") | length) - (if ($c | endswith("\n")) then 1 else 0 end)
+    end
+  ' 2>/dev/null)
+  [ -n "$CONTENT_LINES" ] || exit 0
+  case "$CONTENT_LINES" in ''|*[!0-9]*) exit 0 ;; esac
+  if [ "$CONTENT_LINES" -gt "$THRESHOLD" ]; then
+    if [ -f "$FILE_PATH" ]; then
+      # Existing file: gate on GROWTH, not absolute size — a rewrite that
+      # SHRINKS a 900-line file to 450 is exactly the desired refactor and
+      # must not be denied (review finding #1).
+      EXISTING_LINES=$(wc -l < "$FILE_PATH" 2>/dev/null)
+      case "$EXISTING_LINES" in ''|*[!0-9]*) EXISTING_LINES=0 ;; esac
+      if [ "$CONTENT_LINES" -gt "$EXISTING_LINES" ]; then
+        _deny "$FILE_PATH would grow from $EXISTING_LINES to $CONTENT_LINES lines (> $THRESHOLD)."
+      fi
+    else
+      # New file: absolute deny is DELIBERATE, unlike the Edit branch. A
+      # brand-new >400-line code file materializing in ONE autonomous write
+      # is a strong god-file signal with no incremental history behind it;
+      # files that grow past 400 via small edits are covered by the delta
+      # gate and post-hoc review instead.
+      _deny "$FILE_PATH would be created as $CONTENT_LINES lines (> $THRESHOLD) in a single write."
+    fi
+  fi
+  exit 0
+fi
+
+# Edit / MultiEdit: only matters if the file already exists and is already
+# past the threshold — a small/new file growing past 400 in one edit is not
+# what this gate is for (that's a normal, expected edit).
+[ -f "$FILE_PATH" ] || exit 0
+CURRENT_LINES=$(wc -l < "$FILE_PATH" 2>/dev/null)
+case "$CURRENT_LINES" in ''|*[!0-9]*) exit 0 ;; esac
+[ "$CURRENT_LINES" -gt "$THRESHOLD" ] || exit 0
+
+# Net line delta: new_string lines minus old_string lines, summed across
+# MultiEdit's edits[] (a plain Edit is treated as a single-element list).
+# replace_all multiplies a per-occurrence delta by an occurrence count we
+# cannot know here (cross-model review finding: per-edit counting let a
+# 20-occurrence replace_all grow the file while summing to <=0) — so any
+# replace_all edit with a POSITIVE per-occurrence delta is treated as
+# unbounded growth (forces the deny check); negative/zero deltas keep their
+# single-occurrence value (undercounting shrink is allow-safe).
+DELTA=$(printf '%s' "$INPUT" | jq -r '
+  def linecount:
+    if . == "" or . == null then 0
+    else (split("\n") | length) - (if endswith("\n") then 1 else 0 end)
+    end;
+  (if .tool_name == "MultiEdit" then (.tool_input.edits // [])
+   else [.tool_input] end) as $edits |
+  [$edits[]
+   | (((.new_string // "") | linecount) - ((.old_string // "") | linecount)) as $d
+   | if (.replace_all == true) and ($d > 0) then 100000 else $d end
+  ] | add // 0
+' 2>/dev/null)
+case "$DELTA" in ''|*[!0-9-]*) exit 0 ;; esac
+# Small-growth allowance: a 3-line null-guard on a 500-line file should not
+# break an autonomous run (review finding #3, ergonomics). Deny only past
+# +15 net lines; replace_all-forced deltas (100000) always exceed it.
+ALLOWANCE=15
+if [ "$DELTA" -gt "$ALLOWANCE" ] 2>/dev/null; then
+  if [ "$DELTA" -ge 100000 ]; then
+    _deny "$FILE_PATH is $CURRENT_LINES lines and this edit grows it (replace_all with positive delta — growth unbounded by occurrence count)."
+  fi
+  _deny "$FILE_PATH is $CURRENT_LINES lines and this edit grows it (+$DELTA)."
+fi
+
+exit 0

@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.34.0] - 2026-07-15
+
+Night batch, fully autonomous under an explicit operator grant: the last enforcement item from the 1.32 plan (P3.2 convention pre-flight) plus the operator's standing cross-model preference written into the pipeline. Dual-model review as first-class process: the diff was reviewed in parallel by a Claude code-reviewer and GPT (Codex, high effort, prompt-only path) — each found real defects the other missed; all fixed and re-verified with live hook runs before this commit.
+
+### Added
+- **`convention-preflight` hook (PreToolUse, Edit|Write|MultiEdit) — deny gate for growing large code files, autonomy-only.** Interactive mode: strict no-op (post-edit-check already owns the post-hoc advisory). Under `CLAUDE_SUBTEAMS_AUTONOMY`: denies growing a >400-line code file past a +15-line allowance (small bugfixes flow, meaningful growth stops), a Write that grows an existing large file, and a brand-new >400-line file materializing in one write (deliberate asymmetry vs the edit path — no incremental history behind it; documented in the header). Shrinking rewrites always pass. `replace_all` with a positive per-occurrence delta is treated as unbounded growth (GPT review caught the bypass: per-edit counting let a 20-occurrence replace_all slip under the net). Escape hatch `CLAUDE_SUBTEAMS_SKIP_PREFLIGHT=1`; fail-open on any parse/tool error. Explicit non-goals in the header: no import-direction analysis (stays with architecture-guard), no CONVENTIONS.md threshold override (a deny gate must not take its threshold from an untrusted project file).
+
+### Changed
+- **GPT critics are now the strong default, not an option** (operator standing preference, 15.07): using-subteams cross-model note + Standard step 5 + cross-review §1.7 — when Codex is available, `gpt-code-reviewer` runs alongside code-reviewer and `gpt-devils-advocate` alongside devils-advocate as equal-rank reviewers for any Standard-or-above review; unavailability degrades to Claude-only without blocking and never becomes a quiet permanent skip. Trivial-mechanical changes stay exempt (consistent with cross-review §1.6).
+
+### Fixed
+- Line counting in the new hook: `split("\n")|length` overcounted newline-terminated content by one (GPT finding — a normal 400-line file was denied; an asymmetric trailing-newline edit produced a phantom +1 delta, Claude finding). Both branches now count identically, trailing terminator excluded.
+- Write branch originally gated absolute size, denying a 900→450-line shrinking rewrite (Claude finding) — now gates on growth for existing files.
+
 ## [1.33.0] - 2026-07-15
 
 The loop release: the audit's "enforcement over prose" line meets the operator's loop-engineering direction. An opt-in autonomous loop over the living plan, a monkey-testing mode for the ui-tester, risk-triggered plan sections, and a repo-aware review gate. Implemented by developer + prompt-engineer subagents; gated by code-reviewer (2 medium found → fixed) and prompt-evaluator (1 blocker found → resolved); the review gate itself was E2E-verified live in this release cycle (real SubagentStart payload captured, marker keyed to the parent session).

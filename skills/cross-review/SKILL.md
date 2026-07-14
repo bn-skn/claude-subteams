@@ -13,6 +13,7 @@ description: "Orchestrates parallel GPT + Claude critics to break model-monocult
 4. Breaking change (Class 4 per `doc-quality-gate` skill) — optional but recommended.
 5. New service bootstrap — first review of a net-new system.
 6. Cross-review is for meaningful reviews (the triggers above), not an automatic hook on every trivial commit — invoke it when you are actually reviewing, not on every save. This is about relevance, not rationing: when cross-review runs, run the full critic set.
+7. **Operator standing preference (15.07.2026):** when Codex is available, GPT critics run ALONGSIDE the Claude critics as the strong default for any meaningful review — equal-rank reviewers, not an optional add-on. Unavailability degrades to Claude-only without blocking; it never becomes a reason to quietly stop dispatching them when Codex is back.
 
 ## 2. Model and Effort Policy — Read This First
 

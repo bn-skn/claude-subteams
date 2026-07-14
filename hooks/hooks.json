@@ -36,6 +36,15 @@
           "async": false,
           "timeout": 15000
         }]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{
+          "type": "command",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/convention-preflight",
+          "async": false,
+          "timeout": 5000
+        }]
       }
     ],
     "SubagentStart": [
