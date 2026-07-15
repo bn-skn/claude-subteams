@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.34.2] - 2026-07-15
+
+### Fixed
+- **The doc-discipline Stop reminder was invisible in practice** — live multi-instance testing proved the hook fired correctly (changeset markers written, valid JSON emitted) but the CLI does not render Stop-hook `systemMessage` at all (the official hooks docs list only `additionalContext` for Stop). P8 rule 1's systemMessage-only delivery therefore silenced the reminder for everyone. **Superseded by explicit operator confirmation (15.07.2026, quoted in the hook):** delivery is now channel-configurable via `CLAUDE_SUBTEAMS_DOC_REMIND_CHANNEL=system|context|both` (default `both`, the 1.29-proven JSON shape). The model-visible `additionalContext` carries a mandatory anti-swallow header (P8 rule 3): repeat your pending answer/question verbatim first, relay the advisory in one line, start no work because of it. P1 per-instance scoping, cooldown, and once-per-changeset gating unchanged. Reviewed: APPROVE (quoting, fallback escaping vs hostile input, marker-gate integrity, header imperativeness all verified).
+
 ## [1.34.1] - 2026-07-15
 
 ### Changed

@@ -5,17 +5,16 @@
 # assistant turn), not end-of-session — the filename is kept for hooks.json
 # wiring stability but the semantics below are per-turn.
 #
-# Delivery: systemMessage-only, advisory-only (P8,
-# docs/plans/2026-07-13-subteams-1.32-research.md). On Stop the only decision
-# value that exists is "block" — we never emit a decision field, so nothing
-# here ever blocks or coerces the model. Stop also supports
-# hookSpecificOutput.additionalContext (text injected into the MODEL's
-# context), but this hook never uses it: additionalContext on Stop risks
-# either "eating" a final answer the model already wrote (the model responds
-# to the hook instead of to the human) or nudging the model into unrequested
-# work. Every reminder here is for the human operator to act on or ignore, so
-# it goes out on the systemMessage channel only, which the model never sees:
-#   {"systemMessage":"<full advisory text>"}
+# Delivery: channel-configurable hybrid, advisory-only (P8 rule 1 superseded
+# by explicit operator confirmation 15.07.2026 — see CHANNEL below; the CLI
+# does not render Stop systemMessage, so systemMessage-only was invisible).
+# On Stop the only decision value that exists is "block" — we never emit a
+# decision field, so nothing here ever blocks or coerces the model. The
+# model-visible additionalContext carries a mandatory anti-swallow header
+# (CTX_HEADER) so the model repeats its pending answer/question verbatim and
+# relays the advisory in one line instead of responding to the hook:
+#   {"systemMessage":"<advisory>",
+#    "hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"<header+advisory>"}}
 # then exit 0. All reminder paths funnel through the _remind() helper below,
 # which emits this JSON (jq when available, hand-escaped fallback otherwise),
 # writes the changeset marker (see below), and exits 0.
@@ -140,6 +139,23 @@ find "${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/session-edits" -type f -mt
 # the case-specific advisory body (see _remind).
 USER_LINE="[subteams] Doc-discipline advisory (re-fires only for new undocumented files after a cooldown). Silence: CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1"
 
+# Delivery channel (explicit operator confirmation 15.07.2026: "верни
+# additionalContext в Stop-хук напоминалки с анти-swallow шапкой, канал по
+# умолчанию both" — supersedes P8 rule 1's systemMessage-only delivery).
+# Live multi-instance test showed the CLI does not render Stop-hook
+# systemMessage at all (official hooks docs list only additionalContext for
+# Stop), so an operator-only advisory was invisible in practice. Context
+# delivery returns, guarded by the mandatory anti-swallow header below
+# (P8 rule 3) — the model relays the advisory instead of the hook silently
+# overwriting the model's final answer.
+#   system  — systemMessage only (invisible on current CLI; future-proof)
+#   context — additionalContext only (model-visible, relayed)
+#   both    — DEFAULT: both keys in one JSON object (1.29-proven shape)
+CHANNEL="${CLAUDE_SUBTEAMS_DOC_REMIND_CHANNEL:-both}"
+case "$CHANNEL" in system|context|both) ;; *) CHANNEL=both ;; esac
+
+CTX_HEADER="[subteams] Automated end-of-turn advisory — NOT a user message. Rules: (1) if you were awaiting the user's confirmation, keep waiting and repeat your pending question verbatim; (2) if your final answer was already written, repeat it verbatim as the first block of your next message; (3) relay this advisory to the user in ONE short line at the end of that message; (4) do NOT start any work because of this reminder."
+
 # True (0) if MARKER_FILE is younger than COOLDOWN minutes — i.e. the re-fire
 # cooldown has NOT elapsed yet, so the caller must stay silent regardless of
 # whether new code files showed up. Missing `find` degrades this to "always
@@ -167,7 +183,7 @@ _has_new_file() {
 # strips control chars [\001-\037] (not just backslash/quote) and turns embedded
 # newlines into literal \n so a hostile file path/message can never break the JSON.
 _remind() { # advisory user_line code_bare -> prints systemMessage-only JSON, writes marker, exits 0
-  local advisory="$1" userline="$2" code_bare="${3:-}" full out esc_full
+  local advisory="$1" userline="$2" code_bare="${3:-}" full out esc_full esc_ctx
 
   # Once-per-changeset gate (see header): only applies when a marker file
   # already exists for this session. First-ever fire in a session, and the
@@ -185,8 +201,16 @@ _remind() { # advisory user_line code_bare -> prints systemMessage-only JSON, wr
 
 ${advisory}"
 
+  local ctx_full="${CTX_HEADER}
+
+${full}"
+
   if [ "$HAVE_JQ" -eq 1 ]; then
-    out=$(jq -nc --arg msg "$full" '{systemMessage:$msg}' 2>/dev/null)
+    case "$CHANNEL" in
+      system)  out=$(jq -nc --arg msg "$full" '{systemMessage:$msg}' 2>/dev/null) ;;
+      context) out=$(jq -nc --arg ctx "$ctx_full" '{hookSpecificOutput:{hookEventName:"Stop", additionalContext:$ctx}}' 2>/dev/null) ;;
+      *)       out=$(jq -nc --arg msg "$full" --arg ctx "$ctx_full" '{systemMessage:$msg, hookSpecificOutput:{hookEventName:"Stop", additionalContext:$ctx}}' 2>/dev/null) ;;
+    esac
     if [ -n "$out" ]; then
       printf '%s\n' "$out"
       _mark_session "$code_bare"
@@ -195,7 +219,13 @@ ${advisory}"
   fi
   esc_full=$(printf '%s' "$full" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
   esc_full="${esc_full%\\n}"
-  printf '{"systemMessage":"%s"}\n' "$esc_full"
+  esc_ctx=$(printf '%s' "$ctx_full" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }')
+  esc_ctx="${esc_ctx%\\n}"
+  case "$CHANNEL" in
+    system)  printf '{"systemMessage":"%s"}\n' "$esc_full" ;;
+    context) printf '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"%s"}}\n' "$esc_ctx" ;;
+    *)       printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"%s"}}\n' "$esc_full" "$esc_ctx" ;;
+  esac
   _mark_session "$code_bare"
   exit 0
 }
