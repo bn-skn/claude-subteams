@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "claude-subteams",
-      "version": "1.34.3",
+      "version": "1.34.4",
       "source": "./",
       "description": "Orchestrator + 16 specialized sub-team agents with quality pipeline and SDLC hooks",
       "category": "development"

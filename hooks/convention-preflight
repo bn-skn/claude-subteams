@@ -28,6 +28,15 @@
 #    consequence than an advisory hook doing the same; out of scope for this
 #    pass. It also does not evaluate semantic correctness ("does this edit
 #    break the logic") — that's code-reviewer + tests, never a hook.
+# 4. How this coexists with the cohesion doctrine (P9): NO conflict by
+#    design, it is a hierarchy. Interactive mode: cohesion is judged by
+#    review — a large-but-cohesive file grows freely with a one-line
+#    justification; this hook stays silent. Autonomous mode: nobody is
+#    present to judge cohesion, so a hard fuse applies and "justification"
+#    means ESCALATING to the operator (the deny message says so) — which is
+#    the cohesion doctrine's own escape hatch, executed via a human instead
+#    of a hunch. Do not "fix" this by teaching the hook to accept comments
+#    as justification: a self-written comment is not operator sign-off.
 #
 # Escape hatch: CLAUDE_SUBTEAMS_SKIP_PREFLIGHT=1 -> exit 0 unconditionally.
 #
@@ -130,10 +139,11 @@ DELTA=$(printf '%s' "$INPUT" | jq -r '
   ] | add // 0
 ' 2>/dev/null)
 case "$DELTA" in ''|*[!0-9-]*) exit 0 ;; esac
-# Small-growth allowance: a 3-line null-guard on a 500-line file should not
-# break an autonomous run (review finding #3, ergonomics). Deny only past
-# +15 net lines; replace_all-forced deltas (100000) always exceed it.
-ALLOWANCE=15
+# Small-growth allowance: a modest fix on a large file should not break an
+# autonomous run (review finding #3, ergonomics). Deny only past +40 net
+# lines (operator calibration 15.07: raised from the initial +15 after the
+# first live run); replace_all-forced deltas (100000) always exceed it.
+ALLOWANCE=40
 if [ "$DELTA" -gt "$ALLOWANCE" ] 2>/dev/null; then
   if [ "$DELTA" -ge 100000 ]; then
     _deny "$FILE_PATH is $CURRENT_LINES lines and this edit grows it (replace_all with positive delta — growth unbounded by occurrence count)."

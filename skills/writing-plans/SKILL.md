@@ -173,6 +173,8 @@ When in doubt **about the trigger itself** — is this feature user-facing? does
 
 After writing the complete plan, look at the spec with fresh eyes and check the plan against it. This is a checklist you run yourself — not a subagent dispatch.
 
+- [ ] Risk-triggered sections present where their trigger fired: user-facing → `## User Stories` (each story has its acceptance line), schema change → `## Data Design`, new/changed public API → `## Interface Contract`. And absent where no trigger fired — empty stubs are worse than nothing.
+
 1. **Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
 2. **Placeholder scan:** Search your plan for red flags — any of the patterns from the "No Placeholders" section above. Fix them.
 3. **Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.

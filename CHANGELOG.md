@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.34.4] - 2026-07-15
+
+### Changed
+- **Preflight growth allowance +15 → +40** (operator calibration after the first live autonomous run): a modest legit edit to a large file flows, generated-monster growth still stops; `replace_all` positive deltas still always deny.
+- **Preflight × cohesion doctrine reconciled explicitly** (hook header pt. 4 + clean-architecture cross-ref): no conflict, a hierarchy — interactive mode judges cohesion via review (hook silent), autonomous mode applies the hard fuse and routes "justification" through operator escalation; a self-written comment or ADR is not operator sign-off, and the hook must never be taught to accept one.
+- **Risk-triggered plan sections wired through the project lifecycle** so they get filled and stay fresh instead of existing as an option: `brainstorming` captures User Stories / Data Design / Interface Contract at spec time (same triggers), `writing-plans` Self-Review checks presence-where-fired AND absence-where-not, `living-plan` Update refreshes the matching section when a closing task changed behavior/schema/API ("a stale story misleads the ui-tester that reads it as scenarios"). Anti-ceremony guards preserved and reinforced; prompt-evaluator PASS on all three checks incl. both smoke directions.
+
 ## [1.34.3] - 2026-07-15
 
 ### Fixed

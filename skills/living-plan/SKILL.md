@@ -42,7 +42,7 @@ Status tokens (use exactly these): `DONE`, `WIP`, `TODO`, `BLOCKED`, written as 
 2. **Write-once acceptance criteria:** once the operator approves the plan, the **original acceptance criteria are immutable** — never rewrite them. Any change lands ONLY as an appended line:
    `REVISED: <what changed> — <why> — "<operator-ack quote>"`
    The operator-ack quote (a verbatim snippet of the operator's approving message) is **REQUIRED** whenever scope or acceptance changes; a `REVISED:` line that alters scope/acceptance without it fails `check-plan.sh`. This is the anti-goalpost-drift anchor: "am I on scope?" is always answered against the original criteria + explicit `REVISED:` lines, never a silently edited doc.
-3. **Update** (during `executing-plans`, as each task closes): flip the matching criterion's status token and checkbox; recompute the affected package's Rollup row.
+3. **Update** (during `executing-plans`, as each task closes): flip the matching criterion's status token and checkbox; recompute the affected package's Rollup row. If the closing task changed user-visible behavior, the schema, or a public API — update the plan's `## User Stories` / `## Data Design` / `## Interface Contract` section in the same pass (a stale story misleads the ui-tester that reads it as scenarios; sections nobody updates are ceremony, which is exactly what they must not be).
 4. **Refresh** (doc-freshness): a change that closes a tracked package/backlog item must also update the matching plan-of-record criterion — keeping the plan in lockstep with `INDEX.md` / `CHANGELOG.md` / `BACKLOG.md`. The `session-end-reminder` hook reminds when the plan lags.
 5. **Close**: when all packages are accepted, move the file `active/ → completed/` (existing convention).
 

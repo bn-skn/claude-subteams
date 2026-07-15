@@ -67,7 +67,7 @@ These apply to CODE files only (not documentation, not config, not generated fil
 
 ### Size — cohesion first (thresholds default; override via CONVENTIONS.md)
 
-Size is a **review signal, not a hard limit.** The primary principle is **cohesion**: a file, class, or function is one semantic unit. Split along semantic seams — never by a line counter.
+Size is a **review signal, not a hard limit.** (Exception — autonomous runs: the `convention-preflight` hook applies a hard growth fuse there, because no reviewer is present mid-run to judge cohesion; the justified-large-file path then goes through operator escalation, not a self-written comment or ADR.) The primary principle is **cohesion**: a file, class, or function is one semantic unit. Split along semantic seams — never by a line counter.
 
 1. **Default review thresholds: 300 lines per file, 80 lines per function.** A project sets its own in CONVENTIONS.md; those win over these defaults.
 2. **Crossing a threshold is a prompt, not a violation.** It means: stop and ask *"is this still one responsibility?"* If yes — the unit lives at whatever size it needs, with one line of justification (a comment or ADR). If no — split along the seam that separates the responsibilities.
