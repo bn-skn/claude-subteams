@@ -10,13 +10,17 @@ fi
 INPUT=$(cat)
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
-# Only act on commands containing git commit (skip echo/printf/comments).
-# Allows an intervening `-C <path>` so `git -C /other/repo commit` isn't
-# missed — the review gate below needs to see these to resolve TARGET_DIR.
-if ! printf '%s\n' "$COMMAND" | grep -qE '\bgit\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
-  exit 0
-fi
-if printf '%s\n' "$COMMAND" | grep -qE '^\s*(echo|printf|#)'; then
+# Only act when a git commit appears at a STATEMENT's command position —
+# split on && / ; / | and anchor the match, so `echo "then git commit"`
+# (the literal text inside another command) never trips the gate (backlog F4).
+# `-C <path>` (quoted or bare) between git and commit is allowed; leading
+# VAR=value env assignments before git are tolerated (review finding: the
+# bare anchor let `GIT_EDITOR=true git commit` slip the gate). Statement
+# splitting is the same heuristic used for TARGET_DIR below: quoted &&/;/|
+# inside strings can mis-split, which fails toward running the gate (never
+# toward skipping a real commit).
+if ! printf '%s\n' "$COMMAND" | sed -E 's/&&|;|\|/\n/g' \
+   | grep -qE '^\s*([A-Za-z_][A-Za-z0-9_]*=(\S*|"[^"]*"|'"'"'[^'"'"']*'"'"')\s+)*git\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
   exit 0
 fi
 
@@ -82,7 +86,7 @@ while IFS= read -r STMT; do
   if printf '%s\n' "$STMT" | grep -qE '^\s*cd\s+\S'; then
     LAST_CD=$(_arg_after "$STMT" '^\s*cd\s+')
   fi
-  if printf '%s\n' "$STMT" | grep -qE '\bgit\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
+  if printf '%s\n' "$STMT" | grep -qE '^\s*([A-Za-z_][A-Za-z0-9_]*=(\S*|"[^"]*"|'"'"'[^'"'"']*'"'"')\s+)*git\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
     COMMIT_STMT="$STMT"
     break
   fi

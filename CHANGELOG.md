@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.34.3] - 2026-07-15
+
+### Fixed
+- **Backlog F4 closed: `git commit` as literal text no longer trips the gate.** The top-level filter previously substring-matched the whole command, so `make build && echo "then git commit"` false-blocked when unreviewed code was staged. Now the command is split on `&&`/`;`/`|` and the match is anchored to a statement's command position — with tolerance for leading `VAR=value` env assignments (review caught the bare anchor letting `GIT_EDITOR=true git commit` slip the gate the 1.32/1.33 releases deliberately hardened). Bonus fix: the old echo-start exclusion also wrongly skipped `echo foo && git commit` (a REAL commit); the anchor catches it now. Known-low-realism remainders (documented, not chased): `\git` / `command git` / bare-subshell `(git commit)` skip; a quoted `| git commit` inside a string can still false-trigger — fails toward running the gate, never toward missing a commit.
+
 ## [1.34.2] - 2026-07-15
 
 ### Fixed
