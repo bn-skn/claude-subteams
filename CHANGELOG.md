@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.34.1] - 2026-07-15
+
+### Changed
+- **Review gate docs-class widened** (operator request): `.txt`, `.csv`, `.rst`, `.adoc` now skip the review gate alongside `.md` — prose/data text is not code. Deliberately still gated: `.html` (site code, operator decision), `.yaml`/`.json` (behavior-bearing configs), and — micro-review finding — `requirements*/constraints*.txt` (dependency manifests wearing a .txt extension stay gated; a blanket .txt skip would have opened a supply-chain-class bypass the surrounding comment itself warns about).
+
 ## [1.34.0] - 2026-07-15
 
 Night batch, fully autonomous under an explicit operator grant: the last enforcement item from the 1.32 plan (P3.2 convention pre-flight) plus the operator's standing cross-model preference written into the pipeline. Dual-model review as first-class process: the diff was reviewed in parallel by a Claude code-reviewer and GPT (Codex, high effort, prompt-only path) — each found real defects the other missed; all fixed and re-verified with live hook runs before this commit.

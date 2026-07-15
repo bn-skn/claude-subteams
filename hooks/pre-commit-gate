@@ -132,7 +132,16 @@ if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ]; then
     while IFS= read -r f; do
       [ -z "$f" ] && continue
       printf '%s\n' "$f" | grep -qE "$NEUTRAL_RE" && continue
-      printf '%s\n' "$f" | grep -qE '\.md$' && continue
+      # Docs-class: prose/data text formats skip the review gate (.md always;
+      # .txt/.csv/.rst/.adoc added 15.07, operator decision). Deliberately NOT
+      # here: .html (site code), .yaml/.json (behavior-bearing configs — CI
+      # workflows, manifests — their edits are exactly what review exists for).
+      # Exception inside .txt (review finding): requirements/constraints .txt
+      # are dependency MANIFESTS, not prose — they stay gated.
+      if printf '%s\n' "$f" | grep -qE '\.(md|txt|csv|rst|adoc)$' \
+         && ! printf '%s\n' "$f" | grep -qiE '(^|/)[^/]*(requirements|constraints)[^/]*\.txt$'; then
+        continue
+      fi
       HAS_CODE=1
       break
     done <<< "$STAGED"
