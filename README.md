@@ -137,7 +137,7 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 
 ## Skills
 
-All 55 skills (auto-loaded on demand by description match; `using-subteams` loads at session start):
+All 57 skills (auto-loaded on demand by description match; `using-subteams` loads at session start):
 
 | Sub-team | Skill | Description |
 |---|---|---|
@@ -145,6 +145,8 @@ All 55 skills (auto-loaded on demand by description match; `using-subteams` load
 | core | `orchestrator-briefing` | Subagent communication protocol. Use before every Agent tool call. Now includes a mandatory `Rails:` briefing field (conventions/architecture docs + active plan) and a `Rails read:` output-contract line. |
 | core | `model-selection` | Guide for choosing sonnet vs opus per task type. |
 | core | `context-management` | Managing the context window, checkpoints, and session summaries. |
+| core | `lazy-implementation` | Vendored ponytail core (MIT): the 7-rung YAGNI ladder — the laziest solution that actually works; security/trust-boundary never trimmed. Also embedded in the developer agent. |
+| core | `autonomous-loop` | In-session plan loop, strictly opt-in: explicit operator request + fresh autonomy run record. Item → pipeline (review floor holds) → mechanical checkpoint → next; any operator message is the kill-switch. |
 | agents | `agent-engineering` | Design multi-agent systems: orchestrator + specialists, context engineering, token efficiency, standardized contracts. |
 | agents | `subagent-prompt-design` | Design subagent prompts: minimal context, restricted tools, standardized output, explicit handoff. |
 | planning | `brainstorming` | Explores intent and requirements before any implementation. For greenfield/structural work, captures decisions as ADRs and projects them into `ARCHITECTURE.md`/`CONVENTIONS.md` (gated by `check-arch-docs.sh`). |
