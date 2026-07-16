@@ -31,11 +31,13 @@ Write this schema to a temp file before invoking Codex:
 ```json
 {
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "challenges": {
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "severity": { "type": "string", "enum": ["blocking", "significant", "worth-considering"] },
           "target": { "type": "string", "description": "What assumption or design element is being challenged" },
@@ -51,6 +53,7 @@ Write this schema to a temp file before invoking Codex:
       "description": "Any material architectural concern not fitting the priority dimensions above",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "severity": { "type": "string", "enum": ["blocking", "significant", "worth-considering"] },
           "target": { "type": "string" },
@@ -58,13 +61,13 @@ Write this schema to a temp file before invoking Codex:
           "alternative_framing": { "type": "string" },
           "why_claude_might_accept_this": { "type": "string" }
         },
-        "required": ["severity", "target", "challenge", "why_claude_might_accept_this"]
+        "required": ["severity", "target", "challenge", "alternative_framing", "why_claude_might_accept_this"]
       }
     },
     "what_looks_solid": { "type": "string" },
     "summary": { "type": "string" }
   },
-  "required": ["challenges", "other_findings", "summary"]
+  "required": ["challenges", "other_findings", "what_looks_solid", "summary"]
 }
 ```
 
@@ -74,7 +77,7 @@ Write this schema to a temp file before invoking Codex:
 # Write schema to temp file
 SCHEMA_FILE=$(mktemp /tmp/gpt-advocate-schema-XXXXXX.json)
 cat > "$SCHEMA_FILE" << 'SCHEMA'
-{"type":"object","properties":{"challenges":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["blocking","significant","worth-considering"]},"target":{"type":"string"},"challenge":{"type":"string"},"alternative_framing":{"type":"string"},"why_claude_might_accept_this":{"type":"string"}},"required":["severity","target","challenge","alternative_framing","why_claude_might_accept_this"]}},"other_findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["blocking","significant","worth-considering"]},"target":{"type":"string"},"challenge":{"type":"string"},"alternative_framing":{"type":"string"},"why_claude_might_accept_this":{"type":"string"}},"required":["severity","target","challenge","why_claude_might_accept_this"]}},"what_looks_solid":{"type":"string"},"summary":{"type":"string"}},"required":["challenges","other_findings","summary"]}
+{"type":"object","additionalProperties":false,"properties":{"challenges":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"severity":{"type":"string","enum":["blocking","significant","worth-considering"]},"target":{"type":"string"},"challenge":{"type":"string"},"alternative_framing":{"type":"string"},"why_claude_might_accept_this":{"type":"string"}},"required":["severity","target","challenge","alternative_framing","why_claude_might_accept_this"]}},"other_findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"severity":{"type":"string","enum":["blocking","significant","worth-considering"]},"target":{"type":"string"},"challenge":{"type":"string"},"alternative_framing":{"type":"string"},"why_claude_might_accept_this":{"type":"string"}},"required":["severity","target","challenge","alternative_framing","why_claude_might_accept_this"]}},"what_looks_solid":{"type":"string"},"summary":{"type":"string"}},"required":["challenges","other_findings","what_looks_solid","summary"]}
 SCHEMA
 
 OUTPUT_FILE=$(mktemp /tmp/gpt-advocate-out-XXXXXX.json)

@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.34.5] - 2026-07-16
+
+### Fixed
+- **Cross-model reviewers (`gpt-code-reviewer`, `gpt-devils-advocate`) failed on every run after a Codex upgrade.** Codex 0.144.5 enforces OpenAI structured-outputs STRICT mode on `--output-schema`, which the shipped schemas violated on two counts: (1) every object needs `"additionalProperties": false`, and (2) `required` must enumerate **every** declared property (nullable fields use a `["type","null"]` union but must still be listed). The old schemas omitted both, so Codex returned HTTP 400 `invalid_json_schema` and the agents degraded to "cross-review-unavailable" on every invocation. Both the pretty-printed doc schema and the compact heredoc schema in each agent are corrected and re-verified against live Codex (rc=0, valid JSON out). Schema-conformance only — no change to review logic. The degradation contract (announce loudly, exit 0, Claude-only review continues) is unchanged and stays correct.
+
 ## [1.34.4] - 2026-07-15
 
 ### Changed

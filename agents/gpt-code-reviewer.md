@@ -31,11 +31,13 @@ Write this schema to a temp file before invoking Codex:
 ```json
 {
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "findings": {
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
           "file": { "type": "string" },
@@ -43,7 +45,7 @@ Write this schema to a temp file before invoking Codex:
           "issue": { "type": "string" },
           "why_claude_might_miss": { "type": "string" }
         },
-        "required": ["severity", "file", "issue", "why_claude_might_miss"]
+        "required": ["severity", "file", "line", "issue", "why_claude_might_miss"]
       }
     },
     "other_findings": {
@@ -51,6 +53,7 @@ Write this schema to a temp file before invoking Codex:
       "description": "Any material issue not fitting the priority categories above",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
           "file": { "type": "string" },
@@ -58,7 +61,7 @@ Write this schema to a temp file before invoking Codex:
           "issue": { "type": "string" },
           "why_claude_might_miss": { "type": "string" }
         },
-        "required": ["severity", "file", "issue", "why_claude_might_miss"]
+        "required": ["severity", "file", "line", "issue", "why_claude_might_miss"]
       }
     },
     "summary": { "type": "string" }
@@ -73,7 +76,7 @@ Write this schema to a temp file before invoking Codex:
 # Write schema to temp file
 SCHEMA_FILE=$(mktemp /tmp/gpt-review-schema-XXXXXX.json)
 cat > "$SCHEMA_FILE" << 'SCHEMA'
-{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","high","medium","low"]},"file":{"type":"string"},"line":{"type":["integer","null"]},"issue":{"type":"string"},"why_claude_might_miss":{"type":"string"}},"required":["severity","file","issue","why_claude_might_miss"]}},"other_findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","high","medium","low"]},"file":{"type":"string"},"line":{"type":["integer","null"]},"issue":{"type":"string"},"why_claude_might_miss":{"type":"string"}},"required":["severity","file","issue","why_claude_might_miss"]}},"summary":{"type":"string"}},"required":["findings","other_findings","summary"]}
+{"type":"object","additionalProperties":false,"properties":{"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"severity":{"type":"string","enum":["critical","high","medium","low"]},"file":{"type":"string"},"line":{"type":["integer","null"]},"issue":{"type":"string"},"why_claude_might_miss":{"type":"string"}},"required":["severity","file","line","issue","why_claude_might_miss"]}},"other_findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"severity":{"type":"string","enum":["critical","high","medium","low"]},"file":{"type":"string"},"line":{"type":["integer","null"]},"issue":{"type":"string"},"why_claude_might_miss":{"type":"string"}},"required":["severity","file","line","issue","why_claude_might_miss"]}},"summary":{"type":"string"}},"required":["findings","other_findings","summary"]}
 SCHEMA
 
 OUTPUT_FILE=$(mktemp /tmp/gpt-review-out-XXXXXX.json)
