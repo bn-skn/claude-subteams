@@ -130,6 +130,19 @@ if [ "$RC" -ne 0 ]; then
   exit 0
 fi
 
+# codex exited 0 but may have died mid-generation - validate the structured output before trusting it.
+# Empty or non-JSON output = the run fell over silently; report loudly, never mislabel as findings.
+if [ ! -s "$OUTPUT_FILE" ] || ! node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$OUTPUT_FILE" 2>/dev/null; then
+  echo "Status: cross-review-unavailable"
+  echo ""
+  echo "### Notes"
+  echo "- Reason: codex exited 0 but produced empty or invalid output (likely died mid-generation)"
+  echo "- Cross-review skipped. Claude devils-advocate findings stand alone."
+  echo "- The main pipeline is not blocked by this."
+  rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
+  exit 0
+fi
+
 cat "$OUTPUT_FILE"
 rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 ```

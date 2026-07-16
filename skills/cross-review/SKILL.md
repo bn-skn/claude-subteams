@@ -161,7 +161,7 @@ rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 
 ## 6. Fallback and Reliability
 
-1. If `codex` is not on PATH, not authenticated, or exits non-zero: skip GPT critics, log the reason, run Claude critics only. NEVER block the main pipeline — Claude critics are always sufficient to proceed.
+1. If `codex` is not on PATH, not authenticated, exits non-zero, OR exits zero but returns empty/invalid output (died mid-generation): skip GPT critics, log the reason, run Claude critics only. The agents validate the structured output after a zero exit and downgrade to `cross-review-unavailable` when it is empty or non-JSON — a mid-run collapse is reported loudly, never mislabeled as findings. NEVER block the main pipeline — Claude critics are always sufficient to proceed.
 2. Do NOT auto-retry a failed Codex call — a non-zero exit means skip and report, not loop on the same call.
 3. For awareness, not as a limit: ChatGPT Plus uses a 5-hour shared bucket across CLI and web. Run the full critic set whenever cross-review fires — do not ration GPT calls. If the human reports ChatGPT being throttled, pause Codex calls and notify; that is a reaction to a real signal, never a pre-emptive cap.
 

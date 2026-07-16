@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.34.6] - 2026-07-16
+
+### Fixed
+- **Mid-run Codex collapse could be silently mislabeled as findings.** The GPT critics keyed availability solely on the `codex exec` exit code. If Codex exited zero but wrote an empty or truncated output file (died mid-generation — network drop, auth expiry mid-call, model error after the process had already started), the agent `cat`-ed the empty file and presented it under `Status: findings-returned`, hiding the collapse. Both `gpt-code-reviewer` (two invocation blocks) and `gpt-devils-advocate` now validate the structured output after a zero exit: empty or non-JSON output downgrades to `Status: cross-review-unavailable` with reason "codex exited 0 but produced empty or invalid output (likely died mid-generation)". A mid-run failure is now reported loudly and never mislabeled. `cross-review` skill §6 documents the broadened availability contract. Degradation stays non-blocking (exit 0, Claude-only review continues) — unchanged.
+
 ## [1.34.5] - 2026-07-16
 
 ### Fixed
