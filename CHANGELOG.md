@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.37.0] - 2026-07-21
+
+### Added
+- **New agent #19: `gemini-design-critic`** — optional cross-model DESIGN lane: structured Gemini critique of RENDERED visuals (screenshots at breakpoints, image renders, PDF-preview captures, poster/cover art) with severity-graded findings across hierarchy / typography / spacing / color-contrast / artifacts / responsive integrity / taste. Complements `design-critic` (which reviews code and spec) by judging the pixels users actually see, from a non-Claude aesthetic distribution — taste disagreements between families are the signal. Same proven harness shape as `gemini-code-reviewer`: pinned "Gemini 3.1 Pro (High)" (env `GEMINI_DESIGN_CRITIC_MODEL`), single agy call with `read_file`-only mandate and all images in one call (cross-screen consistency), JSON validation with single-fence tolerance, mandatory model log-verification with DEGRADED marking, graceful `gemini-design-unavailable` + mandatory degradation relay. Aesthetic findings are explicitly framed as attributed judgment; artifact-class findings (clipping, overflow, contrast) as checkable defects.
+- `design-qa` §6.5 upgraded from a single ad-hoc option to a two-tool lane: `gemini-design-critic` for structured QA on client-facing/public artifacts, `gemini-analyst` for quick one-question looks. Opt-in doctrine unchanged.
+
+### Changed
+- `using-subteams`: roster #19, model note now covers Gemini agents #17-19.
+- `README.md`: roster table + claudemd-snippet agent list carry all three Gemini agents.
+
+### Deferred by design
+- A Gemini design GENERATOR (competing drafts in web-design-pipeline) is deliberately NOT an agent yet: through headless agy Gemini emits text (HTML/CSS/specs) only, and its generative design quality is unproven here. Next step is a live judge-panel experiment on a real design task; formalize only if it earns it.
+
 ## [1.36.0] - 2026-07-21
 
 ### Added

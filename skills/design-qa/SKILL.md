@@ -69,11 +69,14 @@ Run each heuristic against the implementation:
 4. Flag visual regressions: layout shifts, missing elements, broken styling.
 5. Save screenshots for future regression comparisons.
 
-## 6.5 Cross-Model Visual Second Opinion (optional)
+## 6.5 Cross-Model Visual Lane (optional)
 
-1. When screenshots or rendered images exist (Section 6, or any rendered artifact — poster, PDF preview, cover), you MAY additionally dispatch `gemini-analyst` for an independent non-Claude visual pass: brief it with the absolute screenshot paths and the concrete design questions (hierarchy, alignment, overflow, contrast, "what looks off").
-2. This is opt-in, same doctrine as the GPT critics in `cross-review`: the user asked for a cross-model design check, or the artifact is public/client-facing and the orchestrator judges a second pair of eyes worth it. Not a default step.
-3. Gemini's visual verdict is ATTRIBUTED, additive to design-critic — never a replacement. If `agy` is unavailable, the agent reports "gemini-unavailable"; design-critic's review stands alone, the degradation is stated in the summary, and the pipeline is never blocked.
+1. When screenshots or rendered images exist (Section 6, or any rendered artifact — poster, PDF preview, cover), you MAY additionally dispatch the cross-model design lane. Two tools, by weight:
+   - **`gemini-design-critic`** — the structured lane: full visual critique with severity-graded findings (hierarchy, typography, spacing, color/contrast, artifacts, responsive integrity, taste), "Gemini 3.1 Pro (High)" by default. Use for real design QA on client-facing/public artifacts.
+   - **`gemini-analyst`** — the quick look: one ad-hoc visual question ("what looks off here?") without the findings contract. Use when a full critique is overkill.
+2. Brief either with ABSOLUTE paths to the rendered images plus the design context (audience, brand constraints, spec highlights). The Gemini lane judges pixels; code and spec stay with design-critic — do not send Gemini to read stylesheets.
+3. This is opt-in, same doctrine as the GPT critics in `cross-review`: the user asked for a cross-model design check, or the artifact is public/client-facing and the orchestrator judges a second pair of eyes worth it. Not a default step.
+4. Gemini's verdict is ATTRIBUTED, additive to design-critic — never a replacement. Aesthetic ("taste") findings are judgment, not defects; artifact-class findings (clipping, overflow, contrast) are checkable — verify before acting on them. If `agy` is unavailable, the lane reports "gemini-design-unavailable"; design-critic's review stands alone, the degradation is stated in the user-facing summary, and the pipeline is never blocked.
 
 ## 7. Output Format
 
