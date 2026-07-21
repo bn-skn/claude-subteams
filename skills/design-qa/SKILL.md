@@ -69,6 +69,12 @@ Run each heuristic against the implementation:
 4. Flag visual regressions: layout shifts, missing elements, broken styling.
 5. Save screenshots for future regression comparisons.
 
+## 6.5 Cross-Model Visual Second Opinion (optional)
+
+1. When screenshots or rendered images exist (Section 6, or any rendered artifact — poster, PDF preview, cover), you MAY additionally dispatch `gemini-analyst` for an independent non-Claude visual pass: brief it with the absolute screenshot paths and the concrete design questions (hierarchy, alignment, overflow, contrast, "what looks off").
+2. This is opt-in, same doctrine as the GPT critics in `cross-review`: the user asked for a cross-model design check, or the artifact is public/client-facing and the orchestrator judges a second pair of eyes worth it. Not a default step.
+3. Gemini's visual verdict is ATTRIBUTED, additive to design-critic — never a replacement. If `agy` is unavailable, the agent reports "gemini-unavailable"; design-critic's review stands alone, the degradation is stated in the summary, and the pipeline is never blocked.
+
 ## 7. Output Format
 
 The design-critic agent returns results in this structure:

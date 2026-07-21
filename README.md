@@ -127,7 +127,7 @@ After install, add this snippet to your project's `CLAUDE.md` (or global `~/.cla
 For development tasks use the claude-subteams plugin (orchestrator + specialized sub-team agents).
 Invoke skill "claude-subteams:using-subteams" before significant development work.
 For small fixes — act directly, invoke code-review after if logic changed. Any logic change gets code-reviewer (and devils-advocate for non-trivial logic) — no "it's just one line" exemption.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect, gemini-analyst, gemini-code-reviewer.
 Building/editing agents, prompts, skills, or multi-agent systems → invoke agent-architect + prompt-engineer + prompt-evaluator (using-subteams Section 6.5).
 ```
 
@@ -221,6 +221,8 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | `gpt-devils-advocate` | sonnet (+Codex/GPT-5.5) | Cross-model architectural challenge via `codex exec`. Different training distribution than Claude. Read-only; graceful-skip. |
 | `prompt-engineer` | opus | Authors and optimizes prompts, system prompts, and tool/skill instructions. Context-first, eval-driven. Read + write. |
 | `agent-architect` | opus | Designs subagents and multi-agent systems: boundaries, orchestration, tool scoping, contracts. Read + write. |
+| `gemini-analyst` | sonnet (+Antigravity/Gemini) | Multimodal media analysis via `agy` CLI: video frames with temporal precision, images; Gemini second opinion. Read-only repo; graceful-skips if agy unavailable. |
+| `gemini-code-reviewer` | sonnet (+Antigravity/Gemini) | Optional third cross-review lane via `agy` ("Gemini 3.1 Pro (High)"). Opt-in only — explicit triple-review request or top-tier changes. Read-only; graceful-skip with mandatory degradation notice. |
 
 ## Hooks
 

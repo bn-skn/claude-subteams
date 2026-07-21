@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.36.0] - 2026-07-21
+
+### Added
+- **New agent #18: `gemini-code-reviewer`** — optional THIRD cross-review lane (Gemini via Antigravity CLI `agy`), additive to the Claude and GPT critic families, opt-in only: explicit "triple review" request or top-tier (public/irreversible/security) change at orchestrator discretion — never a silent default until quality is proven on real diffs. Harness: materialize the diff to /tmp → single `agy --model "Gemini 3.1 Pro (High)" -p` call (env override `CROSS_REVIEW_GEMINI_MODEL`, display-label only) with `read_file`-only mandate → JSON findings validated before trusting (zero-exit-but-empty/invalid output is reported loudly, never mislabeled as "no findings") → mandatory log-verification of the actual model. Verified live on a bug-seeded diff: Pro (High) caught float-cents money bug, `Math.random()` idempotency key, and `res.json()`-on-error crash in one pass (~29 s).
+- **Mandatory degradation notification** across all Gemini lanes: `gemini-review-unavailable` / `gemini-unavailable` must reach the user-facing summary (merged-report line + orchestrator relay duty in `cross-review` §3.3/§6.4 and the using-subteams model note) — a missing lane must never read as "all models agreed". Repeated unavailability of the consumer-preview quota is a tell-the-operator signal, not something to absorb.
+- **Design QA cross-model lane (optional):** `design-qa` §6.5 — `gemini-analyst` as an independent non-Claude visual pass on screenshots/rendered artifacts (opt-in, additive to design-critic, same degradation doctrine).
+
+### Changed
+- `cross-review`: §1.8 Gemini-lane triggers, §2 Gemini model policy (documented deviation from the no-hardcode rule: agy's settings default is Flash — right for the analyst, too shallow for review; agy has no per-role config), §3.1 optional fifth critic, §3.3 Gemini-Only Findings section, §6.4 fallback+notification, §9 agent row.
+- `using-subteams`: roster #18, model note (Gemini agents #17-18, degraded lane always surfaced), Full Step 6 + Standard step 5 clarify the Gemini lane is opt-in and NOT part of the GPT-critics default.
+- `gemini-analyst`: model log-verification recipe hardened against concurrent-run log interleaving (found live: a parallel session's agy run made bare `grep | tail -1` return another process's model line; now newest-by-mtime file + match the `Print mode: starting` line to your own flag).
+- `README.md` agent roster caught up: both Gemini agents added to the table and the claudemd-snippet agent list (the 1.35.0 release had wired `gemini-analyst` into using-subteams only, leaving the README enumeration at 16 while the marketplace description advertised 17 — release-review finding).
+
+### Considered and rejected
+- Gemini as an additional **researcher** lane: headless `agy` has no web access (all non-`read_file` tools soft-denied), so it would answer from training data alone — a stale-knowledge opinion, not research. Second opinions on synthesized findings remain available ad-hoc via `gemini-analyst`; `live-research`/`researcher` stay Claude+web.
+
 ## [1.35.0] - 2026-07-21
 
 ### Added

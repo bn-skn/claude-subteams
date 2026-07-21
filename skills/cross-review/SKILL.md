@@ -14,6 +14,7 @@ description: "Orchestrates parallel GPT + Claude critics to break model-monocult
 5. New service bootstrap — first review of a net-new system.
 6. Cross-review is for meaningful reviews (the triggers above), not an automatic hook on every trivial commit — invoke it when you are actually reviewing, not on every save. This is about relevance, not rationing: when cross-review runs, run the full critic set.
 7. **Operator standing preference (15.07.2026):** when Codex is available, GPT critics run ALONGSIDE the Claude critics as the strong default for any meaningful review — equal-rank reviewers, not an optional add-on. Unavailability degrades to Claude-only without blocking; it never becomes a reason to quietly stop dispatching them when Codex is back.
+8. **Gemini third lane (optional, 21.07.2026 — NOT a default):** `gemini-code-reviewer` (Gemini via the Antigravity CLI `agy`) can join as a third model family. Dispatch it only when (a) the user explicitly asks for a triple / three-model review, or (b) the change is top-tier (public / irreversible / security) AND the orchestrator judges a third distribution worth the latency. It stays opt-in until its review quality is proven on real diffs — do not promote it to a default without an operator decision. Degradation mirrors Codex: unavailable → skip, report loudly, never block.
 
 ## 2. Model and Effort Policy — Read This First
 
@@ -48,7 +49,9 @@ CROSS_REVIEW_EFFORT=high              # override effort; unset → Codex uses it
 codex exec -c model_reasoning_effort=high -s read-only --skip-git-repo-check "Return your model name and reasoning effort level as JSON."
 ```
 
-**Agents implementing this policy:** `agents/gpt-code-reviewer.md` · `agents/gpt-devils-advocate.md`
+**Gemini lane model policy (differs from Codex by design):** `gemini-code-reviewer` passes `--model "Gemini 3.1 Pro (High)"` explicitly (override: `CROSS_REVIEW_GEMINI_MODEL=<display label>`). This deviates from the no-hardcode rule because agy's own settings default is the fast Flash tier — right for the analyst role, too shallow for review — and agy has no per-role config to inherit from. agy accepts ONLY display labels; slugs are silently ignored (the agent log-verifies the actual model after every call). There is no separate effort env — effort is part of the label.
+
+**Agents implementing this policy:** `agents/gpt-code-reviewer.md` · `agents/gpt-devils-advocate.md` · `agents/gemini-code-reviewer.md` (optional lane)
 
 ## 3. Trigger: `/cross-review`
 
@@ -60,6 +63,8 @@ Dispatch the FULL critic set in parallel — both model families together — fo
 3. All four receive the same diff/file context. Write sets are empty — all read-only.
 
 Run all four by default. Do NOT drop GPT critics to conserve quota — full coverage is the point of cross-review; the user has opted into it.
+
+**Optional fifth critic:** when the Gemini third lane is triggered (Section 1 item 8), also dispatch `gemini-code-reviewer` in the same parallel batch. It is additive — never a substitute for either standing family, and never dispatched silently as a default.
 
 **Reviewer-name rule (harness quirk):** in harnesses where a custom spawn name overrides `agent_type` in the hook payload (observed in teammate mode), the review-gate matches a reviewer by the substring `code-reviewer` — so spawn review agents with no custom name, or a name containing `code-reviewer`. An unrelated custom name hides the review from the gate.
 
@@ -83,9 +88,14 @@ Run all four by default. Do NOT drop GPT critics to conserve quota — full cove
 - [file:line] Issue. Source: code-reviewer | devils-advocate.
 ### GPT-Only Findings
 - [file:line] Issue. Source: gpt-code-reviewer | gpt-devils-advocate.
+### Gemini-Only Findings (when the third lane ran)
+- [file:line] Issue. Source: gemini-code-reviewer.
 ### Cross-Review Skipped (if applicable)
 - Reason: Codex unavailable. Claude critics ran; results are single-model.
+- Reason: Gemini lane requested but agy unavailable — <reason from the agent>. Claude/GPT findings stand; the report is two-model, not three.
 ```
+
+When any requested lane degraded (Codex OR Gemini), the orchestrator MUST carry that line into its final user-facing summary — a missing lane must never read as "all models agreed".
 
 ## 4. Trigger: `/rescue`
 
@@ -164,6 +174,7 @@ rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 1. If `codex` is not on PATH, not authenticated, exits non-zero, OR exits zero but returns empty/invalid output (died mid-generation): skip GPT critics, log the reason, run Claude critics only. The agents validate the structured output after a zero exit and downgrade to `cross-review-unavailable` when it is empty or non-JSON — a mid-run collapse is reported loudly, never mislabeled as findings. NEVER block the main pipeline — Claude critics are always sufficient to proceed.
 2. Do NOT auto-retry a failed Codex call — a non-zero exit means skip and report, not loop on the same call.
 3. For awareness, not as a limit: ChatGPT Plus uses a 5-hour shared bucket across CLI and web. Run the full critic set whenever cross-review fires — do not ration GPT calls. If the human reports ChatGPT being throttled, pause Codex calls and notify; that is a reaction to a real signal, never a pre-emptive cap.
+4. **Gemini lane fallback (same shape as Codex):** `agy` missing, unauthenticated, non-zero exit, timeout, tool soft-deny, or zero-exit-but-empty/invalid-JSON → the agent returns `gemini-review-unavailable` with the reason; the review proceeds on Claude (+GPT) findings. **Notification is mandatory, not optional:** the degradation line goes into the merged report AND into the orchestrator's final user-facing summary. No auto-retry (single timeout retry inside the agent only). Gemini runs on a consumer-preview quota that can change without warning — treat repeated unavailability as a signal to tell the operator, not something to quietly absorb.
 
 ## 7. Red Flags
 
@@ -196,3 +207,4 @@ rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 |-------|------|--------------------------|
 | `gpt-code-reviewer` | Concurrency, numeric, platform, spec-drift, resource lifecycle bugs | `code-reviewer` |
 | `gpt-devils-advocate` | Abstraction boundaries, implicit contracts, failure model, composability | `devils-advocate` |
+| `gemini-code-reviewer` | Optional third-model lane — independent Gemini judgment on the same diff (opt-in, Section 1 item 8) | `code-reviewer` (additive) |

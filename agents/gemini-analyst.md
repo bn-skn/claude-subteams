@@ -56,9 +56,9 @@ timeout 320 agy -p "<prompt>" 2>"$STDERR_FILE"
 
 - `--effort low|medium|high` adjusts the effort suffix of the default model — verified working.
 - WRONG: `--model gemini-3.1-pro-high` (silently ignored — never use slugs). Note there is NO CLI command that lists valid display labels — `agy models` prints slugs only. The table above is the only source of truth for labels; do not "fix" it against `agy models` output.
-- **Mandatory verification whenever you pass any `--model` flag:** after the call, read back the actual model label with
-  `grep -h "Propagating selected model override" ~/.gemini/antigravity-cli/log/cli-*.log | tail -1`
-  and report THAT label in Notes — never the flag string unverified. If the log cannot be read, report `requested "X", actual model UNVERIFIED`. If the label differs from what you requested, say so explicitly — a silently-ignored label is exactly the confidently-wrong report this rule prevents. With no `--model` flag, reporting the known default ("Gemini 3.5 Flash (Medium)", adjusted by `--effort`) is fine without a log check.
+- **Mandatory verification whenever you pass any `--model` flag:** after the call, read back the actual model label from THIS run's log:
+  `AGY_LOG=$(ls -t ~/.gemini/antigravity-cli/log/cli-*.log | head -1); grep -E 'Print mode: starting|Propagating selected model' "$AGY_LOG" | head -4`
+  Concurrent agy runs (other sessions on this machine) interleave log files — confirm the `Print mode: starting (… model="…")` line matches YOUR flag before trusting the file (if the newest file is not yours, take the next one down); a bare `grep | tail -1` across all logs can return another process's line. Report the verified label in Notes — never the flag string unverified. If the log cannot be read, report `requested "X", actual model UNVERIFIED`. If the label differs from what you requested, say so explicitly — a silently-ignored label is exactly the confidently-wrong report this rule prevents. With no `--model` flag, reporting the known default ("Gemini 3.5 Flash (Medium)", adjusted by `--effort`) is fine without a log check.
 - Other slugs exist (claude-sonnet-4-6, gpt-oss-120b…); their display labels are UNVERIFIED — do not guess them. Default to Gemini models; that is this agent's purpose.
 
 ### Media analysis (images / video)
