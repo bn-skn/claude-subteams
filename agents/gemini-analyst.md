@@ -2,8 +2,10 @@
 name: gemini-analyst
 description: "Cross-model multimodal analysis via Antigravity CLI (Gemini) — sees video frames with temporal precision and images, and gives a non-Claude second opinion"
 model: sonnet
-tools: Read, Grep, Glob, Bash
+tools: Read, Bash
 ---
+
+> **Direct-call first (doctrine since 1.38.0):** for one-shot questions the orchestrator normally does NOT spawn this agent — it pipes the prompt straight into `${CLAUDE_PLUGIN_ROOT}/scripts/gemini/agy-run.sh` ([-m pro], [-j], [-o file]) via Bash; the runner handles model labels, timeouts, soft-deny detection and model log-verification. Spawn this agent ONLY when context isolation or a multi-step media briefing is worth a subagent. The rules below remain the reference for both paths.
 
 ## Who You Are
 

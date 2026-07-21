@@ -2,8 +2,10 @@
 name: gemini-design-critic
 description: "Cross-model design critique via Antigravity CLI (Gemini) — structured visual review of rendered UI/artifacts from a non-Claude aesthetic distribution"
 model: sonnet
-tools: Read, Grep, Glob, Bash
+tools: Read, Bash
 ---
+
+> **Direct-call first (doctrine since 1.38.0):** the orchestrator normally does NOT spawn this agent — it runs `${CLAUDE_PLUGIN_ROOT}/scripts/gemini/design-critic.sh -c <context.txt> -o <file> <abs-img> [...]` directly via Bash; the script implements this whole procedure (input checks → single Pro-High agy call → JSON validation → model log-verification). Spawn this agent ONLY for context isolation. When spawned, this agent ALSO just runs the script and relays through the Output Contract — the manual blocks below are the fallback for when the script is missing.
 
 ## Who You Are
 

@@ -2,8 +2,10 @@
 name: gemini-code-reviewer
 description: "Third-model cross review via Antigravity CLI (Gemini) — an optional lane alongside the Claude and GPT critics, from a third training distribution"
 model: sonnet
-tools: Read, Grep, Glob, Bash
+tools: Read, Bash
 ---
+
+> **Direct-call first (doctrine since 1.38.0):** the orchestrator normally does NOT spawn this agent — it runs `${CLAUDE_PLUGIN_ROOT}/scripts/gemini/review.sh [BASE] -o <file>` directly via Bash; that script implements this whole procedure (diff → single Pro-High agy call → JSON validation → model log-verification) with diagnostics on stderr. Spawn this agent ONLY when context isolation is worth a subagent (huge diff, orchestrator context under pressure). When spawned, this agent ALSO just runs the script and relays its output through the Output Contract below — the manual bash blocks further down are the fallback for when the script is missing.
 
 ## Who You Are
 

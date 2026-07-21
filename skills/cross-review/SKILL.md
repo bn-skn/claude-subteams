@@ -64,7 +64,7 @@ Dispatch the FULL critic set in parallel — both model families together — fo
 
 Run all four by default. Do NOT drop GPT critics to conserve quota — full coverage is the point of cross-review; the user has opted into it.
 
-**Optional fifth critic:** when the Gemini third lane is triggered (Section 1 item 8), also dispatch `gemini-code-reviewer` in the same parallel batch. It is additive — never a substitute for either standing family, and never dispatched silently as a default.
+**Optional fifth critic:** when the Gemini third lane is triggered (Section 1 item 8), add it in the same round. Default method is a DIRECT call — the orchestrator runs `${CLAUDE_PLUGIN_ROOT}/scripts/gemini/review.sh [BASE] -o <file>` via Bash while the other critics run as subagents, then merges the JSON findings from the file. Spawn the `gemini-code-reviewer` agent instead only for context isolation. Either way it is additive — never a substitute for either standing family, and never triggered silently as a default.
 
 **Reviewer-name rule (harness quirk):** in harnesses where a custom spawn name overrides `agent_type` in the hook payload (observed in teammate mode), the review-gate matches a reviewer by the substring `code-reviewer` — so spawn review agents with no custom name, or a name containing `code-reviewer`. An unrelated custom name hides the review from the gate.
 

@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.38.0] - 2026-07-21
+
+### Added
+- **Gemini direct-call layer `scripts/gemini/` (operator decision: no sonnet middleman).** Four executable scripts the orchestrator calls straight from Bash: `agy-run.sh` (generic runner: display-label mapping with `fast`/`pro` presets, timeout discipline — outer always above `--print-timeout`, soft-deny detection from stderr, per-run model log-verification with `[verified|DEGRADED→…]`, optional strict JSON mode with single-fence tolerance, `-o` file output so big results land on disk not in context; found live: agy drains stdin even in `agy models`, so the availability probe runs `</dev/null`); `review.sh` (third-model code review: diff materialization with bad-base-ref vs empty-diff discrimination → Pro-High call → findings JSON); `design-critic.sh` (visual critique of rendered images, context via file so quotes/`$` are inert); `frontend.sh` (competing HTML draft from a brief with structural validation `<!DOCTYPE html>…</html>`, 630 s default). All three role scripts verified live end-to-end (the review script immediately caught a real SSRF-class regex gap in a live diff).
+- **New agent #20: `gemini-frontend`** — competing frontend draft generator, approved by the operator on 21.07.2026 after a live judge-panel duel (same brief → Claude pipeline vs Gemini one-shot). Thin harness over `frontend.sh`; delivers an UNEDITED alternative draft, explicitly marked not-yet-reviewed, routed through design-qa/brand check before use. Tools: Read, Write, Bash.
+
+### Changed
+- **Direct-call doctrine everywhere:** using-subteams model note + new doctrine block, cross-review §3.1, design-qa §6.5 — the default method for every Gemini lane is the script via Bash; agent files #17-20 are the opt-in isolation mode and, when spawned, also just run the script. Manual bash blocks in agent files remain as documented fallback.
+- **Agent tools trimmed to necessary-and-sufficient:** #17-19 `Read, Grep, Glob, Bash` → `Read, Bash` (Grep/Glob were never used by the harness procedures); #20 ships as `Read, Write, Bash` (Write only to save the generated artifact).
+
 ## [1.37.0] - 2026-07-21
 
 ### Added

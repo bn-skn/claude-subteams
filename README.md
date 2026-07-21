@@ -127,7 +127,7 @@ After install, add this snippet to your project's `CLAUDE.md` (or global `~/.cla
 For development tasks use the claude-subteams plugin (orchestrator + specialized sub-team agents).
 Invoke skill "claude-subteams:using-subteams" before significant development work.
 For small fixes — act directly, invoke code-review after if logic changed. Any logic change gets code-reviewer (and devils-advocate for non-trivial logic) — no "it's just one line" exemption.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect, gemini-analyst, gemini-code-reviewer, gemini-design-critic.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect, gemini-analyst, gemini-code-reviewer, gemini-design-critic, gemini-frontend.
 Building/editing agents, prompts, skills, or multi-agent systems → invoke agent-architect + prompt-engineer + prompt-evaluator (using-subteams Section 6.5).
 ```
 
@@ -224,6 +224,7 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | `gemini-analyst` | sonnet (+Antigravity/Gemini) | Multimodal media analysis via `agy` CLI: video frames with temporal precision, images; Gemini second opinion. Read-only repo; graceful-skips if agy unavailable. |
 | `gemini-code-reviewer` | sonnet (+Antigravity/Gemini) | Optional third cross-review lane via `agy` ("Gemini 3.1 Pro (High)"). Opt-in only — explicit triple-review request or top-tier changes. Read-only; graceful-skip with mandatory degradation notice. |
 | `gemini-design-critic` | sonnet (+Antigravity/Gemini) | Optional cross-model design lane via `agy`: structured critique of rendered visuals (screenshots, renders). Opt-in per design-qa §6.5. Read-only; graceful-skip with mandatory degradation notice. |
+| `gemini-frontend` | sonnet (+Antigravity/Gemini) | Competing frontend draft from a brief via `agy` ("Gemini 3.1 Pro (High)"): unedited self-contained HTML alternative to the Claude pipeline. Direct-call first via `scripts/gemini/frontend.sh`. |
 
 ## Hooks
 
