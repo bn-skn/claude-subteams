@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.35.0] - 2026-07-21
+
+### Added
+- **New agent #17: `gemini-analyst`** — a sonnet harness that shells out to the Antigravity CLI (`agy`, Google Gemini) in headless print mode, mirroring the Codex-critic pattern (availability check → single structured invocation → graceful "gemini-unavailable" degradation, never blocking the pipeline). Its niche: multimodal media analysis Claude agents cannot do at all — video frames with verified temporal precision (exact-second answers on a test clip) and images — plus a Gemini cross-model second opinion. The agent prompt encodes the empirically verified 1.1.5 gotchas: `--model` accepts only display labels ("Gemini 3.1 Pro (High)"), slugs from `agy models` are silently ignored (log-verified model reporting is mandatory whenever a `--model` flag is passed); `--effort low|medium|high` works; headless soft-denies tools outside `permissions.allow` (only `read_file(*)` is allow-listed; stderr capture is read after every call); video is ingested frames-only, the audio track is not passed (independently re-verified on a speech clip); `--dangerously-skip-permissions` is forbidden. Roster row + model-note wiring in `using-subteams`. Reviewed by prompt-evaluator (FAIL → 7 findings fixed → PASS, live smoke tests).
+
+### Fixed
+- `marketplace.json` version drift: entry still said 1.34.4 while plugin.json shipped 1.34.6 — both now carry the release version.
+
 ## [1.34.6] - 2026-07-16
 
 ### Fixed
