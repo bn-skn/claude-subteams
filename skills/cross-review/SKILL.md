@@ -15,6 +15,7 @@ description: "Orchestrates parallel GPT + Claude critics to break model-monocult
 6. Cross-review is for meaningful reviews (the triggers above), not an automatic hook on every trivial commit — invoke it when you are actually reviewing, not on every save. This is about relevance, not rationing: when cross-review runs, run the full critic set.
 7. **Operator standing preference (15.07.2026):** when Codex is available, GPT critics run ALONGSIDE the Claude critics as the strong default for any meaningful review — equal-rank reviewers, not an optional add-on. Unavailability degrades to Claude-only without blocking; it never becomes a reason to quietly stop dispatching them when Codex is back.
 8. **Gemini third lane (STANDING DEFAULT since 22.07.2026 — operator decision, leveled to the Codex analogy):** when `agy` is available, the Gemini review lane runs ALONGSIDE the Claude and GPT critics for any meaningful review — three model families whenever possible. Default method is the direct call (§3.1); spawn `gemini-code-reviewer` only for context isolation. Unavailability degrades to the remaining families without blocking and is ALWAYS surfaced in the final summary — a missing lane must never read as "all models agreed". The Claude critics remain the PRIMARY reviewers in every configuration — the Gemini lane never outranks or replaces them, and its findings never override native findings (disagreements go through §3.2 escalation like any cross-model conflict).
+9. **Plan-defense lane (STANDING DEFAULT since 22.07.2026 — operator decision):** cross-model critique is not only for code. On the Full pipeline's Step 3 (Plan Defense — see `using-subteams`), the plan DOCUMENT is challenged by GPT and Gemini alongside the native `devils-advocate` + `architecture-guard`, whenever Codex/`agy` are available. Same hierarchy, merge, and escalation rules as code review; mechanics in §3.4. This default is automatic WITHIN the Full pipeline's Step 3 only — no conflict with item 6 or Critical Rule 6: plan defense is a pipeline gate on meaningful work, never a per-commit hook.
 
 ## 2. Model and Effort Policy — Read This First
 
@@ -96,6 +97,16 @@ Run all four by default. Do NOT drop GPT critics to conserve quota — full cove
 ```
 
 When any requested lane degraded (Codex OR Gemini), the orchestrator MUST carry that line into its final user-facing summary — a missing lane must never read as "all models agreed".
+
+### 3.4 Plan Defense (cross-model critique of the plan document)
+
+On the Full pipeline's Step 3 (`using-subteams`), the same cross-model machinery applies to the **plan document** instead of a diff:
+
+1. **GPT lane:** dispatch `gpt-devils-advocate` with the plan file as read-only input — it challenges the design/plan, not code (the agent takes a plan as a valid target; see `agents/gpt-devils-advocate.md`).
+2. **Gemini lane:** DIRECT call — `"${CLAUDE_PLUGIN_ROOT}/scripts/gemini/agy-run.sh"` with the plan file and a plan-critique prompt, `-o <file>` for on-disk output where `<file>` is a UNIQUE per-run path (`mktemp`-style — parallel lanes writing a static name clobber each other). Use `agy-run.sh` (the generic runner), NOT `review.sh` — the review script materializes a git diff, which a plan document is not. **Output contract:** the prompt MUST demand the same findings JSON the code lane uses (`{"findings":[{"severity":"critical|high|medium|low","target":...,"issue":...}],"summary":...}`) so results enter the shared severity normalization; empty or non-JSON output → `gemini-plan-unavailable` degradation per §6.4, never hand-waved into the merge.
+3. **Merge, severity, escalation:** identical to §2 (severity normalization) and §3.2 (critical/blocking from either family → human decision). Native critics stay PRIMARY; cross-model findings are additive and never override them.
+4. **Report:** reuse the §3.3 sections, marked "plan defense" (Escalated / High-Confidence / Claude-Only / GPT-Only / Gemini-Only). A degraded lane is stated in the summary — a silent skip must never read as a clean plan.
+5. **Loop-back (bounded, re-reviewed):** if the critics surface an unknown (unfamiliar API, questionable pattern, unweighed alternative), the orchestrator returns to `live-research` / `researcher`, resolves it, and updates the plan. A materially updated plan gets its CHANGED sections re-defended (that re-defense completes the round) — research must never become a bypass that ships an unreviewed plan mutation straight to implementation. Hard cap: 2 rounds total, mirroring the review-round cap in §8 Critical Rule 9. If the unknown is still unresolved at the cap, record it and escalate to the human before implementation — do not proceed silently.
 
 ## 4. Trigger: `/rescue`
 

@@ -176,9 +176,11 @@ This calibration is deliberate: a single isolated one-line fix does not need an 
 ### Full Pipeline (step by step)
 
 ```
-1. BRAINSTORM     → Understand task (brainstorming skill)
+1. BRAINSTORM     → Understand task (brainstorming skill) — incl. best-practices research
 2. PLAN           → Write implementation plan (writing-plans skill)
-3. DEFEND PLAN    → Devils-advocate + architecture-guard review the plan in parallel
+3. DEFEND PLAN    → Native: devils-advocate + architecture-guard review the plan in parallel
+                    Cross-model (standing default when available): gpt-devils-advocate (Codex)
+                    + Gemini plan critique (agy) on the same plan document
 4. BACKUP         → git tag backup/pre-<feature>-$(date +%s)
 4.5 ARCH GATE     → [greenfield / structural only — Rule 24] ARCHITECTURE.md + CONVENTIONS.md
                     populated via brainstorming capture; `scripts/check-arch-docs.sh` exits 0
@@ -197,13 +199,21 @@ This calibration is deliberate: a single isolated one-line fix does not need an 
 12. CLEANUP       → Remove backup tag, worktree
 ```
 
-**Steps 1-3** can be compressed for well-understood tasks. If the user says "just implement X" and X is clear — skip brainstorming, write a brief plan, and proceed.
+**Step 1 (Brainstorm)** includes the **best-practices research** step (`brainstorming` skill) — before approaches are finalized, research how this class of task is conventionally solved (established patterns, prior art, pitfalls, library-vs-bespoke). It feeds the approach and stack decisions and lands in the spec as a `## Prior Art & Research` subsection.
 
-**Step 3 (Plan Defense)** runs two agents IN PARALLEL on the plan (not code):
+**Steps 1-3** can be compressed for well-understood tasks. If the user says "just implement X" and X is clear — skip brainstorming, write a brief plan, and proceed. **Compression does NOT cancel research when it is mandatory** — greenfield work or a new technology still gets the best-practices research pass (`brainstorming` Best-Practices Research), because "well-understood" is exactly what an unresearched new stack only appears to be.
+
+**Step 3 (Plan Defense)** runs the native critics IN PARALLEL on the plan (not code):
 - **devils-advocate**: challenges necessity, assumptions, scale, edge cases ("do we really need this?", "what if X is wrong?")
 - **architecture-guard**: checks structural decisions, dependency direction, naming, fit with existing architecture ("this violates the dependency graph", "this pattern doesn't match the project")
 
 Dispatch both in a single message. Collect findings, address critical ones before proceeding to implementation.
+
+**Cross-model plan defense (standing default on Full pipeline — operator decision 22.07.2026):** the plan document faces GPT and Gemini too, in the same round, mirroring the code-review lane in Step 6. **Canonical mechanics live in `cross-review` §3.4** — call shapes, output contract, merge, loop-back; do not re-derive them here. The load-bearing points:
+- **When Codex is available** — dispatch `gpt-devils-advocate` IN PARALLEL on the same plan document (a plan is valid input for it, not only a diff). **When agy is available** — run the Gemini plan critique via the direct `agy-run.sh` call per §3.4 (direct-call doctrine, 21.07.2026).
+- **Hierarchy is unchanged:** the native Claude critics are PRIMARY; GPT/Gemini findings never override native ones, and a critical/blocking conflict between families escalates to the human (`cross-review` §3.2). An unavailable lane degrades without blocking and MUST be stated in the summary — a missing lane never reads as "the plan is clean".
+- **Research loop-back:** an unknown surfaced by a critic → research it, update the plan, and re-defend the changed sections before implementation — bounded at 2 rounds with escalation on an unresolved unknown, exactly as `cross-review` §3.4 item 5 specifies.
+- **Subagent-count note:** plan defense legitimately dispatches 3 subagents at once (devils-advocate + architecture-guard + gpt-devils-advocate; Gemini is a direct Bash call, not a subagent). Like the Step 6 review fan-out, this cross-model batch is the sanctioned exception to Critical Rule 2's three-subagent awareness line — the methodology itself makes the user aware, here.
 
 **Step 4.5 (Architecture-Capture Gate)** applies ONLY to greenfield and non-trivial structural work (new module, new layer, dependency-direction change, new external integration — Critical Rule 24 defines the exact scope). For those tasks, structural implementation does NOT begin until both hold:
 - `scripts/check-arch-docs.sh <project-dir>` exits 0 — `docs/ARCHITECTURE.md` and `docs/CONVENTIONS.md` carry no stub markers (the sentinel `> STATUS: TEMPLATE — not yet populated`, `<PLACEHOLDER>`, `<STACK>`, etc. are gone).
