@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.38.2] - 2026-07-22
+
+### Changed
+- **Gemini hierarchy made explicit across the plugin (operator decision, 22.07.2026):** new "Gemini hierarchy" block in `using-subteams` — native Claude agents are ALWAYS the primary team for every role including frontend/design; Gemini lanes #17-20 are cross-model alternatives on explicit request only, never outranking, replacing, or running ahead of the native agent, their findings never overriding native findings (disagreements → cross-review §3.2 escalation). Same sentence added to `cross-review` §1.8. Pipelines must stay complete and self-sufficient on Claude agents alone (agy availability is not guaranteed).
+
+### Fixed
+- Roster rows #17-18 still listed the pre-1.38.0 tool set (`Read, Grep, Glob, Bash`) after the frontmatter trim — now `Read, Bash`, matching the agent files.
+
 ## [1.38.1] - 2026-07-22
 
 ### Changed
