@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.39.0] - 2026-07-22
+
+### Changed
+- **Gemini review lane leveled to the Codex analogy (operator decision, 22.07.2026): STANDING DEFAULT.** When `agy` is available, the Gemini lane runs ALONGSIDE the Claude and GPT critics on every meaningful cross-review — three model families whenever possible, via the direct call (`scripts/gemini/review.sh`). Unavailability degrades to the remaining families, never blocks, and is always surfaced. Hierarchy unchanged: native Claude critics stay PRIMARY, Gemini findings never override native ones, disagreements escalate per §3.2. The other Gemini lanes (#17 analyst, #19 design-critic, #20 frontend) remain on-request. Updated: cross-review §1.8/§2/§3.1/§3.3/§9, using-subteams (roster #18, hierarchy block, Full Step 6, Standard step 5), README, gemini-code-reviewer description. Supersedes the 1.36.0 "opt-in until proven" gate — promotion decided by the operator after live runs.
+
 ## [1.38.2] - 2026-07-22
 
 ### Changed
