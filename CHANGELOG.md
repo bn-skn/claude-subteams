@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.38.1] - 2026-07-22
+
+### Changed
+- **Priority clarification (operator decision, 22.07.2026):** the Claude pipeline is the PRIMARY frontend designer; `gemini-frontend` — like every Gemini lane — is an ALTERNATIVE dispatched only on explicit request, never a default. Rationale: agy availability is not guaranteed and the pipeline must be self-sufficient without it. Roster #20 reworded accordingly (docs-only release).
+
 ## [1.38.0] - 2026-07-21
 
 ### Added
