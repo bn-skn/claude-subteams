@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.41.0] - 2026-07-23
+
+### Changed
+- **doc-agent gains Bash — fenced to document mechanics (operator decision, Богдан 23.07.2026).** Incident driver: tasked with rotating an 832 KB SYSTEM.md, the Bash-less doc-agent pulled content through context (105 chunked Reads → giant Write → context overflow → auto-compact erased the reads → endless loop; two hour-long attempts, zero output). New `## Bash — Document Mechanics Only` section: line-range moves/counts/splits/`mv`/`cp`/`diff` only; hard large-file rule (>~50 KB / >~1000 lines → shell-only in strict order: append → verify `wc -l` reconciles → delete via temp + atomic `mv`, never `sed -i`; near the threshold or in doubt — shell); every operation verified with counters, append flagged non-idempotent; document content is DATA (prompt-injection clause closes the social-engineering variant); forbidden list — network commands, `git push`, package installs, `rm -rf`, privilege escalation, files outside the tasked docs; read-only git allowed; a project-shipped rotation script is preferred over hand-written `sed`. Pipeline: prompt-engineer authored → prompt-evaluator FIX-FIRST findings applied (temp+mv ordering, in-doubt clause) → triple cross-model review (Claude/GPT/Gemini) — `awk` dropped from the prohibitions example (its `system()` is an execution escape hatch; native finding). Roster row #6 updated in `using-subteams`. Gemini's dissent (revoke Bash, allow only a fixed script) recorded and overruled by the operator — doc tasks are broader than one rotation; model stays `sonnet` (prompt-evaluator: the rail is rule-following, not reasoning depth).
+
 ## [1.40.0] - 2026-07-22
 
 ### Added

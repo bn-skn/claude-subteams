@@ -52,7 +52,7 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 | 3 | architecture-guard | opus | Read, Grep, Glob, Bash | Structural changes, new modules, dependency drift | Architecture compliance report |
 | 4 | design-critic | opus | Read, Grep, Glob, Bash | UI/UX changes, design spec compliance | Design findings + recommendations |
 | 5 | prompt-evaluator | opus | Read, Write, Bash, Grep, Glob | Prompt/skill changes, regression testing | Eval results + regressions |
-| 6 | doc-agent | sonnet | Read, Write, Edit, Grep, Glob | Doc freshness after code changes | Updated docs + diff summary |
+| 6 | doc-agent | sonnet | Read, Write, Edit, Bash, Grep, Glob | Doc freshness after code changes | Updated docs + diff summary |
 | 7 | researcher | opus | Read, Grep, Glob, WebSearch, WebFetch | Uncertain technology, unfamiliar APIs, deep research | Research summary + recommendations |
 | 8 | security-auditor | opus | Read, Grep, Glob, Bash | Security-sensitive changes, secrets, auth, crypto | Vulnerability report + severity |
 | 9 | developer | sonnet | Read, Write, Edit, Bash, Grep, Glob | Implementation tasks dispatched via executing-plans | Code changes + test results + risks |
