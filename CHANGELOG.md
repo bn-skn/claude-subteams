@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.42.0] - 2026-07-31
+
+### Added
+- **`gate-lock` — serialized heavy gates (design doc §5.2/§7, Богдан 30.07.2026).** `coord.sh gate-lock [--timeout N] -- CMD...` runs CMD under a lock SEPARATE from commit-lock: a gate (tsc+vitest+canary boot against a DB copy) takes minutes while a commit takes milliseconds, so sharing one lock would queue every fast commit behind a long gate. On a 6 vCPU / 12 GB host, 4-5 concurrent gates do not fit — this is the mechanism that makes scaling past 2-3 instances safe. No `--timeout` = wait forever (a queue is expected, a spurious timeout would fail a healthy gate); `--timeout N` exits **75** if the lock isn't acquired. CMD's own exit code always passes through. **Lock ordering is a hard rule: gate-lock ALWAYS outside commit-lock, never the reverse** — the reverse order is a reproducible ABBA deadlock (found by the native reviewer), and shell cannot enforce it, so it is documented at both call sites and in the skill.
+- **`count` — machine-readable live-instance count.** Reaps, then prints exactly one number on stdout. Added because a consumer (claudebot's `pre-commit` branch-guard) was parsing `roster` output with a regex — any change to the human-readable format would have silently disabled the guard.
+- **Soft instance cap, default 5 (`CLAUDE_SUBTEAMS_MAX_INSTANCES`).** Claude Code has no cross-session resource awareness; nothing stops N sessions from collectively saturating one box. **The cap never rejects registration** — a SessionStart hook cannot un-start a running session, and an unregistered instance runs WITHOUT claims and off the roster, which is precisely the uncoordinated-editing failure this substrate exists to prevent. It registers, warns loudly, and returns exit **6**. Contract, stated at every call site: **exit 6 means REGISTERED, just over cap — callers MUST treat it as success.** `hooks/session-start` now surfaces that warning instead of discarding it (previously `2>&1 >/dev/null` made the whole cap a silent no-op in its only production caller).
+
+### Hardened (three-lane review: Claude native + GPT/Codex + Gemini/agy)
+- **Mailbox entry validation with quarantine** (the Anthropic agent-teams lesson: before v2.1.207 one malformed entry blocked delivery every tick until deleted by hand). A line is valid iff it parses as JSON and has string `.msg` **and** string `.from`; malformed lines go to `<id>.bad.jsonl` (capped at 200) with a loud warning instead of vanishing. `recv --count` and `notify-due` now count only VALID lines, so "how many are waiting" can no longer disagree with "how many recv delivers". A non-string `.from` used to classify as valid, then die on the render's `gsub` and get cleared unquarantined — silent loss (Codex; blast radius corrected on verification: jq 1.7 does not abort the batch).
+- **`recv` no longer clears the inbox when classification itself fails** (corrupt jq, OOM, version skew): previously an empty classification pass was indistinguishable from an empty mailbox, so real unread messages were destroyed. Now exits 9 and leaves the box intact (native review).
+- **fd 9 closed for the locked command's children** in both `gate-lock` and `commit-lock`: a daemonized grandchild inherited the lock fd and held it after the command returned — an unbounded deadlock for every other instance (Gemini).
+- **`_jq_write` return value checked in `cmd_register`** (exit 8): the file runs without `set -e`, so a failed registry write silently reported successful registration (Gemini).
+- `MAX_INSTANCES` validated (junk value silently disabled the cap); `gate-lock --timeout` without a value no longer dies on `unbound variable` (including the `--timeout --` case); timeout code moved 7 → 75 so it stops colliding with ordinary command exits; `deregister` also removes the quarantine file; `notify-due` warns about malformed entries once per change instead of on every PostToolUse forever.
+- `--help` printed a truncated usage (`sed -n '2,40p'` cut off at `send`, hiding `recv`/`notify-due`/`commit-lock`/`repokey`) — pre-existing, fixed.
+- `skills/multi-instance` updated: cap 5 (was a contradictory "2-3"), `gate-lock` with its ordering rule, `count`, mailbox quarantine.
+
 ## [1.41.0] - 2026-07-23
 
 ### Changed

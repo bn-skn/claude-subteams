@@ -20,16 +20,28 @@
 #     instances.json   { id: {pid, worktree, branch, role, started, heartbeat} }
 #     claims.json      { "relpath": {by, at} }
 #     inbox/<id>.jsonl  append-only messages for <id>
+#     inbox/<id>.bad.jsonl  quarantined malformed inbox lines (capped at 200, see recv)
 #     lock              flock target for instances/claims read-modify-write
 #     commit.lock       flock target for serialized git commits
+#     gate.lock         flock target for serialized heavy gates (tsc+vitest+canary)
 #
 # Usage: coord.sh <command> [args]
 #   init                               ensure coord dir + files exist (atomic)
 #   register  --id ID [--worktree P --branch B --role R]
+#                                      *** exit 6 = SUCCESS, WITH a warning: the instance
+#                                      IS registered, just over CLAUDE_SUBTEAMS_MAX_INSTANCES.
+#                                      Callers MUST treat 6 as success (a `register ... &&`
+#                                      chain, `if register; then`, or a `set -e` script must
+#                                      NOT abort on it) — only exit 8 means registration
+#                                      itself failed. ***
+#                                      exit 8 = ledger write failed, instance NOT registered
 #   deregister --id ID                 remove instance + release its claims
 #   heartbeat --id ID [--pid P --worktree P --branch B]  refresh liveness; re-register if reaped
 #   roster                             list live instances (reaps dead first)
 #   reap                               remove dead instances + release their claims
+#   count                              print live-instance count as ONE bare integer, nothing
+#                                      else (reaps dead first; machine-readable — unlike
+#                                      roster's prose, this output format is a stable contract)
 #   claim     --id ID PATH...          atomic claim-or-reject, all-or-nothing across the
 #                                      batch (exit 0 = all claimed, 3 = >=1 held by a peer;
 #                                      1 = internal jq/ledger failure, nothing written)
@@ -40,7 +52,15 @@
 #   send      --from ID --to ID MSG    append MSG to recipient inbox
 #   recv      --id ID [--count]         print + clear own inbox (--count: peek count, no clear)
 #   notify-due --id ID                  echo unread count IF new since last notify, else 0 (throttle)
-#   commit-lock -- CMD...              run CMD holding the global commit lock
+#   commit-lock -- CMD...              run CMD holding the global commit lock (see gate-lock:
+#                                      always take gate-lock OUTSIDE commit-lock, never nested
+#                                      the other way — avoids an ABBA deadlock between the two)
+#   gate-lock [--timeout N] -- CMD...  run CMD holding the gate lock (serializes heavy
+#                                      tsc/vitest/canary gates; no --timeout = wait
+#                                      forever; --timeout N: exit 75 if not acquired in Ns;
+#                                      CMD's own exit code is always passed through — 75 is
+#                                      reserved so a gate that itself exits 75 is never
+#                                      confused with coord's own timeout)
 #   repokey                            print the derived repo key (debug)
 
 set -uo pipefail
@@ -63,6 +83,24 @@ COORD_HOME="${CLAUDE_SUBTEAMS_COORD_HOME:-$HOME/.claude/subteams}"
 # once, so heartbeat freshness is the real liveness signal. Generous default so an
 # instance idling between user turns survives; override via CLAUDE_SUBTEAMS_HEARTBEAT_TTL.
 HEARTBEAT_TTL="${CLAUDE_SUBTEAMS_HEARTBEAT_TTL:-1800}"
+
+# Soft cap on simultaneously live instances. Claude Code has NO cross-session resource
+# awareness — nothing stops N sessions from collectively saturating one box's CPU/RAM,
+# especially once each is running heavy gates (tsc+vitest+canary boot). 5 is the top of
+# Anthropic's own team-size guidance ("three focused often beats five scattered"); past
+# that, gate contention (see gate-lock below) starts to dominate on a 6 vCPU-class host.
+# This is advisory, not a hard reject — see the comment in cmd_register for why.
+MAX_INSTANCES="${CLAUDE_SUBTEAMS_MAX_INSTANCES:-5}"
+# Same "reject non-integer, warn, fall back to a safe default" pattern used elsewhere in
+# this file (see e.g. gate-lock's --timeout validation) — an unset/garbage value must
+# never silently disable the cap (a literal '[: abc: integer expression expected' on
+# every register call, with the cap never actually enforced, is exactly that failure).
+case "$MAX_INSTANCES" in
+  ''|*[!0-9]*)
+    echo "[coord] CLAUDE_SUBTEAMS_MAX_INSTANCES='$MAX_INSTANCES' is not a non-negative integer — falling back to default 5." >&2
+    MAX_INSTANCES=5
+    ;;
+esac
 
 _now() { date +%s; }
 
@@ -117,6 +155,7 @@ CLAIMS="$ROOT/claims.json"
 INBOX="$ROOT/inbox"
 LOCK="$ROOT/lock"
 COMMIT_LOCK="$ROOT/commit.lock"
+GATE_LOCK="$ROOT/gate.lock"
 
 # ---- Atomic init: mkdir is the create guard; never truncate an existing ledger. ----
 cmd_init() {
@@ -215,11 +254,46 @@ cmd_register() {
     pid="$PPID"; trusted=false                      # no claude ancestor → TTL fallback
   fi
   cmd_init
+  local rc=0
   ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
-    _jq_write "$INSTANCES" --arg i "$id" --arg pid "$pid" --arg wt "$wt" \
+    # Reap dead instances FIRST — otherwise a stale registry (peers that crashed or were
+    # never deregistered) inflates the live count and trips the cap warning on phantoms.
+    _reap_locked
+    local already=0
+    jq -e --arg i "$id" 'has($i)' "$INSTANCES" >/dev/null 2>&1 && already=1
+    if ! _jq_write "$INSTANCES" --arg i "$id" --arg pid "$pid" --arg wt "$wt" \
       --arg br "$br" --arg role "$role" --arg tr "$trusted" --arg now "$(_now)" \
-      '.[$i] = {pid:($pid|tonumber), pid_trusted:($tr=="true"), worktree:$wt, branch:$br, role:$role, started:($now|tonumber), heartbeat:($now|tonumber)}'
+      '.[$i] = {pid:($pid|tonumber), pid_trusted:($tr=="true"), worktree:$wt, branch:$br, role:$role, started:($now|tonumber), heartbeat:($now|tonumber)}'; then
+      # set -uo pipefail has NO -e: a write failure here (disk full, corrupt ledger JSON)
+      # would otherwise fall through silently and cmd_register would return success while
+      # the instance never actually made it into the ledger — it would run for the rest
+      # of the session with no claims and off the roster, exactly the uncoordinated-
+      # editing failure mode this file exists to prevent. Fail loudly instead.
+      echo "[coord] register: failed to write instance ledger for '$id' (disk full? corrupt $INSTANCES?) — instance is NOT registered." >&2
+      exit 8
+    fi
+    # The cap is advisory, never a rejection: a SessionStart hook cannot un-start a
+    # session that is already running, and an instance that bailed out of registering
+    # here because of a cap would run WITHOUT claims and OFF the roster — exactly the
+    # uncoordinated-editing failure mode this whole substrate exists to prevent. So we
+    # register unconditionally and instead warn loudly + return a distinct exit code, so
+    # the caller (hook/operator) can decide to close a session or hold off on heavy
+    # gates. Only warn on a genuinely NEW registration — re-registering an id already on
+    # the roster (e.g. a heartbeat-triggered re-register) isn't a new instance.
+    if [ "$already" -eq 0 ]; then
+      local n; n=$(jq 'length' "$INSTANCES" 2>/dev/null || echo 0)
+      if [ "$n" -gt "$MAX_INSTANCES" ]; then
+        echo "[coord] WARNING: $n live instances now registered, over the cap of $MAX_INSTANCES (CLAUDE_SUBTEAMS_MAX_INSTANCES). Registration proceeds anyway — recommend closing an extra session, and avoid starting heavy gates (tsc+vitest+canary) until the count drops; they serialize on gate-lock and will queue behind each other." >&2
+        # exit 6 = SUCCESS with a warning, NOT a failure — the write above already
+        # succeeded and the instance IS on the roster. Every caller of `register`
+        # (hooks, `&&` chains, `set -e` callers) MUST treat 6 as success; see the usage
+        # header. Only exit 8 means the instance failed to register.
+        exit 6
+      fi
+    fi
   ) 9>"$LOCK"
+  rc=$?
+  return "$rc"
 }
 
 cmd_deregister() {
@@ -231,7 +305,9 @@ cmd_deregister() {
     _jq_write "$INSTANCES" --arg i "$id" 'del(.[$i])'
     _jq_write "$CLAIMS" --arg i "$id" 'with_entries(select(.value.by != $i))'
   ) 9>"$LOCK"
-  rm -f "$INBOX/$id.jsonl" 2>/dev/null
+  # Also remove the quarantine file (see recv) — otherwise it's a slow, unbounded leak:
+  # one file per session id that ever received a single malformed message, forever.
+  rm -f "$INBOX/$id.jsonl" "$INBOX/$id.bad.jsonl" 2>/dev/null
 }
 
 cmd_heartbeat() {
@@ -280,6 +356,21 @@ cmd_roster() {
 }
 
 cmd_reap() { cmd_init; ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }; _reap_locked ) 9>"$LOCK"; }
+
+# Machine-readable live-instance count: reaps dead peers first (same as roster), then
+# prints EXACTLY one bare integer to stdout and nothing else. Exists because an external
+# consumer (another repo's git hook) previously parsed `roster`'s first line with a
+# regex ("Live instances (N):") — fragile, since roster's prose is free to change. This
+# output format IS the contract: never add surrounding text to it.
+cmd_count() {
+  cmd_init
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
+    _reap_locked
+    local n; n=$(jq 'length' "$INSTANCES" 2>/dev/null)
+    case "$n" in ''|*[!0-9]*) n=0;; esac
+    echo "$n"
+  ) 9>"$LOCK"
+}
 
 # atomic claim-or-reject, one or more paths per call. exit 0 = ALL claimed (by me/new);
 # exit 3 = at least one held by another live instance (then NOTHING is claimed — all-or-nothing,
@@ -348,6 +439,46 @@ cmd_claims() {
   jq -r 'to_entries[] | "  - \(.key)  by=\(.value.by)"' "$CLAIMS" 2>/dev/null || echo "(no claims)"
 }
 
+# ---- Mailbox entry validation (hardening lesson from Anthropic's native agent-teams:
+# before v2.1.207 one malformed inbox line blocked delivery on every tick until someone
+# deleted it by hand — see the design doc's §0). A line is VALID iff it parses as JSON
+# and has a string `.msg` field; blank/whitespace-only lines are not malformed, just
+# ignored. `.from` is ALSO type-checked (must be absent/null or a string) — a numeric or
+# object `.from` used to classify as ok:true and then blow up `.from|gsub(...)` in recv's
+# renderer, a runtime jq error swallowed by 2>/dev/null that silently dropped the message
+# instead of quarantining it (found by Codex cross-review). Shared by recv, recv --count,
+# and notify-due so "how many messages are waiting" never disagrees with "how many
+# messages recv actually delivers".
+_MAILBOX_VALIDATE_JQ='
+  . as $raw
+  | if ($raw | test("^[ \t]*$")) then empty
+    else
+      ($raw | try fromjson catch null) as $obj
+      | if ($obj != null and ($obj|type) == "object"
+            and (($obj.msg? // null) | type) == "string"
+            and (($obj.from? // null) == null or (($obj.from? // null) | type) == "string"))
+        then {ok:true, at:($obj.at // 0), from:($obj.from // ""), msg:$obj.msg}
+        else {ok:false, raw:$raw}
+        end
+    end
+'
+
+_mailbox_valid_count() {  # _mailbox_valid_count <box> — count of VALID lines only
+  local box="$1" n
+  [ -s "$box" ] || { echo 0; return 0; }
+  n=$(jq -Rc "$_MAILBOX_VALIDATE_JQ" "$box" 2>/dev/null | jq -s 'map(select(.ok)) | length' 2>/dev/null)
+  case "$n" in ''|*[!0-9]*) n=0;; esac
+  echo "$n"
+}
+
+_mailbox_bad_count() {  # _mailbox_bad_count <box> — count of MALFORMED lines only
+  local box="$1" n
+  [ -s "$box" ] || { echo 0; return 0; }
+  n=$(jq -Rc "$_MAILBOX_VALIDATE_JQ" "$box" 2>/dev/null | jq -s 'map(select(.ok|not)) | length' 2>/dev/null)
+  case "$n" in ''|*[!0-9]*) n=0;; esac
+  echo "$n"
+}
+
 cmd_send() {
   local from="" to="" msg=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -365,12 +496,14 @@ cmd_send() {
 }
 
 cmd_recv() {
-  # --count: print the number of unread messages WITHOUT clearing — a non-destructive peek
-  # for the notify hook (which must never destroy messages it only counts). Default mode
-  # prints all messages and CLEARS the inbox (the explicit, lossless consume the operator
-  # or orchestrator runs on purpose). Newlines in from/msg are collapsed on render so one
-  # stored message is always one line — a peer cannot forge a fake "from:" header by
-  # embedding a newline in its message body.
+  # --count: print the number of unread, VALID messages WITHOUT clearing — a
+  # non-destructive peek for the notify hook (which must never destroy messages it only
+  # counts). Default mode prints all valid messages, quarantines malformed ones instead
+  # of silently dropping them (see _MAILBOX_VALIDATE_JQ), and CLEARS the inbox (the
+  # explicit, lossless-for-valid-messages consume the operator or orchestrator runs on
+  # purpose). Newlines in from/msg are collapsed on render so one stored message is
+  # always one line — a peer cannot forge a fake "from:" header by embedding a newline
+  # in its message body.
   local id="" count=0
   while [ $# -gt 0 ]; do case "$1" in
     --id) id="$2"; shift 2;; --count) count=1; shift;; *) shift;;
@@ -379,16 +512,56 @@ cmd_recv() {
   _valid_id "$id" || { echo "[coord] recv: invalid --id '$id'" >&2; return 2; }
   local box="$INBOX/$id.jsonl"
   if [ "$count" = 1 ]; then
-    if [ -s "$box" ]; then grep -cve '^[[:space:]]*$' "$box" 2>/dev/null || echo 0; else echo 0; fi
+    _mailbox_valid_count "$box"
     return 0
   fi
   [ -f "$box" ] || { echo "(no messages)"; return 0; }
   ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     if [ -s "$box" ]; then
-      # Tolerant parse: `fromjson?` skips any malformed line instead of aborting the
-      # whole read (a single bad line must not silently swallow the rest of the inbox).
-      jq -rR 'fromjson? | "  [\(.at)] from \(.from|gsub("\n";" ")): \(.msg|gsub("\n";"\\n"))"' "$box" 2>/dev/null
-      : > "$box"   # clear after reading
+      local classified valid_out bad_lines bad_n quarantine _qtmp
+      if ! classified=$(jq -Rc "$_MAILBOX_VALIDATE_JQ" "$box" 2>/dev/null); then
+        # jq failing on the WHOLE classification pass (incompatible jq version, OOM on a
+        # huge line, corrupt binary) is different from a single malformed LINE — that
+        # case is handled below via .ok=false and quarantined. A pass-level failure must
+        # NOT fall through to ": > $box" below: an empty $classified would print "(no
+        # messages)" and then the clear would silently destroy every VALID, unread
+        # message in the box. Leave the box untouched and fail loudly instead.
+        echo "[coord] recv: jq failed to classify inbox for '$id' (nonzero exit) — inbox left UNTOUCHED, nothing cleared. Check the jq binary/version." >&2
+        exit 9
+      fi
+      valid_out=$(printf '%s\n' "$classified" | jq -r 'select(.ok) | "  [\(.at)] from \(.from|gsub("\n";" ")): \(.msg|gsub("\n";"\\n"))"' 2>/dev/null)
+      bad_lines=$(printf '%s\n' "$classified" | jq -r 'select(.ok|not) | .raw' 2>/dev/null)
+      if [ -n "$valid_out" ]; then
+        printf '%s\n' "$valid_out"
+      else
+        echo "(no messages)"
+      fi
+      if [ -n "$bad_lines" ]; then
+        # A malformed line must never just vanish (that's the Anthropic mailbox lesson):
+        # quarantine it where an operator can inspect it, and say so loudly. The append
+        # must SUCCEED before we're allowed to clear $box below (Codex cross-review
+        # finding): a failed quarantine write (disk full) falling through to the clear
+        # anyway would turn "couldn't quarantine" into "silently lost the bad entries",
+        # exactly the loss this whole mechanism exists to prevent.
+        bad_n=$(printf '%s\n' "$bad_lines" | grep -c '.')
+        quarantine="$INBOX/$id.bad.jsonl"
+        if ! printf '%s\n' "$bad_lines" >> "$quarantine"; then
+          echo "[coord] recv: FAILED to write $bad_n malformed entries to quarantine '$quarantine' (disk full?) — inbox left UNTOUCHED, nothing cleared." >&2
+          exit 9
+        fi
+        # Cap growth: a repeatedly-misbehaving sender must not turn this into an
+        # unbounded log — keep only the most recent 200 quarantined lines. A unique
+        # mktemp path (not a fixed "$quarantine.tmp") avoids colliding with a leftover or
+        # concurrent trim of the same name. Trim failure is non-fatal and does NOT block
+        # the box clear below — the malformed lines are already safely appended above
+        # either way, so at worst the quarantine file just stays untrimmed (a nuisance,
+        # not data loss).
+        _qtmp=$(mktemp "${quarantine}.XXXXXX" 2>/dev/null) && {
+          tail -n 200 "$quarantine" > "$_qtmp" 2>/dev/null && mv -f "$_qtmp" "$quarantine" || rm -f "$_qtmp" 2>/dev/null
+        }
+        echo "[coord] recv: dropped $bad_n malformed inbox entries → quarantined in $quarantine" >&2
+      fi
+      : > "$box"   # clear after reading (valid messages consumed, bad ones quarantined)
     else
       echo "(no messages)"
     fi
@@ -396,10 +569,83 @@ cmd_recv() {
 }
 
 cmd_commit_lock() {
+  # Lock ORDER (see gate-lock below): commit-lock is always the INNER lock — a CMD run
+  # here may itself be nested inside gate-lock, but must never itself take gate-lock.
+  # Commits are short, gates are long; the opposite nesting would let two instances
+  # ABBA-deadlock by acquiring the two locks in opposite order.
   [ "${1:-}" = "--" ] && shift
   [ $# -gt 0 ] || { echo "[coord] commit-lock: expected -- CMD..." >&2; return 2; }
   cmd_init
-  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }; "$@" ) 9>"$COMMIT_LOCK"
+  # 9>&- on CMD: close the lock fd for CMD (and thus its children) before running it —
+  # same fd-leak fix as gate-lock (see there for the full rationale). A backgrounded
+  # descendant spawned by a commit hook would otherwise inherit fd 9 and hold the lock
+  # after we return; the subshell itself still holds and releases the lock normally.
+  ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }; "$@" 9>&- ) 9>"$COMMIT_LOCK"
+}
+
+cmd_gate_lock() {
+  # Serializes HEAVY per-instance gates (tsc + vitest + canary boot against a DB copy)
+  # onto a SEPARATE lock from commit-lock: a gate takes minutes, a commit takes
+  # milliseconds — sharing one lock would let a long gate block every fast, unrelated
+  # commit queued behind it. See the design doc §5.2/§7: this is the main guard that
+  # makes running 4-5 instances safe on a 6 vCPU / 12 GB box (their gates would
+  # otherwise run concurrently and starve each other for CPU/RAM).
+  #
+  # Lock ORDER (avoids an ABBA deadlock with commit-lock): gate-lock is always taken
+  # OUTSIDE commit-lock, never the other way around — i.e. a CMD run under gate-lock may
+  # itself take commit-lock, but a CMD run under commit-lock must never take gate-lock.
+  # Gates are long, commits are short; nesting the long lock inside the short one would
+  # let two instances deadlock by acquiring the two locks in opposite order. Shell has no
+  # way to enforce this mechanically — it is a convention every caller must honor.
+  local timeout=""
+  while [ "${1:-}" != "--" ] && [ $# -gt 0 ]; do
+    case "$1" in
+      --timeout)
+        # set -u is active: with only 1 arg left ("--timeout" itself, no value), a bare
+        # "$2" here is an unbound-variable reference and aborts the whole script instead
+        # of giving usage + rc=2. Check argument count BEFORE touching $2 — and also
+        # reject "$2" == "--", the "gate-lock --timeout -- CMD..." case where a value was
+        # simply omitted and "--" (the CMD separator) would otherwise be swallowed as if
+        # it were the timeout, silently misparsing the rest of the command line.
+        if [ $# -lt 2 ] || [ "$2" = "--" ]; then
+          echo "[coord] gate-lock: --timeout requires a value" >&2
+          return 2
+        fi
+        timeout="$2"; shift 2;;
+      *) echo "[coord] gate-lock: unexpected argument '$1' (expected [--timeout N] -- CMD...)" >&2; return 2;;
+    esac
+  done
+  [ "${1:-}" = "--" ] && shift
+  [ $# -gt 0 ] || { echo "[coord] gate-lock: expected [--timeout N] -- CMD..." >&2; return 2; }
+  if [ -n "$timeout" ]; then
+    case "$timeout" in ''|*[!0-9]*) echo "[coord] gate-lock: --timeout must be a non-negative integer (got '$timeout')" >&2; return 2;; esac
+  fi
+  cmd_init
+  local rc
+  if [ -n "$timeout" ]; then
+    # 75, not 7: CMD's own exit code is always passed through on success, so a small
+    # integer like 7 is too easy to collide with — the caller couldn't tell "gate-lock
+    # itself timed out" apart from "CMD ran and legitimately returned 7". 75 sits outside
+    # the range typical CMD exit codes use.
+    ( flock -w "$timeout" 9 || { echo "[coord] gate-lock: timed out after ${timeout}s waiting for the gate lock (another instance's gate is running)." >&2; exit 75; }
+      # 9>&- on CMD: close the lock fd for CMD (and thus its children) before running it.
+      # A backgrounded/daemonized descendant of CMD (a gate spawns a canary boot process)
+      # would otherwise INHERIT fd 9 and keep the flock held after gate-lock returns —
+      # the parent subshell itself still holds and releases the lock normally on exit.
+      "$@" 9>&-
+    ) 9>"$GATE_LOCK"
+    rc=$?
+  else
+    # No timeout by default: a gate runs for minutes and a queue of up to
+    # MAX_INSTANCES instances waiting their turn is expected, not exceptional — a
+    # spurious timeout would fail a perfectly healthy gate for no reason other than bad
+    # luck in the queue, which is worse than just waiting.
+    ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
+      "$@" 9>&-
+    ) 9>"$GATE_LOCK"
+    rc=$?
+  fi
+  return "$rc"
 }
 
 cmd_notify_due() {
@@ -420,14 +666,33 @@ cmd_notify_due() {
   # this single inbox is touched, so there is no multi-lock ordering / deadlock concern.
   ( flock 9 || { echo "coord: failed to acquire lock" >&2; exit 5; }
     mkdir -p "$ROOT/notify" 2>/dev/null
-    local marker="$ROOT/notify/$id.last" newest last count
-    newest=$(jq -rR 'fromjson? | .at' "$box" 2>/dev/null | sort -n | tail -1)
+    local marker="$ROOT/notify/$id.last" newest last count bad_n badmarker bad_last
+    # "newest" and "count" must both be computed from VALID entries only — otherwise a
+    # malformed line could still advance the throttle marker (silently swallowing the
+    # next real notification) while never counting toward the number reported.
+    newest=$(jq -Rc "$_MAILBOX_VALIDATE_JQ" "$box" 2>/dev/null | jq -r 'select(.ok) | .at' 2>/dev/null | sort -n | tail -1)
     case "$newest" in ''|*[!0-9]*) newest=0;; esac
     last=0; [ -f "$marker" ] && last=$(cat "$marker" 2>/dev/null)
     case "$last" in ''|*[!0-9]*) last=0;; esac
+    # Bad-entry warning is throttled to ONCE per distinct count, via its own marker file —
+    # this hook fires on every PostToolUse, so an unthrottled warning on a mailbox that's
+    # entirely malformed (valid count stays 0 forever, so it's never cleared by recv)
+    # would otherwise print on every single tool call, forever.
+    bad_n=$(_mailbox_bad_count "$box")
+    badmarker="$ROOT/notify/$id.badwarn"
+    if [ "$bad_n" -gt 0 ]; then
+      bad_last=0; [ -f "$badmarker" ] && bad_last=$(cat "$badmarker" 2>/dev/null)
+      case "$bad_last" in ''|*[!0-9]*) bad_last=0;; esac
+      if [ "$bad_n" -ne "$bad_last" ]; then
+        echo "[coord] notify-due: $bad_n malformed inbox entries pending — run 'coord.sh recv --id $id' to quarantine them" >&2
+        printf '%s' "$bad_n" > "$badmarker"
+      fi
+    else
+      rm -f "$badmarker" 2>/dev/null   # mailbox clean again — reset so a future recurrence re-warns
+    fi
     if [ "$newest" -gt "$last" ]; then
       printf '%s' "$newest" > "$marker"
-      count=$(grep -cve '^[[:space:]]*$' "$box" 2>/dev/null || echo 0)
+      count=$(_mailbox_valid_count "$box")
       echo "$count"
     else
       echo 0
@@ -444,6 +709,7 @@ main() {
     heartbeat) cmd_heartbeat "$@";;
     roster) cmd_roster;;
     reap) cmd_reap;;
+    count) cmd_count;;
     claim) cmd_claim "$@";;
     release) cmd_release "$@";;
     claims) cmd_claims;;
@@ -451,8 +717,9 @@ main() {
     recv) cmd_recv "$@";;
     notify-due) cmd_notify_due "$@";;
     commit-lock) cmd_commit_lock "$@";;
+    gate-lock) cmd_gate_lock "$@";;
     repokey) echo "$REPOKEY  ($ROOT)";;
-    ""|-h|--help) sed -n '2,40p' "$0";;
+    ""|-h|--help) sed -n '2,64p' "$0";;
     *) echo "[coord] unknown command: $cmd" >&2; return 2;;
   esac
 }

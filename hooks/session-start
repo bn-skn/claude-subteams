@@ -91,8 +91,21 @@ if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ] && command -v jq >/dev/null 
     # Do NOT pass --pid: $PPID here is the hook's ephemeral sh/bash shell, not the
     # long-lived instance. coord.sh resolves the real `claude` ancestor pid itself
     # (and marks it trusted); only if that fails does it fall back to a heartbeat TTL.
-    "$_mi_coord" register --id "$_mi_id" --worktree "$PWD" \
-      --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" >/dev/null 2>&1
+    # stderr is captured (not silenced) so a register warning is actually seen — this is
+    # the ONLY live caller of `register` in production; silencing stderr here made the
+    # over-cap WARNING (and its exit 6) invisible to everyone, i.e. a complete no-op cap.
+    # Never let a nonzero register exit fail the hook itself (a hook failure here would
+    # break every session start), so no `set -e` interaction to worry about and no `||`
+    # needed around the call.
+    _mi_register_err=$("$_mi_coord" register --id "$_mi_id" --worktree "$PWD" \
+      --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" 2>&1 >/dev/null)
+    _mi_register_rc=$?
+    if [ "$_mi_register_rc" -eq 6 ] && [ -n "$_mi_register_err" ]; then
+      # Same mechanism this hook already uses everywhere else to donate context: a plain
+      # echo to stdout (SessionStart hook output is injected as context directly, unlike
+      # the JSON hookSpecificOutput channel used by PostToolUse/UserPromptSubmit hooks).
+      echo "[subteams:multi-instance] $_mi_register_err"
+    fi
     "$_mi_coord" reap >/dev/null 2>&1
     _mi_roster=$("$_mi_coord" roster 2>/dev/null)
     _mi_n=$(printf '%s\n' "$_mi_roster" | grep -c '^  - ')
