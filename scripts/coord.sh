@@ -1,8 +1,9 @@
 #!/bin/bash
 # coord.sh — portable multi-instance coordination for claude-subteams.
 #
-# A small, file-based substrate (flock + jq JSON + per-instance inbox) so 2-3 identical
-# Claude Code instances on ONE machine, working ONE git repo (each in its own worktree),
+# A small, file-based substrate (flock + jq JSON + per-instance inbox) so a handful of
+# identical Claude Code instances (capped at 5 by default, CLAUDE_SUBTEAMS_MAX_INSTANCES;
+# 3-4 in practice) on ONE machine, working ONE git repo (each in its own worktree),
 # can coordinate WITHOUT depending on Claude Code's native agent-teams. Opt-in only.
 #
 # Activation: nothing here does anything unless CLAUDE_SUBTEAMS_MULTI_INSTANCE=1.

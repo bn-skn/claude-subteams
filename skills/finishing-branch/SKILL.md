@@ -13,6 +13,8 @@ Guide completion of development work by presenting clear options and handling ch
 
 **Announce at start:** "I'm using the finishing-branch skill to complete this work."
 
+**Multi-instance note:** if `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` is active and `coord.sh count` reports more than one live instance, Step 1 (tests) and the merge in Step 4/Option 1 don't run standalone — follow the merge protocol in `claude-subteams:multi-instance` §7 instead (gate under `gate-lock`, merge under `commit-lock`, from the main checkout — never `git checkout <base-branch>` from your worktree, which fails with `'main' is already used by worktree at …`). The options and confirmations in Steps 2-4 below are otherwise unchanged. Worktree cleanup (Step 5), however, is **not** unchanged: a native worktree is locked, and a bare `git worktree remove <path>` fails with `cannot remove a locked working tree`. Use `claude-subteams:using-git-worktrees` (Cleanup section) instead of Step 5 as written below.
+
 ## The Process
 
 ### Step 1: Verify Tests
