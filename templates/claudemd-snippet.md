@@ -3,5 +3,7 @@
 For development tasks use the claude-subteams plugin (orchestrator + specialized sub-team agents).
 Invoke skill "claude-subteams:using-subteams" before significant development work.
 For small fixes — act directly, invoke code-review after if logic changed. Any logic change gets code-reviewer (and devils-advocate for non-trivial logic) — no "it's just one line" exemption.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect.
+Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect, gemini-analyst, gemini-code-reviewer, gemini-design-critic, gemini-frontend.
+Cross-model review is the default for Standard-or-above work when available: gpt-* via Codex, gemini-* via the `agy` CLI. Native Claude agents stay primary — cross-model findings never override them, and an unavailable lane degrades without blocking but is always stated.
 Building/editing agents, prompts, skills, or multi-agent systems → invoke agent-architect + prompt-engineer + prompt-evaluator (using-subteams Section 6.5).
+Running several Claude Code instances on one repo → set `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` and follow the `multi-instance` skill: claim files before editing, serialize heavy gates with `gate-lock`, commit/merge under `commit-lock`, land branches via its Merge Protocol (§7). Isolate work in worktrees via `using-git-worktrees`.

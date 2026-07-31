@@ -190,14 +190,14 @@ All 57 skills (auto-loaded on demand by description match; `using-subteams` load
 | backend | `error-handling` | Retry/backoff, circuit breakers, graceful degradation, structured errors; fix root causes. |
 | ops | `ci-cd-pipeline` | Set up and modify CI/CD pipelines, deployment workflows, environment promotion. |
 | ops | `git-workflow` | Branching strategy, conventional commits, and PR workflow. |
-| ops | `using-git-worktrees` | Isolated git worktrees for feature work or plan execution. |
+| ops | `using-git-worktrees` | Isolated git worktrees for feature work or plan execution: directory conventions incl. native `.claude/worktrees/`, `.worktreeinclude` for secrets, shared `node_modules` via `scripts/worktree-setup.sh` (never `npm install` from a worktree), what a worktree does NOT isolate, and teardown of locked worktrees. |
 | ops | `monitoring-logging` | Structured logging, health checks, alerting, and observability for services. |
 | ops | `incident-management` | Production incident response, root-cause analysis, and postmortems. |
 | ops | `mobile-development` | Building, architecting, and deploying React Native, Flutter, or native apps. |
 | ops | `i18n-localization` | Internationalization, translation workflows, and locale-specific formatting. |
 | research | `live-research` | Fetch current library/API docs before coding against fast-moving SDKs (`/research`, `/whatsnew`). |
 | cross-model | `cross-review` | GPT (Codex) + Claude critics in parallel to break model-monoculture blind spots (`/cross-review`, `/rescue`); Claude-only when Codex is down. |
-| coordination | `multi-instance` | Opt-in coordination for several Claude Code instances on one repo: claim before edit, commit under a lock, mailbox + auto-notify. Portable (file-based, not agent-teams). `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`. |
+| coordination | `multi-instance` | Opt-in coordination for several Claude Code instances on one repo: claim before edit, `commit-lock` for commits/merges, `gate-lock` to serialize heavy gates, mailbox + auto-notify, soft cap of 5. Owns the Merge Protocol (§7) for landing a worktree branch on `main`. Portable (file-based, not agent-teams). `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`. |
 
 ## Agents
 
@@ -249,6 +249,10 @@ When `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` (see the `multi-instance` skill), additi
 |---|---|---|
 | `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK` | Set to `1` to silence the Stop hook's documentation advisory entirely. Use for scratch / experimental work where doc updates are deliberately deferred, or in CI / batch contexts where the cycle does not apply. | unset (advisory active) |
 | `CLAUDE_SUBTEAMS_DOC_REMIND_COOLDOWN_MIN` | Minimum age (minutes, positive integer) of the doc-advisory marker before new undocumented files may trigger a re-fire within the same session. Invalid values fall back to the default. | 45 |
+| `CLAUDE_SUBTEAMS_MULTI_INSTANCE` | Set to `1` to enable multi-instance coordination (registry, file claims, locks, mailbox). Unset means the whole subsystem is a no-op — `coord.sh` exits 0 without output and the opt-in hooks do nothing. | unset (off) |
+| `CLAUDE_SUBTEAMS_MAX_INSTANCES` | Soft cap on simultaneously live instances. Exceeding it **never blocks registration** — an already-running session cannot be un-started, and an unregistered instance would hold no claims and sit off the roster, which is the exact failure the substrate exists to prevent. It registers, warns loudly, and returns **exit 6; callers MUST treat 6 as success** (only exit 8 means registration itself failed). Non-numeric values warn and fall back to the default. | 5 |
+| `CLAUDE_SUBTEAMS_HEARTBEAT_TTL` | Liveness fallback (seconds) for harnesses where the real `claude` pid cannot be resolved. With a trusted pid, liveness is authoritative via `kill -0` and this is unused. | 1800 |
+| `CLAUDE_SUBTEAMS_COORD_HOME` | Where the coordination ledgers live (instances, claims, inboxes, locks), keyed per repo. Override to isolate tests from a live registry. | `~/.claude/subteams` |
 
 ### Doc-advisory details
 

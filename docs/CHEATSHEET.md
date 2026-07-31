@@ -130,6 +130,46 @@ Needs the Codex CLI on a machine **without a Russia IP block** (`codex login` �
 
 ---
 
+## Multi-instance (several Claude Code sessions, one repo)
+
+Opt-in — nothing below does anything unless `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`.
+Full protocol: the `multi-instance` skill. `CO=${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh`.
+
+```bash
+$CO roster                          # who is live, on what branch, in which worktree
+$CO count                           # same, machine-readable: one bare integer (for hooks/scripts)
+$CO claims                          # which files are spoken for, and by whom
+$CO claim   --id <you> <path>...    # 0 = all yours · 3 = a peer holds one (then NOTHING is claimed)
+$CO release --id <you> --all        # let go when the work unit is done
+$CO send --from <you> --to <peer> "API ready"
+$CO recv --id <you>                 # prints AND clears your inbox; malformed lines are quarantined
+$CO reap                            # drop dead instances and free their claims
+```
+
+Serialization — **`gate-lock` always OUTSIDE `commit-lock`, never the reverse** (the reverse
+order is a real ABBA deadlock; shell cannot enforce it, so it is on you):
+
+```bash
+# NOTE the bash -c: `gate-lock -- a && b` would run only `a` under the lock and `b` outside it.
+$CO gate-lock   -- bash -c 'npx tsc --noEmit && npx vitest run'   # heavy gate: minutes, one at a time
+$CO commit-lock -- git commit -m "…"                              # fast: serializes shared .git refs
+```
+
+Landing a branch from a worktree: **`multi-instance` §7**. The merge runs **in the main
+checkout**, not the worktree — run it from the worktree and `git merge` prints
+`Already up to date.` and exits 0 having done nothing.
+
+Worktrees: `claude -w <name>` creates `.claude/worktrees/<name>/` on branch `worktree-<name>`
+and copies gitignored files listed in `.worktreeinclude` (a Claude Code feature — a manual
+`git worktree add` copies nothing). Then `scripts/worktree-setup.sh` shares the main
+checkout's `node_modules` by symlink — **never `npm install` from a worktree**. Teardown of a
+native worktree needs `git worktree unlock` first (the lock outlives the session).
+
+Caps and knobs: `CLAUDE_SUBTEAMS_MAX_INSTANCES` (default 5 — over-cap **warns**, exit 6, and
+still registers), `CLAUDE_SUBTEAMS_HEARTBEAT_TTL` (1800s), `CLAUDE_SUBTEAMS_COORD_HOME`.
+
+---
+
 ## Diagnostics
 
 ```bash
@@ -137,6 +177,7 @@ claude plugin list                  # what's installed + status
 claude plugin marketplace list      # configured marketplaces
 claude plugin validate .            # validate the manifest (run in the repo)
 ls ~/.claude/plugins/*.json         # global state (BACK UP before editing)
+$CO repokey                         # which coord ledger this repo maps to (multi-instance)
 ```
 
 ---
