@@ -1,6 +1,6 @@
 ---
 name: skill-engineering
-description: "Standards for writing high-quality SKILL.md files: one job per skill, numbered checklists, critical rules, and mandatory testing."
+description: "Use when authoring, splitting, merging, or auditing a SKILL.md — one job per skill, frontmatter that routes correctly, numbered checklists, critical rules, and testing that measures the trigger rate rather than the prose. Also covers where a rule must live to fire at all (§4a). Do NOT use for writing ordinary docs, README files, or a system prompt for an instance — a skill is invoked on demand, those are always resident."
 ---
 
 # Skill Engineering
@@ -46,9 +46,10 @@ description: "One sentence. Starts with verb or noun. Ends with period."
 ```
 
 1. `name` MUST match the directory name.
-2. `description` MUST be under 120 characters.
-3. `type: rigid` — agent MUST follow every step in order. No skipping, no reordering.
-4. `type: flexible` — agent follows the spirit but can adapt steps to context.
+2. `description` carries BOTH the trigger and the antitrigger — when to invoke, and explicitly when NOT to. It is the primary routing mechanism and is always resident in context, so everything a caller needs to decide belongs here, not in the body.
+3. Write it in the third person, naming the situation rather than the topic: "Use when X…  Do NOT use for Y."
+4. No character limit beyond keeping metadata lean — the whole `name` + `description` pair should stay around 100 words. Measured 2026-08-02: an explicit antitrigger produced 5 of 5 correct silences on out-of-class inputs, and it does not fit in a short line. Under-triggering is the common failure, not over-length.
+5. No `type:` field. It was specified for seven versions and carried by 0 of 59 skills, including this one; nothing reads it. Rigidity belongs in the body as NEVER/ALWAYS/MUST wording.
 
 ## 4a. Where a Rule Lives Decides Whether It Fires
 
@@ -80,10 +81,11 @@ Every skill MUST include a red flags table:
 ## 6. Testing Requirements
 
 1. After writing a skill, create 5-10 representative test inputs.
-2. Test inputs MUST cover: normal use (3), edge cases (2-3), misuse attempts (1-2).
-3. Run each test and verify the skill produces correct behavior.
-4. Save passing tests as regression tests.
-5. NEVER ship a skill without testing it with at least 5 inputs.
+2. Test inputs MUST cover: normal use (3), edge cases (2-3), misuse attempts (1-2), and at least one input where the skill MUST stay silent.
+3. Run each test against a real headless session and verify the routing decision, not just the prose. A skill that reads well and never fires is worse than no skill.
+4. Repeat the in-class inputs at least twice. Trigger rate is not deterministic — a skill firing on one run and not the next is a defect, and a single run cannot see it.
+5. Save passing tests as regression tests. The official `skill-creator` ships `run_eval.py` and `run_loop.py` for exactly this; use them rather than inventing a harness.
+6. NEVER ship a skill without testing it with at least 5 inputs.
 
 ## 7. Skill-Creator as Starting Point
 
@@ -97,7 +99,7 @@ Every skill MUST include a red flags table:
 
 1. Frontmatter is valid YAML with all required fields.
 2. Name in frontmatter matches directory name.
-3. Description is one sentence under 120 characters.
+3. Description names the trigger AND the antitrigger, third person, roughly within 100 words together with `name`.
 4. All sections use numbered checklists, not prose.
 5. Red flags table exists with 3-8 rows.
 6. Critical rules section exists with NEVER/ALWAYS/MUST statements.
