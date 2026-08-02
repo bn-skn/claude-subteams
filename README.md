@@ -137,13 +137,15 @@ This is also available as a file: `templates/claudemd-snippet.md`.
 
 ## Skills
 
-All 57 skills (auto-loaded on demand by description match; `using-subteams` loads at session start):
+All 59 skills (auto-loaded on demand by description match; `using-subteams` loads at session start):
 
 | Sub-team | Skill | Description |
 |---|---|---|
 | core | `using-subteams` | Orchestrator meta-skill — methodology, pipeline, red flags. Loaded at session start. |
 | core | `orchestrator-briefing` | Subagent communication protocol. Use before every Agent tool call. Now includes a mandatory `Rails:` briefing field (conventions/architecture docs + active plan) and a `Rails read:` output-contract line. |
 | core | `model-selection` | Guide for choosing sonnet vs opus per task type. |
+| core | `context-gaps` | Noticing that context is missing and fetching from the right source: gap classification (shared past / code / outside world), calibration, "similar-by-words is not one fact", "empty result is not proof of absence". |
+| core | `delivering-to-user` | The recipient pass before an expensive delivery — document, render, diff, subagent output. Includes the raw-output exception and progress signalling. Message SHAPE is deliberately not here: see CHANGELOG 1.44.0. |
 | core | `context-management` | Managing the context window, checkpoints, and session summaries. |
 | core | `lazy-implementation` | Vendored ponytail core (MIT): the 7-rung YAGNI ladder — the laziest solution that actually works; security/trust-boundary never trimmed. Also embedded in the developer agent. |
 | core | `autonomous-loop` | In-session plan loop, strictly opt-in: explicit operator request + fresh autonomy run record. Item → pipeline (review floor holds) → mechanical checkpoint → next; any operator message is the kill-switch. |

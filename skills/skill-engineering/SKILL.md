@@ -50,6 +50,21 @@ description: "One sentence. Starts with verb or noun. Ends with period."
 3. `type: rigid` — agent MUST follow every step in order. No skipping, no reordering.
 4. `type: flexible` — agent follows the spirit but can adapt steps to context.
 
+## 4a. Where a Rule Lives Decides Whether It Fires
+
+Measured 2026-08-02 across two eval rounds (headless runs, `delivering-to-user` and `context-gaps`). Three layers, and only two of them are always present:
+
+| Layer | In context | Use it for |
+|-------|-----------|------------|
+| The host's own instruction file | Always | Invariants that must hold on EVERY turn |
+| Skill `description` | Always (all skills' metadata is resident) | The trigger, the antitrigger, and any one-line rule that must not be missed |
+| Skill body | Only when the skill is invoked — measured ~40% on its own declared class | Depth: what exactly to check, how to judge, worked procedure |
+
+1. The platform does NOT invoke a skill for work the model already performs unaided. Response formatting, tone, and length are that class — a skill carrying them fired on 2 of 5 in-class deliveries and was NOT reproducible on identical input.
+2. Therefore: a rule whose violation is SILENT (no error, no failed test, just quietly worse output) must NOT live in the body alone.
+3. Narrowing the description does not fix an undertriggering body. It was tried: rewriting the trigger from a broad phrase to concrete artifact nouns left the rate unchanged at 2/5.
+4. Corollary for portability: when a skill is meant to carry methodology to another host, any invariant must be reproduced in the host's instruction template too. A pointer is not a rule.
+
 ## 5. Red Flags Table Format
 
 Every skill MUST include a red flags table:

@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.44.0] - 2026-08-02
+
+### Added
+- `context-gaps` — noticing that context is missing and fetching from the source that owns it: gap classification (shared past / code / outside world), calibration against false positives, "similar-by-words is not one fact", "an empty result is not proof of absence". Measured 10/10 correct routing decisions on a headless eval, including "never web-search the user's own past" and "an installed dependency is CODE".
+- `delivering-to-user` — the recipient pass before an expensive delivery: what the pass checks, the raw-output exception (handing over untouched is allowed; agreeing not to read it never is), the boundary against verification and independent review, progress signalling.
+
+### Changed
+- `templates/claudemd-snippet.md` — two rules added as always-on text rather than a skill invocation: the user's past is never searched on the web, and an already-installed library is CODE. Both are lost if left behind a skill trigger.
+
+### Notes
+- Message-shape rules deliberately do NOT live in a skill. Measured: a skill carrying them fired on 2 of 5 human-facing deliveries and was not reproducible on identical input — the platform does not invoke a skill for what the model already does unaided. They belong in the instance's own system prompt; the skill carries depth, not reflex.
+
 ## [1.43.0] - 2026-07-31
 
 ### Added
