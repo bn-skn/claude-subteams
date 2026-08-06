@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Git-хук репозитория claude-subteams (НЕ хук плагина из hooks/ — тот едет заказчикам,
+# эта проверка специфична для самого репо и наружу не поставляется).
+#
+# Зачем: 06.08.2026 marketplace.json завис на 1.39.0, пока plugin.json уехал на 1.44.0 —
+# пять релизов подряд бампили только plugin.json. Каталог читается при сравнении
+# «есть ли апдейт», поэтому обновление у пользователя молча не приезжало.
+#
+# Срабатывает только когда в индексе есть один из двух манифестов версии.
+# Установка (разово в клоне): git config core.hooksPath .githooks
+
+set -uo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+if ! printf '%s\n' "$staged" | grep -qE '^\.claude-plugin/(plugin|marketplace)\.json$'; then
+  exit 0
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "[version-sync] python3 не найден — проверка версий пропущена, сверь вручную." >&2
+  exit 0
+fi
+
+if ! bash "$DIR/scripts/check-version-sync.sh" --staged; then
+  echo >&2
+  echo "Коммит остановлен: в индексе манифест версии, а plugin.json и marketplace.json разошлись." >&2
+  echo "Бампи ОБА файла в одном коммите. Обход (осознанно): git commit --no-verify" >&2
+  exit 1
+fi

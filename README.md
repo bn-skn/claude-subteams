@@ -62,6 +62,29 @@ claude --plugin-dir /path/to/claude-subteams
 
 Use `/reload-plugins` inside Claude Code to hot-reload after changes.
 
+### Releasing (maintainers)
+
+A release bumps the version in **two** manifests, and both must move in the same commit:
+
+- `.claude-plugin/plugin.json` — the version the plugin reports and installs as
+- `.claude-plugin/marketplace.json` — the version the catalog advertises, which is what the CLI compares against to decide whether an update exists
+
+Bumping only `plugin.json` is silent: the code ships fine, but `plugin update` can read a lower catalog version than the one already installed and conclude there is nothing to do. That happened for five releases straight (1.40.0 → 1.44.0) and left installs stranded on an old version.
+
+Enable the guard once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`.githooks/pre-commit` then runs `scripts/check-version-sync.sh --staged` whenever either manifest is staged, and refuses the commit if the two versions disagree. It reads the **index**, not the working tree, so a locally-fixed file cannot mask a broken commit. Deliberate override: `git commit --no-verify`. The check also runs standalone against the working tree:
+
+```bash
+bash scripts/check-version-sync.sh
+```
+
+This is a repo-local git hook, not a plugin hook — it is not part of what `hooks/` ships to users.
+
 ### Requirements
 
 - **git** — required for marketplace cloning (private repo)
