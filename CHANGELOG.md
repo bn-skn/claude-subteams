@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.45.0] - 2026-08-28
+
+### Added
+- `using-subteams` §1.1 "Document artifacts: budget the size before you delegate" — three rules for document deliverables: size budget fixed before any writer is dispatched and carried verbatim in every brief; compression by subagent forbidden (rewrite in one pass instead); one writer per deliverable file, parallel writers only for parts that never merge. Scope is strict — code, tests, config and internal process artifacts (plans, ADRs, briefs) are excluded.
+- Critical Rules 25-27 restate the three as checkable violations: a budget you cannot quote was never set; a brief containing "shorten/compress/trim" is itself the violation; two agents holding one document path is the violation, checked on the dispatch list rather than the diff.
+- Two Red Flags rows ("I'll have a subagent shorten it", "Five writers will finish this document faster").
+- `parallel-dispatch` — "Do not use when" gains the stitched-document case.
+
+### Changed
+- `using-subteams` description and Section 3 now route document deliverables into the skill. Previously "write me a spec" classified as non-development ("Plugin stays SILENT"), so the skill never loaded on the very task class these rules govern.
+
+### Context
+Measured on a 2026-08-28 requirements run: five parallel writers plus stitching plus two compression passes burned ~2.8M subagent tokens and exhausted the session limit twice; roughly 1.8M of that was producing excess and then removing it. The independent review in the same run cost 231K and surfaced schema defects that would otherwise have shipped — review is not the expensive part, unbudgeted volume is. Rule 26 deliberately carves out review, fact-check and defect fixes so the correction does not overshoot into "subagents are expensive, do it all yourself".
+
 ## [1.44.0] - 2026-08-02
 
 ### Added

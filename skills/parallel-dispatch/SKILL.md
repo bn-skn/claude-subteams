@@ -25,6 +25,7 @@ When you have multiple unrelated failures (different test files, different subsy
 1. Failures are related (fix one might fix others)
 2. Need to understand full system state
 3. Agents would interfere with each other
+4. The output is one document that must be stitched into a coherent whole (see `using-subteams` §1.1)
 
 ## The Pattern
 

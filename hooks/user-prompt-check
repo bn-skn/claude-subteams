@@ -24,6 +24,10 @@ fi
 # Agentic/prompt patterns — checked first (a more specific subtype of dev work)
 if printf '%s\n' "$PROMPT" | grep -qiE 'system prompt|prompt engineer|agentic|sub-?agent|multi-?agent|mcp server|tool (definition|schema)|llm[ -]?judge|rag pipeline|(build|create|design|edit|write|improve|optimi[sz]e)( [a-z]+){0,3}? (agent|prompt|skill)s?\b'; then
   echo "[subteams:scope] Agentic/prompt work detected — apply using-subteams Section 6.5: agent-architect (design) / prompt-engineer (authoring) / prompt-evaluator (validation)."
+# Document deliverables — checked before greenfield: "write a spec for a new service" is a document task
+# first and a structural task second, and the document budget must be set before any writer is dispatched.
+elif printf '%s\n' "$PROMPT" | grep -qiE '(write|draft|make|prepare|напиши|составь|сделай|подготовь)( [^ ]+){0,3} (spec|specification|requirements|proposal|report|тз|техзадание|техническое задание|спецификаци|коммерческое предложение|отчёт|отчет)|\bтз\b|statement of work'; then
+  echo "[subteams:scope] Document deliverable detected — set the size budget BEFORE dispatching writers, one writer per file, never compress with a subagent (using-subteams Section 1.1, Rules 25-27)."
 # Greenfield / structural patterns — checked before generic dev so the architecture-capture flow surfaces
 elif printf '%s\n' "$PROMPT" | grep -qiE 'new( [^ ]+){0,3} (project|service|module|layer|integration|microservice)|greenfield|scaffold|bootstrap (a |the |new )?project|from scratch|re-?design (the )?architecture|re-?architect|dependency direction|архитектур|нов(ый|ого)( [^ ]+){0,3} (проект|сервис|модул|слой|интеграци)|с нуля|редизайн'; then
   echo "[subteams:scope] Greenfield/structural work detected — apply the architecture-capture flow: capture decisions as ADRs during brainstorming, populate ARCHITECTURE.md/CONVENTIONS.md, and gate IMPLEMENT on scripts/check-arch-docs.sh (using-subteams Rule 24)."

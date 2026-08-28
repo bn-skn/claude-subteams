@@ -1,7 +1,7 @@
 ---
 name: using-subteams
-description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, planning architecture, or building/editing agents, prompts, skills, and multi-agent systems."
-version: 1.9.0
+description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, planning architecture, or building/editing agents, prompts, skills, and multi-agent systems. Also invoke before producing a document deliverable with subagents — spec, requirements, TZ, report, proposal — to set the size budget before any writer starts (Section 1.1)."
+version: 1.10.0
 ---
 
 # Using Subteams — Orchestrator Meta-Skill
@@ -27,7 +27,7 @@ Five rules carry the weight of everything below. Read them first. The rest of th
 You are a **leader**, not a relay. You understand the work deeply enough to review it, fix it, and do it yourself when that is the right call. Subagents are your team — you brief them, review their output, and take responsibility for the final result.
 
 **Delegate when:**
-- The task is parallelizable (2+ independent units of work)
+- The task is parallelizable (2+ independent units of work) — **parts of one document are not independent units; see 1.1**
 - A specialist perspective adds value (security audit, adversarial testing, architecture review)
 - You need a fresh pair of eyes (devil's advocate, code review)
 - The task is isolated and well-scoped (single module, clear inputs/outputs)
@@ -38,6 +38,18 @@ You are a **leader**, not a relay. You understand the work deeply enough to revi
 - Quick fixes faster to implement than to write a brief (< 5 min of work)
 - Integrating results from multiple subagents into a coherent whole
 - The user explicitly asked YOU to do something
+
+### 1.1 Document artifacts: budget the size before you delegate
+
+When the deliverable is a **document** (spec, requirements, plan, report, analysis), three rules apply on top of the delegation calculus above. Writing an unbounded document and then shrinking it costs far more than writing it right-sized once.
+
+1. **Set the size budget before any writer starts.** Target pages or lines go into EVERY writer's brief. If the user did not state a size, ask — one clarifying line is cheaper than any later trim. Without a budget each writer maximizes the completeness of their own part, and the parts sum to several times what the reader wanted.
+2. **Never shrink a document with a subagent.** Compression is the most expensive agent mode: the agent reads the whole file, makes dozens to hundreds of small edits, and re-reads around each one. If the artifact overran its budget, rewrite it yourself in one pass — that beats trimming on both cost and coherence.
+3. **Split a document across writers only when the parts do not have to be stitched.** Parallel authors of one document diverge on names, thresholds, and identifiers, and reconciling them costs more than the writing did. Parallel writers are allowed in exactly one case: the parts ship as separate files that never merge. If they merge, one writer — no matter how large the document. Parallelize the research feeding that writer instead.
+
+**Scope is strict:** this covers a document a human reads as the product — spec, requirements/TZ, client report, proposal. It does NOT apply to code, tests, config, or to a subagent's report back to you (that is an output contract — see `orchestrator-briefing`). Internal process artifacts — plans, ADRs, briefs, review findings — carry the budget their own skill defines; never stop to ask the user for a page count on those.
+
+Measured on a 2026-08-28 requirements run: five parallel writers plus stitching plus two compression passes burned ~2.8M subagent tokens and exhausted the session limit twice; ~1.8M of that was producing excess and then removing it. Compression makes the agent re-read the file around every edit — that is what makes trimming cost more than the writing did. The independent review in the same run cost 231K and surfaced schema defects that would otherwise have shipped. Review is not the expensive part — unbudgeted volume is.
 
 **Ownership principle:** If you delegated and the result is wrong, YOU are responsible. You chose the agent, wrote the brief, reviewed the output. "The subagent got it wrong" is never an excuse — you signed off on the work.
 
@@ -87,7 +99,7 @@ Before applying any development skill, classify the task. This is not optional.
 | Development | Code changes, file references, "implement", "fix", "refactor", "test", "deploy", architectural discussions | Full or lightweight pipeline (Section 7) |
 | **Agentic / prompt work** | Building or editing agents, system prompts, skills, tool definitions, MCP servers, multi-agent systems, LLM-judge/RAG pipelines | Development pipeline **+ mandatory Section 6.5 specialist wiring** |
 | Partial development | Marketing copy + code, design + implementation, docs + config | Apply only relevant skills — do not impose full process on non-code parts |
-| Non-development | General questions, analysis, writing, conversation, brainstorming without implementation | Respond directly. Plugin stays SILENT — do NOT impose process |
+| Non-development | General questions, analysis, writing, conversation, brainstorming without implementation | Respond directly. Plugin stays SILENT — do NOT impose process. **One exception: if you are about to dispatch subagents to write a document deliverable, Section 1.1 applies — budget first** |
 
 **Detection heuristics:**
 - File paths mentioned (`.ts`, `.py`, `.go`, etc.) → likely development
@@ -430,6 +442,8 @@ These are the rationalizations that lead to broken software. When you catch your
 | "This is simple, no need for review" | Simple changes cause cascading bugs. The simpler it seems, the less attention you pay. | Run code-reviewer for ANY logic change, no exceptions. |
 | "I'll skip testing, it obviously works" | "Obviously works" is the #1 predictor of production bugs. | Run test-engineer for any logic change. |
 | "I'll just commit and fix later" | Later never comes. Bugs compound. Technical debt accrues interest. | Verify BEFORE commit. Always. |
+| "I'll have a subagent shorten it" | Compression makes the agent re-read the document around every edit — trimming routinely costs more than the writing did, and the result loses the thread. | Rewrite it yourself in one pass, or re-agree the size with the user (Section 1.1). |
+| "Five writers will finish this document faster" | Parallel authors diverge on names, thresholds and identifiers; reconciling them costs more than the writing. | One writer per deliverable file. Parallelize the research feeding them (Section 1.1). |
 | "The subagent said it passed" | Subagents hallucinate results. "tsc: OK" in the report does not mean tsc actually ran. | Read the actual command output yourself. Verify evidence. |
 | "I know this library well enough" | Your training data may be 6-18 months stale. APIs change. Defaults change. | Research first — context7, WebSearch. 30 seconds saves 10 minutes. |
 | "I know what they want" | You are guessing. Business context lives in the user's head, not in code. | Ask. One question now prevents one rewrite later. |
@@ -479,6 +493,9 @@ These are non-negotiable. Violating any of these is a process failure.
 22. **MUST** apply Section 6.5 to agentic/prompt work. Building or editing agents, system prompts, skills, tool definitions, or multi-agent systems requires agent-engineering + subagent-prompt-design + prompt-evaluation and a prompt-evaluator pass. NEVER ship an unevaluated prompt or agent.
 23. **MUST** verify the process ran with evidence before declaring done (Section 6.6). A gate you cannot show output for did not happen. Skipped gates are stated explicitly, never presented as passed.
 24. **MUST** gate greenfield and non-trivial structural work on populated architecture docs (Full Pipeline Step 4.5). Before structural IMPLEMENT, `docs/ARCHITECTURE.md` + `docs/CONVENTIONS.md` must be populated via the `brainstorming` capture flow — `scripts/check-arch-docs.sh` passes AND every non-obvious choice traces to an ADR (or is `**TBD — unresolved**`, never invented). **Scope is strict:** greenfield (new project) and non-trivial structural changes ONLY — a new module, a new layer, a dependency-direction change, or a new external integration. This rule does NOT apply to logic-only features, bug fixes, in-module refactors, UI tweaks, or any change that leaves the module boundaries and dependency graph intact. Applying it to small changes is bureaucracy, not safety. The orchestrator populates the docs in-context — never a fresh-context subagent, which would fabricate decisions it never witnessed.
+25. **MUST** set a written size budget for any document deliverable before dispatching writers, put it verbatim in every writer's brief, and report delivered-vs-budget in the final summary (Section 1.1). No size from the user → ask, one line. **A budget you cannot quote was never set.**
+26. **NEVER** dispatch a subagent to shorten, compress or trim a document — a brief containing "shorten / compress / trim / сократи" IS the violation. Overran the budget → rewrite it yourself in one pass; does not fit your remaining context → stop and re-agree the size with the user, never spawn a compressor (Section 1.1). **This bans shrinking-for-size only — review, fact-check and targeted defect fixes by subagents stay mandatory (Rules 21-23).**
+27. **NEVER** give two writers Write access to the same deliverable file. Parts that merge into one coherent artifact get one writer; parts that ship as separate files never merged may be written in parallel. **Two agents holding one document path is the violation — check the dispatch list before sending, not the diff after** (Section 1.1).
 
 ## 14. Instruction Hierarchy
 
