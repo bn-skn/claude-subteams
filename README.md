@@ -22,15 +22,6 @@ claude plugin marketplace add bn-skn/claude-subteams
 claude plugin install claude-subteams@articortex
 ```
 
-**Private repo auth required.** This repo is private. Before running either path, ensure your GitHub credentials are configured:
-
-```bash
-gh auth login
-gh auth setup-git
-```
-
-Or set `GITHUB_TOKEN` in your environment for non-interactive / CI use.
-
 A convenience shell wrapper is also available:
 
 ```bash
@@ -87,8 +78,7 @@ This is a repo-local git hook, not a plugin hook — it is not part of what `hoo
 
 ### Requirements
 
-- **git** — required for marketplace cloning (private repo)
-- **gh** (GitHub CLI) — needed for private repo auth (`gh auth login && gh auth setup-git`)
+- **git** — required for marketplace cloning
 - **Node.js** (via nvm or global) — required for pre-commit-gate hook (tsc check)
 - **jq** — used by hooks to parse JSON input
 
