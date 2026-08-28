@@ -31,15 +31,6 @@ claude plugin marketplace add bn-skn/claude-subteams
 claude plugin install claude-subteams@articortex
 ```
 
-**Private repo auth required.** Configure git credentials before running:
-
-```bash
-gh auth login
-gh auth setup-git
-```
-
-Or set `GITHUB_TOKEN` in your environment for non-interactive / CI use.
-
 After install, reload Claude Code (`/reload-plugins` or new session).
 
 ---
@@ -95,10 +86,9 @@ Restart Claude Code (new session or `/reload-plugins`), then check:
 - Check that skills are flat: `skills/{name}/SKILL.md`, NOT `skills/category/{name}/SKILL.md`
 - Claude Code only scans one level deep under `skills/`
 
-**Marketplace add fails with auth error?**
-- Run `gh auth status` to confirm GitHub credentials.
-- Run `gh auth login && gh auth setup-git` if not configured.
-- Alternatively set `GITHUB_TOKEN` in your environment.
+**Marketplace add fails?**
+- Confirm network access to `github.com`.
+- Confirm your `claude` CLI supports the subcommand: `claude plugin marketplace --help`.
 
 **`claude plugin` subcommand not recognized?**
 - Run `claude plugin --help` to see available subcommands.

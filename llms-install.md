@@ -6,11 +6,10 @@ You are installing the **claude-subteams** plugin into Claude Code on the user's
 
 ## 0. Requirements
 
-This protocol requires three capabilities from your harness:
+This protocol requires two capabilities from your harness:
 
 1. **Shell execution** — you must be able to run arbitrary bash commands. If your harness requires per-command approval, request blanket approval for this session now before proceeding.
 2. **Claude Code CLI** — the `claude` binary must be on PATH. If it is not, the plugin has nothing to load into.
-3. **Private repo auth** — this repo is private. The user's git credentials must be configured so `git clone git@github.com:bn-skn/claude-subteams` (or the HTTPS equivalent) succeeds without prompting. Claude Code uses the machine's existing git/gh credentials when cloning marketplace repos.
 
 If you cannot satisfy requirement 1, stop and tell the user their harness does not support shell-based installation. They can run the installer manually.
 
@@ -44,21 +43,6 @@ git --version
 
 **Pass:** exits 0.
 **Fail:** not found. Stop — git is required for marketplace cloning.
-
-### 1d. GitHub auth (private repo)
-
-```bash
-gh auth status 2>&1 | head -5
-```
-
-**Pass:** output includes `Logged in to github.com` (or similar confirmation).
-**Fail / gh not found:** warn the user that git credentials for `github.com/bn-skn` must be configured before the marketplace add will work. Options:
-
-- `gh auth login && gh auth setup-git`
-- Set `GITHUB_TOKEN` in the environment
-- Manually configure `~/.netrc` or SSH key
-
-Do not stop — proceed, but note the auth status for the step-7 report.
 
 ### 1e. jq (hooks dependency)
 
@@ -118,7 +102,7 @@ claude plugin install claude-subteams@articortex
 
 **Pass:** exits 0.
 **Fail:** non-zero exit code. Capture the full stderr and report it to the user. Common causes:
-- Auth failure cloning the private repo (step 1d).
+- Network failure cloning the repo.
 - `claude plugin` subcommand not recognized — run `claude plugin --help` to confirm available subcommands and adjust accordingly.
 
 ---
@@ -230,8 +214,6 @@ After steps 1–3 pass, compile and deliver this report.
 
 **Warnings from installer (include verbatim):** scan step 2b stdout for any `WARNING:` lines. If none, write "None."
 
-**Auth status:** report what you found in step 1d. If credentials were absent, remind the user to configure git/gh auth for future updates.
-
 **Requires manual action:**
 
 1. **Reload Claude Code** — run `/reload-plugins` or open a new session. Skills and agents are not active until reload.
@@ -290,7 +272,7 @@ jq 'if .enabledPlugins then .enabledPlugins |= del(.["claude-subteams@bn-skn"]) 
 rm -rf "$HOME/.claude/plugins/marketplaces/bn-skn"
 ```
 
-`/plugins` revives immediately. Then run the normal install (step 2) after ensuring git/gh auth (step 1d).
+`/plugins` revives immediately. Then run the normal install (step 2).
 
 **Report to the user** what you repaired (which entry was stale, that backups were made at `*.bak`), then proceed with the fresh install and the usual reload + smoke test.
 

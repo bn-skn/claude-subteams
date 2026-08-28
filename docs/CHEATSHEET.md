@@ -2,21 +2,15 @@
 
 Quick reference for installing, updating, removing, and **repairing** the plugin from any machine.
 
-- **Repo:** `bn-skn/claude-subteams` (private)
-- **Marketplace:** `articortex` · **Plugin:** `claude-subteams` · **Version:** 1.34.4 (see CHANGELOG for the latest)
-- **Contents:** 16 agents, 57 skills, 11 hooks
+- **Repo:** `bn-skn/claude-subteams` (public)
+- **Marketplace:** `articortex` · **Plugin:** `claude-subteams` · **Version:** 1.44.0 (see CHANGELOG for the latest)
+- **Contents:** 20 agents, 59 skills, 11 hooks
 
 ---
 
 ## Install
 
-Prerequisite (private repo): authenticate GitHub on the machine first.
-
-```bash
-gh auth login && gh auth setup-git      # or: export GITHUB_TOKEN=ghp_...
-```
-
-Then, inside Claude Code:
+Inside Claude Code:
 
 ```
 /plugin marketplace add bn-skn/claude-subteams
@@ -43,7 +37,7 @@ Activate in a project: add the snippet from `templates/claudemd-snippet.md` to t
 claude plugin marketplace update articortex        # 1. refresh catalog (pull latest main)
 claude plugin update claude-subteams@articortex    # 2. upgrade the installed plugin
 ```
-Then `/reload-plugins` (or a new session) to apply. Step 1 pulls the latest `main` from the private repo into the marketplace catalog; step 2 bumps the **installed** plugin to that version. `marketplace update` alone is not enough — the installed plugin is version-pinned and only `plugin update` moves it.
+Then `/reload-plugins` (or a new session) to apply. Step 1 pulls the latest `main` from the repo into the marketplace catalog; step 2 bumps the **installed** plugin to that version. `marketplace update` alone is not enough — the installed plugin is version-pinned and only `plugin update` moves it.
 
 Interactive equivalent: `/plugin marketplace update articortex` → `/plugin update claude-subteams@articortex` → `/reload-plugins`.
 
@@ -94,8 +88,7 @@ jq 'if .enabledPlugins then .enabledPlugins |= del(.["claude-subteams@bn-skn"]) 
 rm -rf ~/.claude/plugins/marketplaces/bn-skn
 ```
 
-`/plugins` revives immediately. Then reinstall via the marketplace flow above
-(after `gh auth login && gh auth setup-git`).
+`/plugins` revives immediately. Then reinstall via the marketplace flow above.
 
 > Safety: never blanket-`rm` `~/.claude/plugins/` — that wipes ALL your plugins.
 > Touch only the `bn-skn` / `claude-subteams@bn-skn` entries. Back up before editing.
@@ -184,8 +177,8 @@ $CO repokey                         # which coord ledger this repo maps to (mult
 
 ## Notes
 
-- The repo is **private** — do not submit to the public `claude-community` marketplace
-  unless you intend to make it public. Self-hosting from the private repo is fully supported.
+- The repo is public, but is **not** submitted to the `claude-community` marketplace —
+  installation goes through the self-hosted `articortex` marketplace.
 - Marketplace name `articortex` is deliberately **different** from the plugin name
   `claude-subteams` to avoid the cache-recursion bug (marketplace-name == plugin-name).
 - Dev copy of the repo lives at `~/claude-subteams` on the main machine.

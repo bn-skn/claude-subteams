@@ -6,8 +6,7 @@
 #   /plugin install claude-subteams@articortex
 #
 # This script is a convenience wrapper for shell environments.
-# Prerequisite for private-repo access: gh auth login && gh auth setup-git
-# (or set GITHUB_TOKEN in your environment).
+# Requires: claude CLI on PATH, git, network access to github.com
 
 set -euo pipefail
 
@@ -58,8 +57,8 @@ if [ "$ALREADY_ADDED" = false ]; then
   # if this fails with "unknown command", the CLI version may differ.
   if ! claude plugin marketplace add "$REPO"; then
     echo "[claude-subteams] ERROR: marketplace add failed." >&2
-    echo "  This is a PRIVATE repo — configure GitHub auth first:" >&2
-    echo "    gh auth login && gh auth setup-git   (or export GITHUB_TOKEN)" >&2
+    echo "  Check network access to github.com and that the 'claude' CLI supports" >&2
+    echo "  'plugin marketplace add' (run: claude plugin marketplace --help)." >&2
     exit 1
   fi
 fi

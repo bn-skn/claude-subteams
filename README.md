@@ -40,7 +40,7 @@ You can hand `llms-install.md` to any coding agent (Cursor, Windsurf, Claude Cod
 @llms-install.md install this plugin
 ```
 
-The protocol walks the agent through dependency checks, auth verification, marketplace add/install, reload instructions, and the post-reload smoke test. A companion `llms-uninstall.md` covers the reverse path.
+The protocol walks the agent through dependency checks, marketplace add/install, reload instructions, and the post-reload smoke test. A companion `llms-uninstall.md` covers the reverse path.
 
 ### Development / Testing
 
