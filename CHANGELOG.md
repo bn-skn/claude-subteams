@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.46.0] - 2026-10-06
+
+### Fixed
+- `cross-review` + both GPT critics: every `codex exec` call now ends with `< /dev/null`. Without the redirect Codex blocks forever on `Reading additional input from stdin...` whenever the caller leaves stdin open with no EOF — which is exactly how an agent's Bash tool launches it. The failure is silent: no error, no output, the lane simply never returns, so it reads as a slow model rather than a hang. Measured 06.10.2026 on codex-cli 0.147.0: one cross-review lane burned ~50 minutes before diagnosis; the retry with the redirect completed normally. Verified in both directions against a real `codex` (exit 124 with stdin held open, exit 0 with the redirect) and against all six call sites with an argv-logging stub — argv is byte-identical, `RC=$?` still captures Codex's own exit code, and the `cross-review-unavailable` degradation path is untouched.
+
+### Added
+- The invariant now lives on the skill's enforcement surfaces, not only in prose: a Red Flags row and Critical Rule 10. A hang is worse than a crash here — a crashed lane reports `cross-review-unavailable` and the pipeline moves on, a hung one eats the whole review budget — so §6.1's availability contract gained the "hangs without returning" state, which it previously did not describe.
+- Explicit scope fence on the redirect: it applies to `codex` ONLY. The Gemini lane is the mirror image — `scripts/gemini/agy-run.sh` reads the prompt FROM stdin (`PROMPT=$(cat)`), so `agy-run.sh < /dev/null` exits 2 with an empty-prompt error. A rule generalized to "always redirect stdin" would kill the third review lane outright. Two further caveats recorded: `codex exec review` documents `-` as "read prompt from stdin" (never combine it with the redirect), and the redirect closes the known hang trigger rather than the class — wrap the call in `timeout` when a hard ceiling is needed, as the sibling Gemini script already does.
+
 ## [1.45.0] - 2026-08-28
 
 ### Added

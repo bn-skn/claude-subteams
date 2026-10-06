@@ -45,9 +45,11 @@ CROSS_REVIEW_EFFORT=high              # override effort; unset → Codex uses it
 | — | significant | **high** |
 | — | worth-considering | **medium** |
 
+**Invocation invariant — every `codex exec` call ends with `< /dev/null`.** Scope is `codex` ONLY, and a new `codex exec` call MUST carry it too. **Do NOT generalize this to other CLIs: the Gemini lane is the opposite** — `scripts/gemini/agy-run.sh` reads the prompt FROM stdin (`PROMPT=$(cat)`), so `review.sh` / `design-critic.sh` pipe into it, and `agy-run.sh < /dev/null` exits 2 with `пустой промпт`. Redirecting stdin there kills the third lane outright. Without it `codex exec` blocks forever on `Reading additional input from stdin...` when launched from a tool that leaves stdin open with no EOF — which is exactly how an agent's Bash tool launches it. The failure has no error and no output: the lane simply never returns. Measured 06.10.2026: one cross-review lane burned ~50 minutes this way before the agent diagnosed it; the retry with `< /dev/null` completed normally. A hang is worse than a crash here — a crashed lane reports `cross-review-unavailable` and the pipeline moves on, a hung one silently eats the whole review budget. Two caveats: `codex exec review` documents `-` as «read prompt from stdin», so a call written that way would get a silently empty prompt from the redirect — don't combine them; and the redirect closes the KNOWN hang trigger, not the class, so wrap the call in `timeout` if you need a hard ceiling (the sibling lane does: `scripts/gemini/agy-run.sh` runs `timeout "$TIMEOUT" agy`, and that script's own header carries the mirror-image lesson — agy eats stdin even in a subcommand).
+
 **Maintenance note:** To upgrade the model or change reasoning effort, edit your Codex CLI config (`~/.codex/config.toml`) — the critics inherit both automatically, exactly as Codex resolves them (profiles included); no plugin edit needed. Use `CROSS_REVIEW_MODEL` / `CROSS_REVIEW_EFFORT` only to pin model/effort temporarily. Verify the configured model and effort with:
 ```bash
-codex exec -c model_reasoning_effort=high -s read-only --skip-git-repo-check "Return your model name and reasoning effort level as JSON."
+codex exec -c model_reasoning_effort=high -s read-only --skip-git-repo-check "Return your model name and reasoning effort level as JSON." < /dev/null
 ```
 
 **Gemini lane model policy (differs from Codex by design):** `gemini-code-reviewer` passes `--model "Gemini 3.1 Pro (High)"` explicitly (override: `CROSS_REVIEW_GEMINI_MODEL=<display label>`). This deviates from the no-hardcode rule because agy's own settings default is the fast Flash tier — right for the analyst role, too shallow for review — and agy has no per-role config to inherit from. agy accepts ONLY display labels; slugs are silently ignored (the agent log-verifies the actual model after every call). There is no separate effort env — effort is part of the label.
@@ -125,7 +127,8 @@ EFFORT_FLAG=()
 
 codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   -s read-only \
-  "<symptom description> — files: <list>. Diagnose the root cause and propose a concrete fix. You may read files in read-only sandbox."
+  "<symptom description> — files: <list>. Diagnose the root cause and propose a concrete fix. You may read files in read-only sandbox." \
+  < /dev/null
 ```
 
 4. Present Codex's diagnosis to the human. Implement the proposed fix yourself after human confirmation — do not let Codex write to the repo directly.
@@ -160,7 +163,8 @@ codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   -s read-only \
   --output-schema "$SCHEMA_FILE" \
   -o "$OUTPUT_FILE" \
-  "<Role mandate for this specialist — e.g., 'You are a security auditor...' — plus the files/diff to examine. Ask for findings the Claude specialist is statistically likely to miss from a different training distribution. Return JSON matching the schema.>"
+  "<Role mandate for this specialist — e.g., 'You are a security auditor...' — plus the files/diff to examine. Ask for findings the Claude specialist is statistically likely to miss from a different training distribution. Return JSON matching the schema.>" \
+  < /dev/null
 RC=$?
 
 if [ "$RC" -ne 0 ]; then
@@ -182,7 +186,7 @@ rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 
 ## 6. Fallback and Reliability
 
-1. If `codex` is not on PATH, not authenticated, exits non-zero, OR exits zero but returns empty/invalid output (died mid-generation): skip GPT critics, log the reason, run Claude critics only. The agents validate the structured output after a zero exit and downgrade to `cross-review-unavailable` when it is empty or non-JSON — a mid-run collapse is reported loudly, never mislabeled as findings. NEVER block the main pipeline — Claude critics are always sufficient to proceed.
+1. If `codex` is not on PATH, not authenticated, exits non-zero, **hangs without returning** (the known trigger is a missing `< /dev/null` — see §2; a hang produces no error and no output, so it looks like a slow model rather than a failure), OR exits zero but returns empty/invalid output (died mid-generation): skip GPT critics, log the reason, run Claude critics only. The agents validate the structured output after a zero exit and downgrade to `cross-review-unavailable` when it is empty or non-JSON — a mid-run collapse is reported loudly, never mislabeled as findings. NEVER block the main pipeline — Claude critics are always sufficient to proceed.
 2. Do NOT auto-retry a failed Codex call — a non-zero exit means skip and report, not loop on the same call.
 3. For awareness, not as a limit: ChatGPT Plus uses a 5-hour shared bucket across CLI and web. Run the full critic set whenever cross-review fires — do not ration GPT calls. If the human reports ChatGPT being throttled, pause Codex calls and notify; that is a reaction to a real signal, never a pre-emptive cap.
 4. **Gemini lane fallback (same shape as Codex):** `agy` missing, unauthenticated, non-zero exit, timeout, tool soft-deny, or zero-exit-but-empty/invalid-JSON → the agent returns `gemini-review-unavailable` with the reason; the review proceeds on Claude (+GPT) findings. **Notification is mandatory, not optional:** the degradation line goes into the merged report AND into the orchestrator's final user-facing summary. No auto-retry (single timeout retry inside the agent only). Gemini runs on a consumer-preview quota that can change without warning — treat repeated unavailability as a signal to tell the operator, not something to quietly absorb.
@@ -198,6 +202,7 @@ rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 | Auto-retrying Codex after a non-zero exit | Looping on a failed call wastes it and can cascade errors | Log unavailable, proceed with Claude critics, notify human |
 | Treating GPT findings as a superset of Claude findings | Different models miss different things; neither is complete | Use intersection for confidence, union for coverage |
 | Skipping availability check before Codex call | Network or auth failure will produce a cryptic error mid-review | Always run `command -v codex && codex login status` first |
+| Calling `codex exec` without `< /dev/null` | Codex blocks forever on `Reading additional input from stdin...` when the caller leaves stdin open with no EOF — which is how an agent's Bash tool launches it. No error, no output: the lane never returns and silently eats the whole review budget (measured 06.10.2026, ~50 min) | End every `codex exec` with `< /dev/null`. Do NOT generalize to the Gemini lane — `agy-run.sh` reads the prompt FROM stdin and dies on that redirect |
 | Letting Codex write to the repo during /rescue | Codex operates in read-only sandbox; changes must be reviewed | Always use `-s read-only`; implement fixes yourself after human confirmation |
 
 ## 8. Critical Rules
@@ -211,6 +216,7 @@ rm -f "$SCHEMA_FILE" "$OUTPUT_FILE"
 7. MUST keep model and effort sourced from the Codex config (`~/.codex/config.toml`) or the `CROSS_REVIEW_MODEL` / `CROSS_REVIEW_EFFORT` env vars — those are the single source of truth for both (the no-hardcode mandate is in Rule 1).
 8. NEVER allow Codex to write to the repository — read-only sandbox always.
 9. MUST cap review rounds at 1-2 — no Claude↔GPT debate loops.
+10. MUST end every `codex exec` with `< /dev/null`; MUST NOT apply that redirect to the Gemini lane (`agy-run.sh` takes the prompt on stdin). Rationale and measurement: §2.
 
 ## 9. Agent Reference
 

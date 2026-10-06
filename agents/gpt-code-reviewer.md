@@ -72,6 +72,8 @@ Write this schema to a temp file before invoking Codex:
 
 ## Codex Invocation
 
+**Invocation invariant:** both `codex exec` calls in this file end with `< /dev/null` — keep it. Without the redirect Codex blocks forever on `Reading additional input from stdin...` when launched from an agent's Bash tool (stdin open, no EOF): no error, no output, the lane just never returns. Measured 06.10.2026 — ~50 minutes lost in one run. Details: `skills/cross-review/SKILL.md`.
+
 ```bash
 # Write schema to temp file
 SCHEMA_FILE=$(mktemp /tmp/gpt-review-schema-XXXXXX.json)
@@ -106,7 +108,7 @@ Place findings from the priority categories above in the "findings" array. Place
 
 Return ONLY valid JSON matching the provided schema.
 PROMPT
-)"
+)" < /dev/null
 RC=$?
 
 if [ "$RC" -ne 0 ]; then
@@ -151,7 +153,8 @@ codex exec "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" \
   --output-schema "$SCHEMA_FILE" \
   -o "$OUTPUT_FILE" \
   review --base main \
-  "Focus on: concurrency/ordering bugs, numeric/precision hazards, platform/locale edge cases, spec-vs-implementation drift, security footguns in unfamiliar APIs, resource lifecycle bugs. Also report any other material issues you independently find. Return JSON matching the schema."
+  "Focus on: concurrency/ordering bugs, numeric/precision hazards, platform/locale edge cases, spec-vs-implementation drift, security footguns in unfamiliar APIs, resource lifecycle bugs. Also report any other material issues you independently find. Return JSON matching the schema." \
+  < /dev/null
 RC=$?
 
 if [ "$RC" -ne 0 ]; then
