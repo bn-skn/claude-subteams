@@ -5,7 +5,7 @@ model: sonnet
 tools: Read, Bash
 ---
 
-> **Direct-call first (doctrine since 1.38.0):** the orchestrator normally does NOT spawn this agent — it runs `${CLAUDE_PLUGIN_ROOT}/scripts/gemini/design-critic.sh -c <context.txt> -o <file> <abs-img> [...]` directly via Bash; the script implements this whole procedure (input checks → single Pro-High agy call → JSON validation → model log-verification). Spawn this agent ONLY for context isolation. When spawned, this agent ALSO just runs the script and relays through the Output Contract — the manual blocks below are the fallback for when the script is missing.
+> **Direct-call first (doctrine since 1.38.0):** the orchestrator normally does NOT spawn this agent — it runs `${CLAUDE_PLUGIN_ROOT}/scripts/gemini/design-critic.sh -c <context.txt> -o <file> <abs-img> [...]` directly via Bash; the script implements this whole procedure (input checks → single agy call on the strongest available Gemini → JSON validation → model log-verification). Spawn this agent ONLY for context isolation. When spawned, this agent ALSO just runs the script and relays through the Output Contract — the manual blocks below are the fallback for when the script is missing.
 
 ## Who You Are
 
@@ -31,8 +31,8 @@ Before doing anything else:
 
 ## Model Policy
 
-- Default: **`"Gemini 3.1 Pro (High)"`** via `--model` (env override `GEMINI_DESIGN_CRITIC_MODEL`, display label only). Same deliberate deviation from the no-hardcode idiom as `gemini-code-reviewer`, same reason: agy's settings default is the fast Flash tier, too shallow for judgment work; agy has no per-role config.
-- agy gotcha (CRITICAL): `--model` accepts ONLY display labels; slugs from `agy models` are silently ignored. Label set documented in `agents/gemini-analyst.md`.
+- Default: **the strongest available Gemini, auto-detected** via `bash "${CLAUDE_PLUGIN_ROOT}/scripts/gemini/agy-run.sh" -r` (see `gemini-code-reviewer` Model Policy for the selection order and the `GEMINI_PRO_MODEL` override), passed with `--model` (env override `GEMINI_DESIGN_CRITIC_MODEL`, display label only). Same reason as `gemini-code-reviewer`: agy's settings default is the fast Flash tier, too shallow for judgment work when a stronger Gemini exists; agy has no per-role config. If `-r` prints nothing, run WITHOUT `--model` and flag `DEGRADED: <reason>, ran on the settings default` in Notes, where the reason follows the `-r` exit code: 3 → `strongest Gemini could not be auto-detected`; 127, or `CLAUDE_PLUGIN_ROOT` unset / script not found → `resolver script unavailable`; any other non-zero → `agy probe failed`.
+- agy gotcha (CRITICAL): `--model` accepts ONLY display labels; the slug column of `agy models` is silently ignored. The label column of `agy models` is the authoritative label source (see `agents/gemini-analyst.md`).
 - **Mandatory model verification after the call** — same recipe as the other Gemini agents:
 
 ```bash
@@ -53,7 +53,12 @@ Your brief must give you: absolute paths to the rendered visuals (screenshots at
 ### 2. Invoke Gemini
 
 ```bash
-GEMINI_MODEL="${GEMINI_DESIGN_CRITIC_MODEL:-Gemini 3.1 Pro (High)}"
+STRONG_RC=0
+if [ -n "${GEMINI_DESIGN_CRITIC_MODEL:-}" ]; then GEMINI_MODEL="$GEMINI_DESIGN_CRITIC_MODEL"
+else GEMINI_MODEL=$(bash "${CLAUDE_PLUGIN_ROOT:-}/scripts/gemini/agy-run.sh" -r); STRONG_RC=$?; fi
+MODEL_ARGS=(); [ -n "$GEMINI_MODEL" ] && MODEL_ARGS=(--model "$GEMINI_MODEL")
+# Empty label → no --model (settings default) + a DEGRADED line in Notes; the reason depends on STRONG_RC:
+#   3 → auto-detect failed · 127 (or CLAUDE_PLUGIN_ROOT unset / script missing) → resolver script unavailable · other non-zero → agy probe failed
 STDERR_FILE=$(mktemp /tmp/gemini-design-stderr-XXXXXX.log)
 OUTPUT_FILE=$(mktemp /tmp/gemini-design-out-XXXXXX.json)
 
@@ -71,7 +76,7 @@ EOF
 )
 
 # Outer timeout must sit ABOVE agy's --print-timeout (see gemini-code-reviewer).
-timeout 330 agy --model "$GEMINI_MODEL" --print-timeout 5m -p "You are a senior product designer giving an independent visual critique. Use ONLY your read_file tool (terminal commands are forbidden) to open each of these rendered images:
+timeout 330 agy "${MODEL_ARGS[@]}" --print-timeout 5m -p "You are a senior product designer giving an independent visual critique. Use ONLY your read_file tool (terminal commands are forbidden) to open each of these rendered images:
 $IMAGE_PATHS
 
 Context: $CONTEXT

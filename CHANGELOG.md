@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.47.0] - 2026-10-28
+
+### Fixed
+- All three Gemini lanes (`review.sh`, `design-critic.sh`, `frontend.sh`, plus the `gemini-*` agents) died at once after the agy 1.4.9 update: `scripts/gemini/agy-run.sh` mapped `-m pro` to the hardcoded label "Gemini 3.1 Pro (High)", which no longer exists, so every call failed in ~5 s with `error: invalid model selection (--model "Gemini 3.1 Pro (High)" --effort ""): model … is not recognized`. Pipelines read that as "Gemini lane unavailable" and silently dropped the third review model. Measured 28.10.2026; verified the fix by running `agy-run.sh -m pro` live against agy 1.4.9 (stderr `model="Gemini 3.8 Flash (High)" [verified]`, reply received).
+
+### Changed
+- `agy-run.sh -m pro` now means "strongest available Gemini, auto-detected" from `agy models` (which now prints TWO tab-separated columns, slug and display label — the old "prints slugs only" notes were outdated). Selection among `Gemini …` labels: tier first, taken from the whole name between the version and the trailing `(Effort)` — exactly "Pro" > exactly "Flash" > any other name (so "Flash Lite", "Flash-Lite", "Flash Image" and "Pro Deep Think" all rank below plain Flash/Pro, and a returning Pro wins again) — then highest version (`sort -V`, so 3.10 beats 3.2), then effort High > Medium > Low > no suffix, then shorter name; full ties are broken by the label text so the result does not depend on listing order. A trailing CR in the label (CRLF output) is stripped before parsing.
+- Override: env `GEMINI_PRO_MODEL=<exact display label>` short-circuits detection.
+- Detection failure (no `Gemini …` label parsed) no longer hard-fails: the run proceeds without `--model` (settings default) and prints `agy-run: DEGRADED — не удалось автоопределить сильнейшую Gemini, работаю на дефолте settings.json` to stderr so the caller reports degradation.
+- New `-r` flag: resolve-only, prints the label `-m pro` would use (empty + exit 3 on detection failure) and exits without a prompt; it ignores `-m/-j/-o` and must precede any positional prompt file. `gemini-code-reviewer` and `gemini-design-critic` call it instead of hardcoding a label (their env overrides `CROSS_REVIEW_GEMINI_MODEL` / `GEMINI_DESIGN_CRITIC_MODEL` still win; empty result → run without `--model` and flag `DEGRADED`, with the reason told apart by the `-r` exit code: 3 auto-detect failed, 127 / unset `CLAUDE_PLUGIN_ROOT` resolver script unavailable, other agent probe failed). `gemini-analyst` builds `--model` via the same empty-safe `MODEL_ARGS` pattern instead of passing `--model ""`.
+- Removed every hardcoded "Gemini 3.1 Pro (High)" / "Gemini 3.5 Flash (Medium)" pin from `gemini-analyst`, `gemini-frontend`, `cross-review`, `design-qa`, `using-subteams`, README; `gemini-analyst` now names `agy models` (label column) as the authoritative label source and points at `settings.json` for the default instead of pinning a version.
+- New regression test `scripts/gemini/test-agy-run.sh` (stub `agy` first on PATH, child bash under `env -u BASH_ENV`): real listing → Flash (High); Pro beats a newer Flash; 3.10 beats 3.2/3.1; slug-only listing → empty + exit 3; `GEMINI_PRO_MODEL` override; tie cases (Flash vs Flash Lite / Flash-Lite / Flash Image, Pro vs Pro Deep Think, both listing orders); CRLF listing; full `-m pro` run with a slug-only listing shows no `--model` in argv and the DEGRADED line. Negative control: against the first-draft resolver (tier read from one word only) the tie and CRLF cases fail (9 FAIL), against the fixed one all 18 checks pass.
+
 ## [1.46.0] - 2026-10-06
 
 ### Fixed

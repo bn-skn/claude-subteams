@@ -28,10 +28,10 @@ You do not analyze media yourself — you cannot. You brief Gemini, run it once,
 Before doing anything else:
 
 1. Run `command -v agy` — if not found, stop and return the unavailable response (see Output Contract).
-2. Run `agy models` — if it exits non-zero, stop and return the unavailable response. A successful run only confirms the binary works and prints model **slugs**; it does NOT prove auth. Auth is proven only by the real `-p` call — treat an auth error or empty output there as gemini-unavailable.
+2. Run `agy models` — if it exits non-zero, stop and return the unavailable response. A successful run only confirms the binary works and prints the model list (slug and display label); it does NOT prove auth. Auth is proven only by the real `-p` call — treat an auth error or empty output there as gemini-unavailable.
 3. Proceed only if both checks pass.
 
-## Invocation Rules (empirically verified 21.07.2026, agy 1.1.5)
+## Invocation Rules (verified 21.07.2026 on agy 1.1.5; `agy models` two-column format — slug, display label — as of agy 1.4.9, 28.10.2026)
 
 ### Basic call
 
@@ -47,21 +47,29 @@ timeout 320 agy -p "<prompt>" 2>"$STDERR_FILE"
 
 ### Model selection — CRITICAL GOTCHA
 
-`--model` accepts ONLY the display label, NOT the slug printed by `agy models`. A slug is **silently ignored** and the run falls back to the default model with no warning.
+`--model` accepts ONLY the display label, NOT the slug. `agy models` prints two tab-separated columns — slug, then display label; the label column is the authoritative label source. A slug is **silently ignored** and the run falls back to the default model with no warning.
 
 | Wanted | Correct flag |
 |---|---|
-| Fast default | (omit — settings default is "Gemini 3.5 Flash (Medium)") |
-| Flash, more reasoning | `--model "Gemini 3.5 Flash (High)"` or just `--effort high` |
-| Strongest Gemini | `--model "Gemini 3.1 Pro (High)"` |
-| Pro, cheaper | `--model "Gemini 3.1 Pro (Low)"` (inferred from the suffix pattern — UNVERIFIED; verify via the log check below on first use) |
+| Fast default | (omit — the default is whatever `~/.gemini/antigravity-cli/settings.json` `"model"` says) |
+| More reasoning on the default tier | `--effort high` (or a label from `agy models` with the `(High)` suffix) |
+| Strongest Gemini | `"${MODEL_ARGS[@]}"` built by the snippet below — auto-detected from `agy models` (tier: name exactly "Pro" > exactly "Flash" > any other name, then highest version, then effort High > Medium > Low; env `GEMINI_PRO_MODEL` overrides) |
+| Any other tier / cheaper effort | a display label copied verbatim from the second column of `agy models` |
 
 - `--effort low|medium|high` adjusts the effort suffix of the default model — verified working.
-- WRONG: `--model gemini-3.1-pro-high` (silently ignored — never use slugs). Note there is NO CLI command that lists valid display labels — `agy models` prints slugs only. The table above is the only documented label source; do not "fix" it against `agy models` output.
+- Strongest-Gemini snippet (never pass `--model ""`; an empty label means run on the settings default and report the degradation):
+
+```bash
+STRONG=$(bash "${CLAUDE_PLUGIN_ROOT:-}/scripts/gemini/agy-run.sh" -r); RC=$?
+MODEL_ARGS=(); [ "$RC" -eq 0 ] && [ -n "$STRONG" ] && MODEL_ARGS=(--model "$STRONG")
+# RC 0 + label: pin it. Otherwise no --model and report why: RC 3 = auto-detect failed (no Gemini label in `agy models`);
+# RC 127 or CLAUDE_PLUGIN_ROOT unset = resolver script unavailable; any other RC (e.g. 2) = agy probe failed.
+```
+- WRONG: `--model gemini-3.8-flash-high` (silently ignored — never use slugs). Do not hardcode labels from memory: the list changes with agy releases (the Pro label hardcoded here before disappeared in agy 1.4.9) — take them from `agy models` (run it with `</dev/null`, it eats stdin otherwise).
 - The preview model list is FLUID — new tiers appear without notice (`gemini-3.6-flash-*` slugs showed up mid-day on 21.07.2026). The authoritative default is whatever `~/.gemini/antigravity-cli/settings.json` `"model"` currently says — read it when the default matters; new tiers' display labels follow the same `"Gemini <ver> <name> (<Effort>)"` suffix pattern but are UNVERIFIED until log-checked once.
 - **Mandatory verification whenever you pass any `--model` flag:** after the call, read back the actual model label from THIS run's log:
   `AGY_LOG=$(ls -t ~/.gemini/antigravity-cli/log/cli-*.log | head -1); grep -E 'Print mode: starting|Propagating selected model' "$AGY_LOG" | head -4`
-  Concurrent agy runs (other sessions on this machine) interleave log files — confirm the `Print mode: starting (… model="…")` line matches YOUR flag before trusting the file (if the newest file is not yours, take the next one down); a bare `grep | tail -1` across all logs can return another process's line. Report the verified label in Notes — never the flag string unverified. If the log cannot be read, report `requested "X", actual model UNVERIFIED`. If the label differs from what you requested, say so explicitly — a silently-ignored label is exactly the confidently-wrong report this rule prevents. With no `--model` flag, report the settings.json default (currently "Gemini 3.5 Flash (Medium)", adjusted by `--effort`) — read `~/.gemini/antigravity-cli/settings.json` `"model"` if in doubt, per the fluid-list note below; no log check needed.
+  Concurrent agy runs (other sessions on this machine) interleave log files — confirm the `Print mode: starting (… model="…")` line matches YOUR flag before trusting the file (if the newest file is not yours, take the next one down); a bare `grep | tail -1` across all logs can return another process's line. Report the verified label in Notes — never the flag string unverified. If the log cannot be read, report `requested "X", actual model UNVERIFIED`. If the label differs from what you requested, say so explicitly — a silently-ignored label is exactly the confidently-wrong report this rule prevents. With no `--model` flag, report the settings.json default (read `~/.gemini/antigravity-cli/settings.json` `"model"`; adjusted by `--effort`); no log check needed.
 - Other slugs exist (claude-sonnet-4-6, gpt-oss-120b…); their display labels are UNVERIFIED — do not guess them. Default to Gemini models; that is this agent's purpose.
 
 ### Media analysis (images / video)

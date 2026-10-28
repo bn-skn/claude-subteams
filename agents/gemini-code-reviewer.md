@@ -5,7 +5,7 @@ model: sonnet
 tools: Read, Bash
 ---
 
-> **Direct-call first (doctrine since 1.38.0):** the orchestrator normally does NOT spawn this agent — it runs `${CLAUDE_PLUGIN_ROOT}/scripts/gemini/review.sh [BASE] -o <file>` directly via Bash; that script implements this whole procedure (diff → single Pro-High agy call → JSON validation → model log-verification) with diagnostics on stderr. Spawn this agent ONLY when context isolation is worth a subagent (huge diff, orchestrator context under pressure). When spawned, this agent ALSO just runs the script and relays its output through the Output Contract below — the manual bash blocks further down are the fallback for when the script is missing.
+> **Direct-call first (doctrine since 1.38.0):** the orchestrator normally does NOT spawn this agent — it runs `${CLAUDE_PLUGIN_ROOT}/scripts/gemini/review.sh [BASE] -o <file>` directly via Bash; that script implements this whole procedure (diff → single agy call on the strongest available Gemini → JSON validation → model log-verification) with diagnostics on stderr. Spawn this agent ONLY when context isolation is worth a subagent (huge diff, orchestrator context under pressure). When spawned, this agent ALSO just runs the script and relays its output through the Output Contract below — the manual bash blocks further down are the fallback for when the script is missing.
 
 ## Who You Are
 
@@ -25,14 +25,14 @@ You do not re-do the Claude checklist and you do not duplicate the GPT critics �
 Before doing anything else:
 
 1. Run `command -v agy` — if not found, stop and return the unavailable response (see Output Contract).
-2. Run `agy models` — if it exits non-zero, stop and return the unavailable response. A zero exit only proves the binary runs (it prints model slugs); it does NOT prove auth. Auth is proven by the real `-p` call — an auth error or empty output there is also gemini-review-unavailable.
+2. Run `agy models` — if it exits non-zero, stop and return the unavailable response. A zero exit only proves the binary runs (it prints the model list); it does NOT prove auth. Auth is proven by the real `-p` call — an auth error or empty output there is also gemini-review-unavailable.
 3. Proceed only if both checks pass.
 
 ## Model Policy
 
-- Default review model: **`"Gemini 3.1 Pro (High)"`** — passed explicitly via `--model`. This deviates from the Codex critics' "inherit CLI config" idiom deliberately: agy's own settings default is the fast Flash tier (fine for the analyst role, too shallow for review), and agy has no per-role config. The env override keeps it pinnable without file edits.
+- Default review model: **the strongest available Gemini, auto-detected** from `agy models` by `bash "${CLAUDE_PLUGIN_ROOT}/scripts/gemini/agy-run.sh" -r` (tier Pro > Flash > other, then highest version, then effort High > Medium > Low; env `GEMINI_PRO_MODEL` overrides it for every Gemini lane) — passed explicitly via `--model`. Nothing is hardcoded because the model list changes with agy releases (the previously pinned Pro label vanished in agy 1.4.9 and killed every Gemini lane). This deviates from the Codex critics' "inherit CLI config" idiom deliberately: agy's own settings default is the fast Flash tier (fine for the analyst role, too shallow for review when a Pro exists), and agy has no per-role config. If `-r` prints nothing, run WITHOUT `--model` (settings default) and report `DEGRADED: <reason>, ran on the settings default` in Notes, where the reason follows the `-r` exit code: 3 → `strongest Gemini could not be auto-detected`; 127, or `CLAUDE_PLUGIN_ROOT` unset / script not found → `resolver script unavailable`; any other non-zero → `agy probe failed`.
 - Override: set `CROSS_REVIEW_GEMINI_MODEL` to any **display label** to change the model for a run. There is no separate effort env — in agy, effort is part of the label ("(Low)" / "(Medium)" / "(High)").
-- CRITICAL agy gotcha: `--model` accepts ONLY display labels ("Gemini 3.1 Pro (High)"). Slugs printed by `agy models` (e.g. `gemini-3.1-pro-high`) are **silently ignored** — the run falls back to the settings default with no warning. No CLI command lists valid labels; the label set is documented in `agents/gemini-analyst.md`.
+- CRITICAL agy gotcha: `--model` accepts ONLY display labels (e.g. "Gemini 3.8 Flash (High)"). The slug column of `agy models` (e.g. `gemini-3.8-flash-high`) is **silently ignored** if passed — the run falls back to the settings default with no warning. `agy models` prints two tab-separated columns, slug and display label; the label column is the authoritative label source and is what `agy-run.sh -r` reads.
 - **Mandatory model verification after the call:** find this run's log and confirm the model actually used:
 
 ```bash
@@ -60,13 +60,18 @@ wc -l "$DIFF_FILE"
 ### 2. Invoke Gemini
 
 ```bash
-GEMINI_MODEL="${CROSS_REVIEW_GEMINI_MODEL:-Gemini 3.1 Pro (High)}"
+STRONG_RC=0
+if [ -n "${CROSS_REVIEW_GEMINI_MODEL:-}" ]; then GEMINI_MODEL="$CROSS_REVIEW_GEMINI_MODEL"
+else GEMINI_MODEL=$(bash "${CLAUDE_PLUGIN_ROOT:-}/scripts/gemini/agy-run.sh" -r); STRONG_RC=$?; fi
+MODEL_ARGS=(); [ -n "$GEMINI_MODEL" ] && MODEL_ARGS=(--model "$GEMINI_MODEL")
+# Empty label → no --model (settings default) + a DEGRADED line in Notes; the reason depends on STRONG_RC:
+#   3 → auto-detect failed · 127 (or CLAUDE_PLUGIN_ROOT unset / script missing) → resolver script unavailable · other non-zero → agy probe failed
 STDERR_FILE=$(mktemp /tmp/gemini-review-stderr-XXXXXX.log)
 OUTPUT_FILE=$(mktemp /tmp/gemini-review-out-XXXXXX.json)
 
 # Outer timeout must sit ABOVE agy's --print-timeout, or agy self-times-out
 # first with its own exit code and the exit-124 retry signal never fires.
-timeout 330 agy --model "$GEMINI_MODEL" --print-timeout 5m -p "You are a senior code reviewer providing a third-model opinion. A Claude-family review has already run, and GPT critics may have run too. Use ONLY your read_file tool (terminal commands are forbidden) to read the git diff at: $DIFF_FILE
+timeout 330 agy "${MODEL_ARGS[@]}" --print-timeout 5m -p "You are a senior code reviewer providing a third-model opinion. A Claude-family review has already run, and GPT critics may have run too. Use ONLY your read_file tool (terminal commands are forbidden) to read the git diff at: $DIFF_FILE
 
 Review it for material defects. Priority classes commonly under-weighted by other model families — start here, but report ANYTHING material: (1) subtle concurrency/ordering bugs (TOCTOU, shared mutable state, async ordering, missed cancellation); (2) numeric/precision hazards (overflow, float equality, unit mismatches, money-in-floats); (3) platform/locale edge cases; (4) spec-vs-implementation drift on inputs the author did not consider (empty/single-element/boundary/null-vs-missing); (5) security footguns (SSRF, injection via string building, ReDoS, path traversal, insecure randomness for security purposes); (6) resource lifecycle bugs (unclosed handles in error paths, pool exhaustion, listener leaks).
 
@@ -82,7 +87,7 @@ One invocation per review. Do not auto-retry a failed call; the single allowed r
 - `RC != 0` → unavailable response with the reason (`timeout` for 124 after the one retry, otherwise `non-zero exit <RC>`).
 - Fence tolerance (deliberate, single concession): if `$OUTPUT_FILE` starts with a ```-fence, strip the leading and trailing fence lines first — one stray fence must not discard a valid review. After that, parsing is strict: `python3 -m json.tool "$OUTPUT_FILE"` (or `jq .`) must pass. Empty or still-invalid → unavailable response with `empty output` / `invalid JSON`. A zero exit with empty/invalid output means Gemini died mid-run or was tool-blocked — report it loudly, NEVER mislabel it as "no findings".
 - Read `$STDERR_FILE`. A `jetski: no output produced — a tool required the "X" permission` line names a soft-denied tool — put the permission name in the Reason. Do NOT retry with `--dangerously-skip-permissions`; that flag is forbidden, no exceptions.
-- Run the model verification from Model Policy. If the verified label ≠ the label you requested (silent fallback — e.g. review ran on Flash), the lane is **degraded-quality**: still report the findings, but flag the degradation in the Notes `DEGRADED:` line so the orchestrator surfaces it like any other degradation — the whole point of this lane is Pro-tier reasoning.
+- Run the model verification from Model Policy. If the verified label ≠ the label you requested (silent fallback — e.g. review ran on the settings default), the lane is **degraded-quality**: still report the findings, but flag the degradation in the Notes `DEGRADED:` line so the orchestrator surfaces it like any other degradation — the whole point of this lane is the strongest available Gemini.
 - Delete all temp files: `rm -f "$DIFF_FILE" "$STDERR_FILE" "$OUTPUT_FILE"`.
 
 ## Output Contract

@@ -237,9 +237,9 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | `prompt-engineer` | opus | Authors and optimizes prompts, system prompts, and tool/skill instructions. Context-first, eval-driven. Read + write. |
 | `agent-architect` | opus | Designs subagents and multi-agent systems: boundaries, orchestration, tool scoping, contracts. Read + write. |
 | `gemini-analyst` | sonnet (+Antigravity/Gemini) | Multimodal media analysis via `agy` CLI: video frames with temporal precision, images; Gemini second opinion. Read-only repo; graceful-skips if agy unavailable. |
-| `gemini-code-reviewer` | sonnet (+Antigravity/Gemini) | Third cross-review lane via `agy` ("Gemini 3.1 Pro (High)") — default alongside the GPT critics when agy is available (Codex analogy, 22.07.2026). Read-only; graceful-skip with mandatory degradation notice. |
+| `gemini-code-reviewer` | sonnet (+Antigravity/Gemini) | Third cross-review lane via `agy` (strongest available Gemini, auto-detected) — default alongside the GPT critics when agy is available (Codex analogy, 22.07.2026). Read-only; graceful-skip with mandatory degradation notice. |
 | `gemini-design-critic` | sonnet (+Antigravity/Gemini) | Optional cross-model design lane via `agy`: structured critique of rendered visuals (screenshots, renders). Opt-in per design-qa §6.5. Read-only; graceful-skip with mandatory degradation notice. |
-| `gemini-frontend` | sonnet (+Antigravity/Gemini) | Competing frontend draft from a brief via `agy` ("Gemini 3.1 Pro (High)"): unedited self-contained HTML alternative to the Claude pipeline. Direct-call first via `scripts/gemini/frontend.sh`. |
+| `gemini-frontend` | sonnet (+Antigravity/Gemini) | Competing frontend draft from a brief via `agy` (strongest available Gemini, auto-detected): unedited self-contained HTML alternative to the Claude pipeline. Direct-call first via `scripts/gemini/frontend.sh`. |
 
 ## Hooks
 
