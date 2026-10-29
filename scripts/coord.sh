@@ -63,8 +63,20 @@
 #                                      reserved so a gate that itself exits 75 is never
 #                                      confused with coord's own timeout)
 #   repokey                            print the derived repo key (debug)
+#   status    [--id ID]                roster + claims (+ your unread count with --id); never
+#                                      clears the inbox (reaps dead instances, like roster)
+#   help                               print this usage (also -h, --help, no command)
 
 set -uo pipefail
+
+# Usage is printed from this header, between the "# Usage:" line and the first line that
+# is not a comment — so a command added above can never be cut off by a hardcoded range.
+_usage() { sed -n '/^# Usage:/,/^[^#]/{/^#/s/^# \{0,1\}//p}' "$0"; }
+
+# Help works before the opt-in gate and outside a git repo: it is read-only, and an agent
+# asking for help in a session without CLAUDE_SUBTEAMS_MULTI_INSTANCE=1 should learn the
+# commands instead of getting a silent exit 0.
+case "${1:-}" in ""|help|-h|--help) _usage; exit 0;; esac
 
 # ---- Opt-in gate: the very first thing. Unset → no-op, exit clean. ----
 if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" != "1" ]; then
@@ -104,6 +116,10 @@ case "$MAX_INSTANCES" in
 esac
 
 _now() { date +%s; }
+
+# A flag given as the last argument, with no value: under set -u a bare "$2" aborts the
+# script with "unbound variable" before any usage message can print.
+_novalue() { echo "[coord] $1: $2 requires a value" >&2; }
 
 # Identity sanity: ids and inbox targets become filenames and jq keys — reject anything
 # that could traverse the coord dir or break the ledger. Session-hash ids are [a-f0-9].
@@ -379,7 +395,7 @@ cmd_count() {
 cmd_claim() {
   local id=""; local -a paths=()
   while [ $# -gt 0 ]; do case "$1" in
-    --id) id="$2"; shift 2;; *) paths+=("$1"); shift;;
+    --id) [ $# -ge 2 ] || { _novalue claim --id; return 2; }; id="$2"; shift 2;; *) paths+=("$1"); shift;;
   esac; done
   [ -n "$id" ] && [ "${#paths[@]}" -gt 0 ] || { echo "[coord] claim: --id and at least one PATH required" >&2; return 2; }
   _valid_id "$id" || { echo "[coord] claim: invalid --id '$id'" >&2; return 2; }
@@ -415,13 +431,13 @@ cmd_claim() {
 cmd_release() {
   local id="" all=0; local -a paths=()
   while [ $# -gt 0 ]; do case "$1" in
-    --id) id="$2"; shift 2;; --all) all=1; shift;; *) paths+=("$1"); shift;;
+    --id) [ $# -ge 2 ] || { _novalue release --id; return 2; }; id="$2"; shift 2;; --all) all=1; shift;; *) paths+=("$1"); shift;;
   esac; done
-  [ -n "$id" ] || return 2
+  [ -n "$id" ] || { echo "[coord] release: --id required (release --id ID PATH... | --all)" >&2; return 2; }
   [ -f "$CLAIMS" ] || return 0
   local plist=""
   if [ "$all" -ne 1 ]; then
-    [ "${#paths[@]}" -gt 0 ] || return 2
+    [ "${#paths[@]}" -gt 0 ] || { echo "[coord] release: give PATH... or --all" >&2; return 2; }
     _valid_paths release "${paths[@]}" || return 2
     plist=$(printf '%s\n' "${paths[@]}" | jq -R . | jq -sc .) || return 1
   fi
@@ -437,7 +453,10 @@ cmd_release() {
 
 cmd_claims() {
   [ -f "$CLAIMS" ] || { echo "(no claims)"; return 0; }
-  jq -r 'to_entries[] | "  - \(.key)  by=\(.value.by)"' "$CLAIMS" 2>/dev/null || echo "(no claims)"
+  local out
+  out=$(jq -r 'to_entries[] | "  - \(.key)  by=\(.value.by)"' "$CLAIMS" 2>/dev/null) || out=""
+  # An empty ledger ({}) used to print nothing at all, which reads as a hung or broken call.
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else echo "(no claims)"; fi
 }
 
 # ---- Mailbox entry validation (hardening lesson from Anthropic's native agent-teams:
@@ -483,7 +502,14 @@ _mailbox_bad_count() {  # _mailbox_bad_count <box> — count of MALFORMED lines 
 cmd_send() {
   local from="" to="" msg=""
   while [ $# -gt 0 ]; do case "$1" in
-    --from) from="$2"; shift 2;; --to) to="$2"; shift 2;; *) msg="$1"; shift;;
+    --from) [ $# -ge 2 ] || { _novalue send --from; return 2; }; from="$2"; shift 2;;
+    --to) [ $# -ge 2 ] || { _novalue send --to; return 2; }; to="$2"; shift 2;;
+    # "--" ends the options: everything after it is the message (agents write `send ... -- "msg"`
+    # by analogy with commit-lock -- CMD).
+    --) shift; [ $# -gt 0 ] && msg="${msg:+$msg }$*"; break;;
+    # An unquoted message arrives as several words; keeping only the last one (the old
+    # behavior) silently delivered a fragment. Join them instead.
+    *) msg="${msg:+$msg }$1"; shift;;
   esac; done
   [ -n "$to" ] && [ -n "$msg" ] || { echo "[coord] send: --to and MSG required" >&2; return 2; }
   _valid_id "$to" || { echo "[coord] send: invalid --to '$to'" >&2; return 2; }
@@ -507,9 +533,9 @@ cmd_recv() {
   # in its message body.
   local id="" count=0
   while [ $# -gt 0 ]; do case "$1" in
-    --id) id="$2"; shift 2;; --count) count=1; shift;; *) shift;;
+    --id) [ $# -ge 2 ] || { _novalue recv --id; return 2; }; id="$2"; shift 2;; --count) count=1; shift;; *) shift;;
   esac; done
-  [ -n "$id" ] || return 2
+  [ -n "$id" ] || { echo "[coord] recv: --id required (recv --id ID [--count])" >&2; return 2; }
   _valid_id "$id" || { echo "[coord] recv: invalid --id '$id'" >&2; return 2; }
   local box="$INBOX/$id.jsonl"
   if [ "$count" = 1 ]; then
@@ -574,7 +600,13 @@ cmd_commit_lock() {
   # here may itself be nested inside gate-lock, but must never itself take gate-lock.
   # Commits are short, gates are long; the opposite nesting would let two instances
   # ABBA-deadlock by acquiring the two locks in opposite order.
-  [ "${1:-}" = "--" ] && shift
+  #
+  # commit-lock takes no options. `commit-lock --id X -- git commit` used to run "--id"
+  # as the command ("command not found", nothing committed) — reject a leading option.
+  case "${1:-}" in
+    --) shift;;
+    -*) echo "[coord] commit-lock: takes no options (no --id) — usage: commit-lock -- CMD..." >&2; return 2;;
+  esac
   [ $# -gt 0 ] || { echo "[coord] commit-lock: expected -- CMD..." >&2; return 2; }
   cmd_init
   # 9>&- on CMD: close the lock fd for CMD (and thus its children) before running it —
@@ -701,6 +733,39 @@ cmd_notify_due() {
   ) 9>"$INBOX/$id.jsonl.lock"
 }
 
+cmd_status() {
+  # The command agents reach for first ("status" was the most frequent unknown command).
+  # Roster + claims, and the unread count when --id is given. Never clears the inbox (it
+  # counts with recv --count); it does reap dead instances, exactly like roster.
+  local id="" want_id=0
+  while [ $# -gt 0 ]; do case "$1" in
+    --id) [ $# -ge 2 ] || { _novalue status --id; return 2; }; id="$2"; want_id=1; shift 2;;
+    *) shift;;
+  esac; done
+  if [ "$want_id" = 1 ]; then
+    _valid_id "$id" || { echo "[coord] status: invalid --id '$id'" >&2; return 2; }
+  fi
+  cmd_roster
+  echo "Claims:"
+  cmd_claims
+  [ "$want_id" = 1 ] && echo "Unread for $id: $(cmd_recv --id "$id" --count) (read with: recv --id $id)"
+  return 0
+}
+
+_unknown_command() {
+  local hint=""
+  case "$1" in
+    list|ls) hint="roster (live instances) or claims (claimed files)";;
+    inbox|messages|msgs|read) hint="recv --id ID --count (peek) or recv --id ID (read and clear)";;
+    unclaim|unlock) hint="release --id ID PATH... | --all";;
+    lock) hint="commit-lock -- CMD... (or gate-lock -- CMD... for heavy gates)";;
+    instances|who|whoami) hint="roster";;
+  esac
+  echo "[coord] unknown command: $1" >&2
+  [ -n "$hint" ] && echo "[coord] did you mean: $hint" >&2
+  echo "[coord] commands: status roster claims claim release send recv commit-lock gate-lock count reap register deregister heartbeat notify-due init repokey help" >&2
+}
+
 main() {
   local cmd="${1:-}"; shift || true
   case "$cmd" in
@@ -720,8 +785,8 @@ main() {
     commit-lock) cmd_commit_lock "$@";;
     gate-lock) cmd_gate_lock "$@";;
     repokey) echo "$REPOKEY  ($ROOT)";;
-    ""|-h|--help) sed -n '2,64p' "$0";;
-    *) echo "[coord] unknown command: $cmd" >&2; return 2;;
+    status) cmd_status "$@";;
+    *) _unknown_command "$cmd"; return 2;;
   esac
 }
 

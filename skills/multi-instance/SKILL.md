@@ -27,7 +27,7 @@ You do NOT manage registration or heartbeat manually. You DO manage **claims, co
 
 ## 3. The protocol you must follow
 
-All commands: `scripts/coord.sh <cmd>` (resolve the path from `${CLAUDE_PLUGIN_ROOT}` or the repo). Your `--id` is the instance id from the awareness line.
+All commands: `scripts/coord.sh <cmd>` (resolve the path from `${CLAUDE_PLUGIN_ROOT}` or the repo). Your `--id` is the instance id from the awareness line. Not sure of a command or its flags — run `coord.sh help` instead of guessing; `coord.sh status --id <you>` shows live instances, claims and your unread count without clearing the inbox.
 
 1. **Claim a file before editing it.** `coord.sh claim --id <you> <path> [<path>...]` — exit 0 = all listed paths are yours, exit 3 = at least one is held by a live peer (then NOTHING from the batch is claimed — all-or-nothing; do NOT edit the conflicting file; pick other work or coordinate via the mailbox). Claims are **advisory**: they bind cooperating instances, not `--no-hooks` runs or external editors. Honor them.
 2. **Partition work by file/module up front.** Worktrees defer same-file conflicts to merge, not prevent them. The reliable rule is the old one: each instance owns a distinct set of files. Claims make that ownership visible and checkable.

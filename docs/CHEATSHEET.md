@@ -129,6 +129,8 @@ Opt-in — nothing below does anything unless `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`
 Full protocol: the `multi-instance` skill. `CO=${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh`.
 
 ```bash
+$CO help                            # all commands and flags — run this instead of guessing
+$CO status --id <you>               # roster + claims + your unread count (does not clear the inbox)
 $CO roster                          # who is live, on what branch, in which worktree
 $CO count                           # same, machine-readable: one bare integer (for hooks/scripts)
 $CO claims                          # which files are spoken for, and by whom
