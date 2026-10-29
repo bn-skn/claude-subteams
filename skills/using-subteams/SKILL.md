@@ -1,7 +1,7 @@
 ---
 name: using-subteams
 description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, planning architecture, or building/editing agents, prompts, skills, and multi-agent systems. Also invoke before producing a document deliverable with subagents — spec, requirements, TZ, report, proposal — to set the size budget before any writer starts (Section 1.1)."
-version: 1.11.0
+version: 1.11.1
 ---
 
 # Using Subteams — Orchestrator Meta-Skill
@@ -66,7 +66,7 @@ Measured on a 2026-08-28 requirements run: five parallel writers plus stitching 
 | 7 | researcher | opus | Read, Grep, Glob, WebSearch, WebFetch | Uncertain technology, unfamiliar APIs, deep research | Research summary + recommendations |
 | 8 | security-auditor | opus | Read, Grep, Glob, Bash | Security-sensitive changes, secrets, auth, crypto | Vulnerability report + severity |
 | 9 | developer | sonnet | Read, Write, Edit, Bash, Grep, Glob | Implementation tasks dispatched via executing-plans | Code changes + test results + risks |
-| 10 | devils-advocate | opus | Read, Grep, Glob | Full pipeline: challenges assumptions, edge cases, scale, necessity | Challenge report + rebuttals |
+| 10 | devils-advocate | opus | Read, Grep, Glob, Bash | Full pipeline: challenges assumptions, edge cases, scale, necessity | Challenge report + rebuttals |
 | 11 | ui-tester | sonnet | Read, Write, Edit, Bash, Grep, Glob | After UI implementation: browser testing, screenshots, E2E | Test files + screenshots + visual findings |
 | 12 | improvement-agent | opus | Read, Grep, Glob, Bash | Periodic codebase health checks, tech debt discovery, sprint planning | Prioritized proposals (read-only, no code changes) |
 | 13 | gpt-code-reviewer | sonnet (+Codex/GPT) | Read, Grep, Glob, Bash | Cross-model review (`/cross-review`, breaking/security changes) — shells out to Codex for bug classes Claude under-weights | Structured cross-model findings |

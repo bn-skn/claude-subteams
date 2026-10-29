@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.48.1] - 2026-10-29
+
+### Changed
+- **`devils-advocate` gets Bash** (operator decision, 29.10.2026) — to see the diff itself and check its own concerns instead of relying on the brief. Look and check only: git read commands, a test command the brief names (its caches/temp files/test DB allowed), one read-only probe per concern. No edits, builds, migrations, installs, restarts, non-test DB writes, external calls or git state changes (`add`/`commit`/`stash`/`checkout`/`switch`/`reset`/`clean`); unsure whether a command writes → don't run it, list the check under Questions. A failing check is reported with command and output, not debugged. Concerns carry `evidence: command + result, or UNVERIFIED`. Same `### Secrets` block as code-reviewer. Same tool set as code-reviewer and security-auditor; `using-subteams` roster row updated (1.11.1).
+
+### Review
+- prompt-evaluator `fix-first` (borderline commands, debugging drift, evidence wording, secrets block) — all applied. Static evaluation only. GPT/Gemini lanes unavailable.
+
 ## [1.48.0] - 2026-10-29
 
 Fixes from the 28.10.2026 audit of the plugin on the claudebot project (17 sessions, 184 subagent calls), re-checked 29.10 against 1.47.0 and two live sessions. Operator decisions (Богдан, 29.10.2026) set the scope: cross-model lanes, the Stop-hook reminder and the rails pointer stay as they are; no new skills or gates.
