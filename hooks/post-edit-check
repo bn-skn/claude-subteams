@@ -55,10 +55,15 @@ if [ -n "$SESSION_ID" ]; then
     || printf '%s\n' "$RELPATH" >> "$EDITS_DIR/$SESSION_ID" 2>/dev/null
 fi
 
+# Warnings are collected and emitted once, at the end, as JSON additionalContext:
+# this hook is async, and an async hook delivers only the JSON fields
+# additionalContext/systemMessage on the next turn — bare stdout is dropped.
+WARN=""
+
 # Block edits to CLAUDE.md and SKILL.md unless explicitly requested
 BASENAME=$(basename "$FILE_PATH")
 if [ "$BASENAME" = "CLAUDE.md" ] || [ "$BASENAME" = "SKILL.md" ]; then
-  echo "[subteams:post-edit-check] Warning: $BASENAME was modified. These are protected files — ensure the user explicitly requested this change."
+  WARN="[subteams:post-edit-check] Warning: $BASENAME was modified. These are protected files — ensure the user explicitly requested this change."
 fi
 
 # Check file size — a review signal, not a violation (P9,
@@ -73,9 +78,14 @@ if printf '%s\n' "$FILE_PATH" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; the
   if [ ! -f "$CONVENTIONS_ROOT/CONVENTIONS.md" ]; then
     LINES=$(wc -l < "$FILE_PATH")
     if [ "$LINES" -gt 400 ]; then
-      echo "[subteams:post-edit-check] $FILE_PATH is $LINES lines. Check: is this still one semantic unit (cohesion), or does it need splitting along its actual seams?"
+      WARN="${WARN}${WARN:+
+}[subteams:post-edit-check] $FILE_PATH is $LINES lines. Check: is this still one semantic unit (cohesion), or does it need splitting along its actual seams?"
     fi
   fi
+fi
+
+if [ -n "$WARN" ]; then
+  jq -nc --arg c "$WARN" '{hookSpecificOutput:{hookEventName:"PostToolUse", additionalContext:$c}}'
 fi
 
 exit 0

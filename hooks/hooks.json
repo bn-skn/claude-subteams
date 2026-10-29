@@ -6,7 +6,7 @@
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start",
         "async": false,
-        "timeout": 10000
+        "timeout": 10
       }]
     }],
     "PreToolUse": [
@@ -16,7 +16,7 @@
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-commit-gate",
           "async": false,
-          "timeout": 30000
+          "timeout": 60
         }]
       },
       {
@@ -25,7 +25,7 @@
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-push-check",
           "async": false,
-          "timeout": 5000
+          "timeout": 5
         }]
       },
       {
@@ -34,7 +34,7 @@
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/autonomy-gate PreToolUse",
           "async": false,
-          "timeout": 15000
+          "timeout": 15
         }]
       },
       {
@@ -43,7 +43,7 @@
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/convention-preflight",
           "async": false,
-          "timeout": 5000
+          "timeout": 5
         }]
       }
     ],
@@ -54,7 +54,18 @@
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-rails SubagentStart",
           "async": false,
-          "timeout": 5000
+          "timeout": 5
+        }]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [{
+          "type": "command",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-rails SubagentStop",
+          "async": false,
+          "timeout": 5
         }]
       }
     ],
@@ -64,7 +75,7 @@
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-check",
         "async": true,
-        "timeout": 5000
+        "timeout": 5
       }]
     }, {
       "matcher": "",
@@ -72,7 +83,7 @@
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/coord-notify PostToolUse",
         "async": false,
-        "timeout": 5000
+        "timeout": 5
       }]
     }],
     "Stop": [
@@ -82,7 +93,7 @@
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-end-reminder",
           "async": false,
-          "timeout": 5000
+          "timeout": 10
         }]
       }
     ],
@@ -92,7 +103,7 @@
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/coord-session-end",
         "async": false,
-        "timeout": 5000
+        "timeout": 5
       }]
     }],
     "UserPromptSubmit": [{
@@ -100,13 +111,13 @@
       "hooks": [{
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-check",
-        "async": true,
-        "timeout": 5000
+        "async": false,
+        "timeout": 5
       }, {
         "type": "command",
         "command": "${CLAUDE_PLUGIN_ROOT}/hooks/coord-notify UserPromptSubmit",
         "async": false,
-        "timeout": 5000
+        "timeout": 5
       }]
     }]
   }

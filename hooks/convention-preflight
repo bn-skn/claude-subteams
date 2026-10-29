@@ -44,8 +44,8 @@
 # with no resolvable file_path, or any internal error all fall through to
 # exit 0 — same doctrine as pre-commit-gate's review gate: we cannot prove a
 # violation, so we do not guess one. Silent-fail: no diagnostics are logged
-# on the fail-open path; stdout only ever carries the deny message when we
-# DO deny.
+# on the fail-open path; stderr only ever carries the deny message when we
+# DO deny (exit 2 delivers stderr to the model; stdout would be lost).
 
 # 1: autonomy-only, checked first and cheaply — before any stdin/disk work.
 [ -n "${CLAUDE_SUBTEAMS_AUTONOMY:-}" ] || exit 0
@@ -72,8 +72,8 @@ printf '%s\n' "$FILE_PATH" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$' || exit
 
 THRESHOLD=400
 
-_deny() { # message -> print it, exit 2 (blocks the tool call)
-  echo "[subteams:convention-preflight] $1 In an autonomous run, split along semantic seams or get operator sign-off (cohesion doctrine). Override: CLAUDE_SUBTEAMS_SKIP_PREFLIGHT=1."
+_deny() { # message -> print it to STDERR (the only channel the model sees on exit 2), exit 2
+  echo "[subteams:convention-preflight] $1 In an autonomous run, split along semantic seams or get operator sign-off (cohesion doctrine). Override (operator only, set in the CLI environment): CLAUDE_SUBTEAMS_SKIP_PREFLIGHT=1." >&2
   exit 2
 }
 

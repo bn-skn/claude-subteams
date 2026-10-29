@@ -1,6 +1,7 @@
 #!/bin/bash
 # PreToolUse hook for Bash — checks git commit commands
-# Runs compilation check and warns about large files
+# Review gate first (cheap, blocks immediately), then the compilation check, then
+# a size signal for large files.
 
 # Check jq availability
 if ! command -v jq &>/dev/null; then
@@ -10,98 +11,134 @@ fi
 INPUT=$(cat)
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
-# Only act when a git commit appears at a STATEMENT's command position —
-# split on && / ; / | and anchor the match, so `echo "then git commit"`
-# (the literal text inside another command) never trips the gate (backlog F4).
-# `-C <path>` (quoted or bare) between git and commit is allowed; leading
-# VAR=value env assignments before git are tolerated (review finding: the
-# bare anchor let `GIT_EDITOR=true git commit` slip the gate). Statement
-# splitting is the same heuristic used for TARGET_DIR below: quoted &&/;/|
-# inside strings can mis-split, which fails toward running the gate (never
-# toward skipping a real commit).
-if ! printf '%s\n' "$COMMAND" | sed -E 's/&&|;|\|/\n/g' \
-   | grep -qE '^\s*([A-Za-z_][A-Za-z0-9_]*=(\S*|"[^"]*"|'"'"'[^'"'"']*'"'"')\s+)*git\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
+# Only act on a real `git commit`. hooks/lib-gitcmd.sh tokenizes the command line
+# (quote-aware, so `echo "…git commit…"` is just an echo) and lists every git
+# invocation: global options (`git -c x=y -C dir commit`), wrappers (`env git`,
+# `timeout 60 git`, `/usr/bin/git`) and `bash -c "…"` / `if …; then git commit`
+# are all seen; `git commit-tree` is a different subcommand and `--dry-run` / `-h`
+# never create a commit. Cheap substring pre-filter first: non-commit Bash calls
+# (the vast majority) skip the tokenizer entirely.
+case "$COMMAND" in *commit*) ;; *) exit 0 ;; esac
+# shellcheck source=lib-gitcmd.sh
+. "$(dirname "$0")/lib-gitcmd.sh" 2>/dev/null || exit 0
+
+# Legacy detection (the pre-1.49 regex): used ONLY when the tokenizer says its
+# parse is unreliable (unterminated quote, awk died, nesting cap). The principle
+# of this gate: when unsure, err toward the OLD behaviour (detect via regex, file
+# set = index), never toward opening the gate.
+_legacy_has_commit() {
+  printf '%s\n' "$COMMAND" | sed -E 's/&&|;|\|/\n/g' \
+    | grep -qE '^\s*([A-Za-z_][A-Za-z0-9_]*=(\S*|"[^"]*"|'"'"'[^'"'"']*'"'"')\s+)*git\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'
+}
+
+# Legacy target extraction (pre-1.49), used only when the parse is unreliable:
+# prefer `git -C <path>` on the commit statement, else the last `cd <path>` before
+# it (statements split on && / ;). A quoted span wins over whitespace-splitting.
+_arg_after() { # $1=line  $2=extended-regex prefix
+  printf '%s\n' "$1" | sed -nE "s/.*${2}\"([^\"]+)\".*/\1/p" | head -1 | grep . \
+  || printf '%s\n' "$1" | sed -nE "s/.*${2}'([^']+)'.*/\1/p" | head -1 | grep . \
+  || printf '%s\n' "$1" | sed -nE "s/.*${2}(\S+).*/\1/p" | head -1
+}
+_legacy_target() { # sets RAW_TARGET
+  local STMT LAST_CD="" COMMIT_STMT=""
+  while IFS= read -r STMT; do
+    [ -z "$STMT" ] && continue
+    if printf '%s\n' "$STMT" | grep -qE '^\s*cd\s+\S'; then
+      LAST_CD=$(_arg_after "$STMT" '^\s*cd\s+')
+    fi
+    if printf '%s\n' "$STMT" | grep -qE '^\s*([A-Za-z_][A-Za-z0-9_]*=(\S*|"[^"]*"|'"'"'[^'"'"']*'"'"')\s+)*git\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
+      COMMIT_STMT="$STMT"
+      break
+    fi
+  done < <(printf '%s\n' "$COMMAND" | sed -E 's/&&|;/\n/g')
+  RAW_TARGET=""
+  if [ -n "$COMMIT_STMT" ] && printf '%s\n' "$COMMIT_STMT" | grep -qE '\bgit\s+-C\s+\S'; then
+    RAW_TARGET=$(_arg_after "$COMMIT_STMT" '\bgit\s+-C\s+')
+  elif [ -n "$LAST_CD" ]; then
+    RAW_TARGET="$LAST_CD"
+  fi
+  RAW_TARGET="${RAW_TARGET%\"}"; RAW_TARGET="${RAW_TARGET#\"}"
+  RAW_TARGET="${RAW_TARGET%\'}"; RAW_TARGET="${RAW_TARGET#\'}"
+}
+
+gitcmd_scan "$COMMAND"
+
+# One entry per REAL commit in the command line (every commit is examined, not
+# just the first; --dry-run / -h skip only their own commit).
+CM_I=(); CM_ALL=(); CM_PATHS=()
+if [ "$GC_RELIABLE" -eq 1 ]; then
+  for i in "${!GC_SUB[@]}"; do
+    [ "${GC_SUB[$i]}" = "commit" ] || continue
+    all=0; dry=0; skip=0; rest=0; cpaths=""
+    IFS=$'\037' read -r -a CARGS <<< "${GC_ARGS[$i]}"
+    for a in "${CARGS[@]}"; do
+      if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+      if [ "$rest" -eq 1 ]; then cpaths="${cpaths}${cpaths:+$'\037'}$a"; continue; fi
+      case "$a" in
+        --) rest=1 ;;
+        --dry-run|--help) dry=1 ;;
+        --all) all=1 ;;
+        --message|--file|--author|--date|--reuse-message|--reedit-message|--fixup|--squash|--cleanup|--template|--trailer|--pathspec-from-file) skip=1 ;;
+        --*) ;;
+        -h) dry=1 ;;
+        -?*)
+          # short-option cluster (`-am`, `-sam`, `-qvm`): scan chars until one that
+          # takes a value (the rest of the cluster, or the next word, is that value)
+          cl="${a#-}"
+          while [ -n "$cl" ]; do
+            ch="${cl:0:1}"; cl="${cl:1}"
+            case "$ch" in
+              a) all=1 ;;
+              m|F|C|c|t) [ -z "$cl" ] && skip=1; break ;;
+              u|S) break ;;
+            esac
+          done ;;
+        *) cpaths="${cpaths}${cpaths:+$'\037'}$a" ;;
+      esac
+    done
+    [ "$dry" -eq 0 ] || continue
+    n=${#CM_I[@]}
+    CM_I[n]=$i; CM_ALL[n]=$all; CM_PATHS[n]="$cpaths"
+  done
+  [ "${#CM_I[@]}" -gt 0 ] || exit 0
+elif ! _legacy_has_commit; then
   exit 0
 fi
 
 ERRORS=""
-
-# Stack-agnostic compilation check — intentionally cwd-scoped (the session's
-# active project), NOT TARGET_DIR: compiling a best-effort-resolved foreign
-# repo would add noise; the review gate below is what goes cross-repo.
-if [ -f "tsconfig.json" ]; then
-  # Source nvm if available (hooks run in minimal shell without .bashrc) — only
-  # needed here, inside the git-commit branch, so non-commit calls never pay for it.
-  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
-  if command -v npx &>/dev/null; then
-    if ! TSC_OUTPUT=$(npx tsc --noEmit 2>&1); then
-      ERRORS="[subteams:pre-commit-gate] TypeScript compilation failed:\n$TSC_OUTPUT\n\nFix compilation errors before committing."
-    fi
-  else
-    echo "[subteams:pre-commit-gate] Warning: npx not found in PATH — skipping TypeScript check. Ensure nvm is set up or node is installed globally."
-  fi
-elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
-  if command -v mypy &>/dev/null; then
-    if ! MYPY_OUTPUT=$(mypy . --no-error-summary 2>&1 | head -20); then
-      ERRORS="[subteams:pre-commit-gate] mypy check found issues:\n$MYPY_OUTPUT"
-    fi
-  fi
-elif [ -f "go.mod" ]; then
-  if command -v go &>/dev/null; then
-    if ! GO_OUTPUT=$(go build ./... 2>&1); then
-      ERRORS="[subteams:pre-commit-gate] Go build failed:\n$GO_OUTPUT"
-    fi
-  else
-    echo "[subteams:pre-commit-gate] Warning: go not found in PATH — skipping Go build check."
-  fi
-fi
+NOTES=""
 
 # P1.33: resolve the repo the commit actually targets. PreToolUse runs in the
 # session's cwd, but the command may act on a different repo via
 # `cd X && git commit` or `git -C X commit` — a bare `git diff --cached` below
 # would then check the wrong repo's staging area (post-1.32 finding, see
 # docs/plans/2026-07-13-subteams-1.32-research.md). Extraction is best-effort:
-# prefer `git -C <path>` on the commit statement itself, else the last `cd
-# <path>` before it (split on && / ;). ~ and $HOME expand; any other $ or `
-# in the path is an unresolvable substitution and we fall back to cwd rather
-# than guess. Relative paths resolve against the session cwd.
+# prefer `git -C <path>` on the (first) commit statement itself, else the last
+# `cd <path>` before it. ~ and $HOME expand; any other $ or ` in the path is an
+# unresolvable substitution and we fall back to cwd rather than guess. Relative
+# paths resolve against the session cwd. Unreliable parse: cwd.
 TARGET_DIR="$PWD"
-COMMIT_STMT=""
-LAST_CD=""
-
-# Extract the argument after a prefix (`cd ` / `git -C `): a quoted span wins
-# over whitespace-splitting, so `cd "/path with space"` resolves whole instead
-# of truncating at the space (review finding F2 — a truncated prefix that
-# happens to be a real repo would silently point the gate at the WRONG repo).
-_arg_after() { # $1=line  $2=extended-regex prefix
-  printf '%s\n' "$1" | sed -nE "s/.*${2}\"([^\"]+)\".*/\1/p" | head -1 | grep . \
-  || printf '%s\n' "$1" | sed -nE "s/.*${2}'([^']+)'.*/\1/p" | head -1 | grep . \
-  || printf '%s\n' "$1" | sed -nE "s/.*${2}(\S+).*/\1/p" | head -1
-}
-
-while IFS= read -r STMT; do
-  [ -z "$STMT" ] && continue
-  if printf '%s\n' "$STMT" | grep -qE '^\s*cd\s+\S'; then
-    LAST_CD=$(_arg_after "$STMT" '^\s*cd\s+')
-  fi
-  if printf '%s\n' "$STMT" | grep -qE '^\s*([A-Za-z_][A-Za-z0-9_]*=(\S*|"[^"]*"|'"'"'[^'"'"']*'"'"')\s+)*git\s+(-C\s+("[^"]*"|'"'"'[^'"'"']*'"'"'|\S+)\s+)?commit\b'; then
-    COMMIT_STMT="$STMT"
-    break
-  fi
-done < <(printf '%s\n' "$COMMAND" | sed -E 's/&&|;/\n/g')
-
 RAW_TARGET=""
-if [ -n "$COMMIT_STMT" ] && printf '%s\n' "$COMMIT_STMT" | grep -qE '\bgit\s+-C\s+\S'; then
-  RAW_TARGET=$(_arg_after "$COMMIT_STMT" '\bgit\s+-C\s+')
-elif [ -n "$LAST_CD" ]; then
-  RAW_TARGET="$LAST_CD"
+FB_WIDE=0   # fallback only: "all modified tracked + untracked may be committed"
+if [ "${#CM_I[@]}" -gt 0 ]; then
+  RAW_TARGET="${GC_DIR[${CM_I[0]}]:-${GC_CD[${CM_I[0]}]}}"
+else
+  # Unreliable parse: keep the target repo (daily case: `cd /other/repo && git
+  # commit -m "…"` with a message the tokenizer could not close), and keep the
+  # set growing-only: an add/stage seen in the parsed prefix, or -a/--all/-am in
+  # the raw text, widens it to every modified + untracked file.
+  for i in "${!GC_SUB[@]}"; do
+    case "${GC_SUB[$i]}" in
+      commit) [ -n "$RAW_TARGET" ] || RAW_TARGET="${GC_DIR[$i]:-${GC_CD[$i]}}" ;;
+      add|stage) FB_WIDE=1 ;;
+    esac
+  done
+  printf '%s\n' "$COMMAND" | grep -qE 'commit\b.*(\s-[A-Za-z]*a[A-Za-z]*(\s|$)|--all\b)' && FB_WIDE=1
+  [ -n "$RAW_TARGET" ] || _legacy_target
+  [ -n "$RAW_TARGET" ] || RAW_TARGET="$GC_LASTCD"
 fi
 
 if [ -n "$RAW_TARGET" ]; then
-  RAW_TARGET="${RAW_TARGET%\"}"; RAW_TARGET="${RAW_TARGET#\"}"
-  RAW_TARGET="${RAW_TARGET%\'}"; RAW_TARGET="${RAW_TARGET#\'}"
   case "$RAW_TARGET" in
     '~'|'~/'*) RAW_TARGET="$HOME${RAW_TARGET#\~}" ;;
     '$HOME'|'$HOME/'*) RAW_TARGET="$HOME${RAW_TARGET#\$HOME}" ;;
@@ -118,19 +155,92 @@ if [ -n "$RAW_TARGET" ]; then
   fi
 fi
 
-# P3.1 review gate: staged code changes require a code-reviewer subagent to
-# have run this session. hooks/subagent-rails writes the marker on
-# SubagentStart when agent_type matches code-reviewer/gpt-code-reviewer; we
-# just check it's there. Escape hatch: CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE=1.
+# FILES = what THIS command can commit, not just what is staged now (PreToolUse
+# runs before the command, so `git add -A && git commit` and `git commit -am`
+# had an empty index here and sailed through). The set only ever WIDENS, never
+# narrows: index ∪ pathspec paths of each commit ∪ paths of every `git add` /
+# `git stage` earlier in the command line ∪ (commit -a) modified tracked files.
+# Garbage "pathspecs" (leftovers of a mis-parsed message) therefore add nothing
+# harmful. Dirty files that nothing in the command touches stay out, so a
+# docs-only commit is not gated by a neighbour's unstaged .ts. A dynamic add
+# (`git add "$f"`, `… | xargs git add`, --pathspec-from-file) is unknowable, so
+# it counts as `add -A` (all modified tracked + untracked). core.quotePath=false:
+# otherwise non-ASCII names come out octal-quoted ("\320\227….md") and miss the
+# extension checks below.
+FILES=$(
+  G=(git -c core.quotePath=false -C "$TARGET_DIR")
+  "${G[@]}" diff --cached --name-only 2>/dev/null
+  if [ "$FB_WIDE" -eq 1 ]; then
+    "${G[@]}" diff --name-only 2>/dev/null
+    "${G[@]}" ls-files -o --exclude-standard --full-name -- ":/" 2>/dev/null
+  fi
+  last=-1
+  for k in "${!CM_I[@]}"; do
+    [ "${CM_I[$k]}" -gt "$last" ] && last=${CM_I[$k]}
+    [ "${CM_ALL[$k]}" -eq 1 ] && "${G[@]}" diff --name-only 2>/dev/null
+    if [ -n "${CM_PATHS[$k]}" ]; then
+      IFS=$'\037' read -r -a PS <<< "${CM_PATHS[$k]}"
+      "${G[@]}" diff HEAD --name-only -- "${PS[@]}" 2>/dev/null \
+        || "${G[@]}" ls-files --full-name -- "${PS[@]}" 2>/dev/null
+      "${G[@]}" ls-files -o --exclude-standard --full-name -- "${PS[@]}" 2>/dev/null
+    fi
+  done
+  for i in "${!GC_SUB[@]}"; do
+    [ "$i" -lt "$last" ] || continue
+    case "${GC_SUB[$i]}" in add|stage) ;; *) continue ;; esac
+    mode=""; paths=(); dyn="${GC_X[$i]:-0}"; skip=0; rest=0
+    IFS=$'\037' read -r -a AARGS <<< "${GC_ARGS[$i]}"
+    for a in "${AARGS[@]}"; do
+      if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+      case "$a" in *'$'*|*'`'*) dyn=1 ;; esac
+      if [ "$rest" -eq 1 ]; then paths+=("$a"); continue; fi
+      case "$a" in
+        --) rest=1 ;;
+        --all) mode=all ;;
+        --update) mode="${mode:-upd}" ;;
+        --chmod) skip=1 ;;
+        --pathspec-from-file|--pathspec-from-file=*) dyn=1; [ "$a" = "--pathspec-from-file" ] && skip=1 ;;
+        --*) ;;
+        -?*)
+          cl="${a#-}"
+          while [ -n "$cl" ]; do
+            ch="${cl:0:1}"; cl="${cl:1}"
+            case "$ch" in A) mode=all ;; u) mode="${mode:-upd}" ;; esac
+          done ;;
+        *) paths+=("$a") ;;
+      esac
+    done
+    if [ "$dyn" -eq 1 ]; then
+      "${G[@]}" diff --name-only -- ":/" 2>/dev/null
+      "${G[@]}" ls-files -o --exclude-standard --full-name -- ":/" 2>/dev/null
+    fi
+    if [ "${#paths[@]}" -eq 0 ]; then
+      [ -n "$mode" ] || continue
+      paths=(":/")
+    fi
+    "${G[@]}" diff --name-only -- "${paths[@]}" 2>/dev/null
+    [ "$mode" = "upd" ] || "${G[@]}" ls-files -o --exclude-standard --full-name -- "${paths[@]}" 2>/dev/null
+  done
+)
+FILES=$(printf '%s\n' "$FILES" | sort -u)
+
+# P3.1 review gate: the commit's code changes require a code-reviewer subagent
+# to have FINISHED this session. hooks/subagent-rails writes the marker on
+# SubagentStop (agent_type matches code-reviewer / gpt-code-reviewer, result not
+# blank); we just check it's there. Escape hatch:
+# CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE=1 — an env var of the CLI process, so only
+# the user can set it; the block message tells the model to ask, not to try.
 # Fails open (no block) when session_id can't be read from stdin — we can't
 # prove a review is missing if we can't identify the session, so we don't guess.
 # Coarse-grained by design: "did code-reviewer run at all this session", not
-# "did it review exactly these staged lines" — matches the plan's scope.
+# "did it review exactly these lines" — matches the plan's scope.
+# Runs BEFORE the compilation check on purpose: it is cheap and blocks at once,
+# whereas tsc can run for tens of seconds and a hook killed by its timeout is a
+# non-blocking error (the commit would go through unreviewed).
 if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ]; then
   SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
   if [ -n "$SID" ] && printf '%s' "$SID" | grep -qE '^[A-Za-z0-9._-]+$' \
      && [ "$SID" != "." ] && [ "$SID" != ".." ]; then
-    STAGED=$(git -C "$TARGET_DIR" diff --cached --name-only 2>/dev/null)
     NEUTRAL_RE='^(\.gitignore|\.editorconfig|\.gitattributes|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|composer\.lock)$|(^|/)\.DS_Store$'
     HAS_CODE=0
     while IFS= read -r f; do
@@ -147,33 +257,84 @@ if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ]; then
         continue
       fi
       HAS_CODE=1
+      CODE_EXAMPLE="$f"
       break
-    done <<< "$STAGED"
+    done <<< "$FILES"
 
     if [ "$HAS_CODE" -eq 1 ]; then
       MARK_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/review-marks/$SID"
       if [ ! -f "$MARK_FILE" ]; then
-        ERRORS="${ERRORS}${ERRORS:+\n}[subteams:pre-commit-gate] Logic changes staged, no code-reviewer run this session — run code-reviewer first, or set CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE=1 to override.\n"
+        # Delivery contract (Claude Code hooks): on exit 2 the model sees only
+        # STDERR — stdout was shown as "No stderr output", so the reason never
+        # reached it. Block reasons therefore go to stderr (chosen over
+        # autonomy-gate's JSON deny: no jq/escaping dependency on the failure
+        # path, and a deny keeps working in every permission mode).
+        echo "[subteams:pre-commit-gate] This commit includes code changes (e.g. $CODE_EXAMPLE) and no code-reviewer subagent has finished in this session. Run the code-reviewer subagent on these changes, wait for its result, then retry the commit. If the user said to skip review, ask the user to set CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE=1 in the environment Claude Code runs in — the model cannot set it from inside the session." >&2
+        exit 2
       fi
     fi
+  fi
+fi
+
+# Stack-agnostic compilation check — intentionally cwd-scoped (the session's
+# active project), NOT TARGET_DIR: compiling a best-effort-resolved foreign
+# repo would add noise; the review gate above is what goes cross-repo.
+# Capped at 45 s (when `timeout` exists) so the hook always finishes inside its
+# 60 s budget: a killed hook is a NON-blocking error, so a slow build must end as
+# a note, not as a silent pass-through. Timeout (rc 124) => note, not a verdict.
+TMO=()
+command -v timeout &>/dev/null && TMO=(timeout 45)
+
+# _run_check <label> <command...>: runs it capped; rc 0 ok, rc 124 note, else ERRORS.
+_run_check() {
+  local label="$1" out rc; shift
+  out=$("${TMO[@]}" "$@" 2>&1); rc=$?
+  if [ "$rc" -eq 124 ] && [ "${#TMO[@]}" -gt 0 ]; then
+    NOTES="${NOTES}${NOTES:+
+}[subteams:pre-commit-gate] $label did not finish in 45s — compilation NOT verified; run it yourself before relying on this commit."
+  elif [ "$rc" -ne 0 ]; then
+    ERRORS="[subteams:pre-commit-gate] $label failed:\n$(printf '%s' "$out" | head -200)\n\nFix before committing."
+  fi
+}
+
+if [ -f "tsconfig.json" ]; then
+  # Source nvm if available (hooks run in minimal shell without .bashrc) — only
+  # needed here, inside the git-commit branch, so non-commit calls never pay for it.
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+  if command -v npx &>/dev/null; then
+    _run_check "TypeScript compilation" npx tsc --noEmit
+  else
+    NOTES="[subteams:pre-commit-gate] Warning: npx not found in PATH — skipping TypeScript check. Ensure nvm is set up or node is installed globally."
+  fi
+elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+  if command -v mypy &>/dev/null; then
+    _run_check "mypy check" mypy . --no-error-summary
+  fi
+elif [ -f "go.mod" ]; then
+  if command -v go &>/dev/null; then
+    _run_check "Go build" go build ./...
+  else
+    NOTES="[subteams:pre-commit-gate] Warning: go not found in PATH — skipping Go build check."
   fi
 fi
 
 # Size check (P9, cohesion doctrine — mirrors hooks/post-edit-check): when the
 # project has a CONVENTIONS.md at the repo root, size thresholds and the
 # cohesion principle live there and are enforced by review, not this hook.
-# Without CONVENTIONS.md: flag staged code files past 400 lines as a
+# Without CONVENTIONS.md: flag code files in this commit past 400 lines as a
 # review signal ("still one semantic unit?"), never as a verdict.
 # 400 vs the 300 review threshold in prose: deliberately coarser — the hook is
 # a last-resort net, review owns the 300 line; avoids mechanical noise.
-# REPO_ROOT and the staged-file list are resolved against TARGET_DIR (see
-# above) — the repo the commit actually targets, not necessarily cwd. Staged
-# paths from `git diff --cached` are always relative to the repo root, so
-# file checks below join against REPO_ROOT rather than assuming cwd == root.
+# REPO_ROOT and the file list are resolved against TARGET_DIR (see above) — the
+# repo the commit actually targets, not necessarily cwd. Paths from git are
+# relative to the repo root, so file checks below join against REPO_ROOT rather
+# than assuming cwd == root.
 REPO_ROOT=$(git -C "$TARGET_DIR" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$TARGET_DIR")
 LARGE_FILES=""
 if [ ! -f "$REPO_ROOT/CONVENTIONS.md" ]; then
-  LARGE_FILES=$(git -C "$TARGET_DIR" diff --cached --name-only 2>/dev/null | while IFS= read -r f; do
+  LARGE_FILES=$(printf '%s\n' "${FILES:-}" | while IFS= read -r f; do
     FULL="$REPO_ROOT/$f"
     if [ -f "$FULL" ] && printf '%s\n' "$f" | grep -qE '\.(ts|js|py|go|rs|java|tsx|jsx)$'; then
       LINES=$(wc -l < "$FULL")
@@ -185,14 +346,21 @@ if [ ! -f "$REPO_ROOT/CONVENTIONS.md" ]; then
 fi
 
 if [ -n "$ERRORS" ]; then
-  echo -e "$ERRORS"
+  echo -e "$ERRORS" >&2
   exit 2
 fi
 
+# Advisory text: PreToolUse stdout on exit 0 is not shown to the model, so it goes
+# out as hookSpecificOutput.additionalContext.
 if [ -n "$LARGE_FILES" ]; then
-  echo "[subteams:pre-commit-gate] Size signal — staged files past 400 lines:"
-  echo "$LARGE_FILES"
-  echo "Check: is each still one semantic unit (cohesion)? If yes, keep with a one-line justification; if no, split along its actual seams."
+  NOTES="${NOTES}${NOTES:+
+}[subteams:pre-commit-gate] Size signal — files past 400 lines in this commit:
+$LARGE_FILES
+Check: is each still one semantic unit (cohesion)? If yes, keep with a one-line justification; if no, split along its actual seams."
+fi
+
+if [ -n "$NOTES" ]; then
+  jq -nc --arg c "$NOTES" '{hookSpecificOutput:{hookEventName:"PreToolUse", additionalContext:$c}}'
 fi
 
 exit 0

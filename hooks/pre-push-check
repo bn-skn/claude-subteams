@@ -1,5 +1,10 @@
 #!/bin/bash
-# PreToolUse hook for Bash — warns before git push
+# PreToolUse hook for Bash — warns before git push.
+# Delivery: PreToolUse stdout on exit 0 never reaches the model, so the warning
+# goes out as hookSpecificOutput.additionalContext (exit 0, never blocks).
+# Detection is token-based (hooks/lib-gitcmd.sh): text inside echo "…git push…"
+# is ignored, and "main"/"master" must be a whole refspec word or the
+# destination of src:dst — a branch like fix-main-bug does not count.
 
 if ! command -v jq &>/dev/null; then
   exit 0
@@ -8,15 +13,38 @@ fi
 INPUT=$(cat)
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
-if ! printf '%s\n' "$COMMAND" | grep -qE '\bgit\s+push\b'; then
-  exit 0
-fi
+case "$COMMAND" in *push*) ;; *) exit 0 ;; esac
+# shellcheck source=lib-gitcmd.sh
+. "$(dirname "$0")/lib-gitcmd.sh" 2>/dev/null || exit 0
 
-# Strong warning for main/master (word boundary match)
-if printf '%s\n' "$COMMAND" | grep -qE '\b(main|master)\b'; then
-  echo "[subteams:pre-push-check] WARNING: Pushing directly to main/master. Are you sure? Consider using a feature branch and PR."
+gitcmd_scan "$COMMAND"
+PUSHED=0; MAIN=0
+if [ "$GC_RELIABLE" -eq 1 ]; then
+  for i in "${!GC_SUB[@]}"; do
+    [ "${GC_SUB[$i]}" = "push" ] || continue
+    PUSHED=1
+    IFS=$'\037' read -r -a PARGS <<< "${GC_ARGS[$i]}"
+    for a in "${PARGS[@]}"; do
+      a="${a#+}"   # +main = force refspec
+      case "$a" in
+        main|master|*:main|*:master|refs/heads/main|refs/heads/master|*:refs/heads/main|*:refs/heads/master|*:+main|*:+master) MAIN=1 ;;
+      esac
+    done
+  done
 else
-  echo "[subteams:pre-push-check] Pushing to remote. Confirm: tests passed and code reviewed this session?"
+  # Unreliable parse (open quote, awk failure): old, coarse detection — warn too often rather than never.
+  if printf '%s\n' "$COMMAND" | grep -qE '\bgit\s+push\b'; then
+    PUSHED=1
+    printf '%s\n' "$COMMAND" | grep -qE '\b(main|master)\b' && MAIN=1
+  fi
+fi
+[ "$PUSHED" -eq 1 ] || exit 0
+
+if [ "$MAIN" -eq 1 ]; then
+  MSG="[subteams:pre-push-check] WARNING: Pushing directly to main/master. Are you sure? Consider using a feature branch and PR."
+else
+  MSG="[subteams:pre-push-check] Pushing to remote. Confirm: tests passed and code reviewed this session?"
 fi
 
+jq -nc --arg c "$MSG" '{hookSpecificOutput:{hookEventName:"PreToolUse", additionalContext:$c}}'
 exit 0

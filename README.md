@@ -237,7 +237,7 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | `prompt-engineer` | opus | Authors and optimizes prompts, system prompts, and tool/skill instructions. Context-first, eval-driven. Read + write. |
 | `agent-architect` | opus | Designs subagents and multi-agent systems: boundaries, orchestration, tool scoping, contracts. Read + write. |
 | `gemini-analyst` | sonnet (+Antigravity/Gemini) | Multimodal media analysis via `agy` CLI: video frames with temporal precision, images; Gemini second opinion. Read-only repo; graceful-skips if agy unavailable. |
-| `gemini-code-reviewer` | sonnet (+Antigravity/Gemini) | Third cross-review lane via `agy` (strongest available Gemini, auto-detected) — default alongside the GPT critics when agy is available (Codex analogy, 22.07.2026). Read-only; graceful-skip with mandatory degradation notice. |
+| `gemini-code-reviewer` | sonnet (+Antigravity/Gemini) | Third cross-review lane via `agy` (strongest available Gemini, auto-detected) — runs alongside the GPT critics in a cross-review (Full pipeline, cross-review triggers, explicit request) when agy is available. Read-only; graceful-skip with mandatory degradation notice. |
 | `gemini-design-critic` | sonnet (+Antigravity/Gemini) | Optional cross-model design lane via `agy`: structured critique of rendered visuals (screenshots, renders). Opt-in per design-qa §6.5. Read-only; graceful-skip with mandatory degradation notice. |
 | `gemini-frontend` | sonnet (+Antigravity/Gemini) | Competing frontend draft from a brief via `agy` (strongest available Gemini, auto-detected): unedited self-contained HTML alternative to the Claude pipeline. Direct-call first via `scripts/gemini/frontend.sh`. |
 
@@ -246,13 +246,13 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | Event | Hook | Purpose |
 |---|---|---|
 | `SessionStart` | `session-start` | Checks for stale BACKLOG items and active plans from previous sessions. No prompt injection — activation via CLAUDE.md. |
-| `PreToolUse` (Bash) | `pre-commit-gate` | Runs tsc / mypy / go build before any git commit; warns on files over 200 lines. |
-| `PreToolUse` (Bash) | `pre-push-check` | Safety check before git push. |
+| `PreToolUse` (Bash) | `pre-commit-gate` | Before a `git commit`: runs tsc / mypy / go build and requires a finished code-reviewer run in the session when the commit includes code. Counts what the command itself will commit (`git add … && git commit`, `-a`, pathspec), parsed by `hooks/lib-gitcmd.sh`; the block reason goes to stderr so the model sees it. Size signal past 400 lines. |
+| `PreToolUse` (Bash) | `pre-push-check` | Advisory (`additionalContext`) on a push to main/master or a force push; never blocks. |
 | `PreToolUse` (Edit/Write/MultiEdit/NotebookEdit/Bash) | `autonomy-gate` | Enforces scoped autonomy grants — blocks out-of-scope or cap-exceeding writes and edits to the grant's own run record before they land. Inert unless `CLAUDE_SUBTEAMS_AUTONOMY` is set. Delegates scope/cap checks to `scripts/autonomy-check.sh`. Contains agent drift off scope; not a sandbox against a shell-equipped agent — see [ADR-007](docs/adr/007-autonomy-enforcement-architecture.md). |
-| `SubagentStart` | `subagent-rails` | Injects a static rails pointer + honesty reminder into every spawned subagent. Plugin text only, never repo content. |
-| `PostToolUse` (Edit/Write) | `post-edit-check` | Async check after file edits. |
+| `SubagentStart` / `SubagentStop` | `subagent-rails` | Start: injects a static rails pointer + honesty reminder into every spawned subagent (plugin text only, never repo content). Stop: writes the review marker `pre-commit-gate` checks, when a code-reviewer subagent finishes. |
+| `PostToolUse` (Edit/Write) | `post-edit-check` | Async check after file edits; warnings delivered as `additionalContext`. |
 | `Stop` | `session-end-reminder` | **Advisory** documentation reminder, fired **at most once per undocumented changeset** (marker keyed on `session_id` stores the reminded file set; re-fires only for new undocumented files after a cooldown, default 45 min via `CLAUDE_SUBTEAMS_DOC_REMIND_COOLDOWN_MIN`). Detects unstaged code changes without `*.md` updates and delivers a hybrid, never-blocking notice: a framed advisory to the model via `additionalContext` ("not a task — surface to the user") + one `systemMessage` line to the operator. Escalates the advisory wording on breaking signals (file deletions, schema/migration files) — see the `doc-quality-gate` skill. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See [ADR-009](docs/adr/009-session-end-hybrid-advisory.md) and "Configuration" below. |
-| `UserPromptSubmit` | `user-prompt-check` | Async prompt validation. |
+| `UserPromptSubmit` | `user-prompt-check` | Scope hint (development / agentic work) as `additionalContext`. |
 
 When `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` (see the `multi-instance` skill), additional **opt-in** hooks run — zero effect when unset: `session-start` also registers the instance + injects the roster; `user-prompt-check` / `post-edit-check` also refresh the liveness heartbeat; `coord-notify` (on `UserPromptSubmit` **and** `PostToolUse`) injects a count of unread peer mailbox messages; `coord-session-end` (on `SessionEnd`) deregisters the instance and releases its claims.
 

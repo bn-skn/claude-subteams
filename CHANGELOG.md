@@ -3,6 +3,28 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.49.0] - 2026-10-30
+
+Fixes from the 29.10.2026 plugin audit (six lanes: Anthropic practice research, prompts/context, October session logs, hook engineering, Codex, Gemini). Operator decisions (Богдан, 30.10.2026): fix the hook bugs; take the GPT and Gemini lanes out of the Standard default; keep the Focused tier, the Stop-hook verbatim repeat and the `using-subteams` size as they are for now (filed in BACKLOG).
+
+### Changed
+- **Cross-model review is no longer a Standard-pipeline default.** GPT critics and the Gemini lane run on the Full pipeline (Step 6, Step 3 plan defense), on a cross-review trigger on any pipeline — security boundary, money, breaking/public contract, data schema, destructive migration (`cross-review` §1 item 3, a narrower list than the §6 artifact risk-triggers) — and on explicit request. A triggered cross-review runs the full §3.1 set. Standard keeps code-reviewer for any logic change and devils-advocate for non-trivial logic. October logs: GPT/Gemini on Standard took 13–23% of reviewer time with little evidence of value on small changes. `using-subteams` 1.12.0 (roster #13/#14/#18, cross-model note, Standard step 5), `cross-review` §1 items 3–9 and §3, `gemini-code-reviewer`, README.
+
+### Fixed
+- **Review gate counted a review the moment a reviewer was spawned.** The marker is now written on `SubagentStop`, not `SubagentStart` (`hooks/subagent-rails`, new `SubagentStop` entry in hooks.json). Live probe on CLI 2.1.312: `SubagentStop` carries the parent `session_id` and `agent_type` but no `last_assistant_message` (present in the SDK types) — absent field trusts the event, a blank one writes no marker.
+- **Review gate missed the usual commit forms.** It read the index before the command ran, so `git add -A && git commit`, `git commit -am`, `git commit <path>` and wrappers (`git -c`, `env git`, `bash -c`, subshells, `timeout`, `flock`, `xargs`) passed with code unreviewed. New `hooks/lib-gitcmd.sh` tokenizes the command (quotes, `$'…'`, heredoc bodies skipped, wrappers stripped incl. `coord.sh commit-lock|gate-lock -- …`, `<<` inside `$((…))` read as a shift, nested `bash -c`/`eval` up to depth 4) and the gate checks every commit in the line against the index plus whatever the command itself stages. The file set only ever grows; an unreliable parse (unclosed quote, heredoc without terminator, tokenizer failure, depth exceeded) falls back to the pre-1.49 regex and target extraction (`cd X` / `git -C X`) with the index, widened to the whole tree when the parsed prefix stages files or the commit has `-a`. `git commit-tree`, `--dry-run`, `-h` and `git commit` inside echoed text no longer trigger. Paths with non-ASCII names are read with `core.quotePath=false` (a Cyrillic `.md` was blocked as code).
+- **Block reasons never reached the model.** `pre-commit-gate` and `convention-preflight` wrote the reason to stdout on exit 2; the CLI shows only stderr ("No stderr output"). Reasons now go to stderr, and the review-gate text tells the model what it can do (run code-reviewer; the skip variable is the user's to set).
+- **Hook timeouts were written as milliseconds**; the contract is seconds (30000 = 8 h 20 min). Now 5–60 s. The review check runs before tsc/mypy/go build, which are wrapped in `timeout 45` when available, so a slow compile can no longer kill the hook before the review check.
+- **`user-prompt-check` never fired**: it read `.user_prompt` (the field is `prompt`) and, being async, printed plain text that is not delivered. Now reads `.prompt` (fallback `.user_prompt`), runs sync, answers with JSON `additionalContext`; the multi-instance heartbeat runs in the background.
+- **`pre-push-check` and `post-edit-check` warnings were never delivered** (PreToolUse stdout on exit 0 and async plain text go to the debug log). Both now answer with JSON `additionalContext`. `pre-push-check` no longer fires on branch names like `fix-main-bug` and now catches `+main` force refspecs.
+
+### Added
+- `scripts/test-hooks.sh` — regression suite for the hooks (temp git repos, isolated cache, stdin JSON; `HOOKS_DIR=` runs it against another copy for a negative control): 109 checks. Negative controls: against 1.48.1 hooks 44 of the first 64 checks fail; against the first draft of this fix 24 of 95; against the second draft 12 of 109.
+
+### Review
+- code-reviewer: request-changes on the first draft (tokenizer failed open on the standard heredoc commit, unclosed quotes, chained commits, >128 KiB commands; timeout could kill the review check) — all fixed; re-review approve-with-fixes found two narrow regressions (`$((1<<2))` taken for a heredoc, fallback losing the `cd`/`-C` target) and the invisible `coord.sh commit-lock` form — fixed with tests; residuals in BACKLOG. prompt-evaluator `fix-first` on the cross-model scope text (trigger list collided with §6 risk-triggers, roster #13/#14, pair vs full set) — applied.
+- Live E2E: `claude -p --plugin-dir` in a temp repo — `git add -A && git commit` blocked with the reason visible to the model; after code-reviewer finished, the same commit passed; a Cyrillic `.md` commit next to a dirty `.ts` passed without review.
+
 ## [1.48.1] - 2026-10-29
 
 ### Changed

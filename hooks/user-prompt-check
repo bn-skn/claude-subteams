@@ -11,31 +11,43 @@ INPUT=$(cat)
 # Multi-instance heartbeat (opt-in): refresh this instance's liveness on each prompt.
 if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ]; then
   _hb_sid=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
-  [ -n "$_hb_sid" ] && "${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh" heartbeat --id "${_hb_sid:0:8}" \
-    --worktree "$PWD" --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" >/dev/null 2>&1
+  # Detached: the hook is sync now, and coord.sh can wait on its flock — the
+  # prompt must not. Output and stdin are cut so the CLI never waits on our pipes.
+  [ -n "$_hb_sid" ] && { "${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh" heartbeat --id "${_hb_sid:0:8}" \
+    --worktree "$PWD" --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" </dev/null >/dev/null 2>&1 & }
 fi
 
-PROMPT=$(printf '%s' "$INPUT" | jq -r '.user_prompt // empty' 2>/dev/null)
+# Field is `prompt` per the UserPromptSubmit contract; `.user_prompt` kept as a
+# fallback for old CLI payloads.
+PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // .user_prompt // empty' 2>/dev/null)
 
 if [ -z "$PROMPT" ]; then
   exit 0
 fi
 
+# Delivery: the hook runs synchronously and the hint goes out as
+# hookSpecificOutput.additionalContext (the documented channel; an async hook
+# would lose bare stdout). Exits right after the first (most specific) match.
+_emit() {
+  jq -nc --arg c "$1" '{hookSpecificOutput:{hookEventName:"UserPromptSubmit", additionalContext:$c}}'
+  exit 0
+}
+
 # Agentic/prompt patterns — checked first (a more specific subtype of dev work)
 if printf '%s\n' "$PROMPT" | grep -qiE 'system prompt|prompt engineer|agentic|sub-?agent|multi-?agent|mcp server|tool (definition|schema)|llm[ -]?judge|rag pipeline|(build|create|design|edit|write|improve|optimi[sz]e)( [a-z]+){0,3}? (agent|prompt|skill)s?\b'; then
-  echo "[subteams:scope] Agentic/prompt work detected — apply using-subteams Section 6.5: agent-architect (design) / prompt-engineer (authoring) / prompt-evaluator (validation)."
+  _emit "[subteams:scope] Agentic/prompt work detected — apply using-subteams Section 6.5: agent-architect (design) / prompt-engineer (authoring) / prompt-evaluator (validation)."
 # Document deliverables — checked before greenfield: "write a spec for a new service" is a document task
 # first and a structural task second, and the document budget must be set before any writer is dispatched.
 elif printf '%s\n' "$PROMPT" | grep -qiE '(write|draft|make|prepare|напиши|составь|сделай|подготовь)( [^ ]+){0,3} (spec|specification|requirements|proposal|report|тз|техзадание|техническое задание|спецификаци|коммерческое предложение|отчёт|отчет)|\bтз\b|statement of work'; then
-  echo "[subteams:scope] Document deliverable detected — set the size budget BEFORE dispatching writers, one writer per file, never compress with a subagent (using-subteams Section 1.1, Rules 25-27)."
+  _emit "[subteams:scope] Document deliverable detected — set the size budget BEFORE dispatching writers, one writer per file, never compress with a subagent (using-subteams Section 1.1, Rules 25-27)."
 # Greenfield / structural patterns — checked before generic dev so the architecture-capture flow surfaces
 elif printf '%s\n' "$PROMPT" | grep -qiE 'new( [^ ]+){0,3} (project|service|module|layer|integration|microservice)|greenfield|scaffold|bootstrap (a |the |new )?project|from scratch|re-?design (the )?architecture|re-?architect|dependency direction|архитектур|нов(ый|ого)( [^ ]+){0,3} (проект|сервис|модул|слой|интеграци)|с нуля|редизайн'; then
-  echo "[subteams:scope] Greenfield/structural work detected — apply the architecture-capture flow: capture decisions as ADRs during brainstorming, populate ARCHITECTURE.md/CONVENTIONS.md, and gate IMPLEMENT on scripts/check-arch-docs.sh (using-subteams Rule 24)."
+  _emit "[subteams:scope] Greenfield/structural work detected — apply the architecture-capture flow: capture decisions as ADRs during brainstorming, populate ARCHITECTURE.md/CONVENTIONS.md, and gate IMPLEMENT on scripts/check-arch-docs.sh (using-subteams Rule 24)."
 # Dev patterns — compound phrases that clearly indicate development work
 elif printf '%s\n' "$PROMPT" | grep -qiE 'fix (the |a |this )?bug|implement\s+\w|refactor|write tests?|deploy to|run build|add (endpoint|feature|component)|create (api|migration|service)|git (commit|push|merge|branch)|code review|pull request'; then
-  echo "[subteams:scope] Development task detected."
+  _emit "[subteams:scope] Development task detected."
 elif printf '%s\n' "$PROMPT" | grep -qiE 'design (the |a )?ui|mockup|layout|style (the |a )'; then
-  echo "[subteams:scope] Design task detected."
+  _emit "[subteams:scope] Design task detected."
 fi
 
 exit 0
