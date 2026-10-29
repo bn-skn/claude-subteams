@@ -3,6 +3,32 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.48.0] - 2026-10-29
+
+Fixes from the 28.10.2026 audit of the plugin on the claudebot project (17 sessions, 184 subagent calls), re-checked 29.10 against 1.47.0 and two live sessions. Operator decisions (Богдан, 29.10.2026) set the scope: cross-model lanes, the Stop-hook reminder and the rails pointer stay as they are; no new skills or gates.
+
+### Added
+- **`coord.sh help`** (also `-h`, `--help`, no command): usage printed from the script header — works before the opt-in gate and outside a git repo. The old `sed -n '2,64p'` range had already dropped the last command.
+- **`coord.sh status [--id ID]`**: roster + claims + your unread count. Never clears the inbox (counts via `recv --count`); reaps dead instances like `roster`. `status` was the most frequent guessed command.
+- Unknown commands print a "did you mean" hint for the measured mistakes (`list`, `inbox`, `unlock`, `lock`, `whoami`) and the command list.
+
+### Fixed
+- `commit-lock --id X -- CMD` ran `--id` as the command and committed nothing; a leading option other than `--` is now rejected (exit 2). `commit-lock CMD` without `--` still works.
+- A flag given last without its value (`--id`, `--to`, `--from`) aborted with `unbound variable`; now a message and exit 2 (claim, release, send, recv, status).
+- `send` with an unquoted message kept only the last word — words are joined; `--` before the message is understood.
+- `release`/`recv` without `--id` exited 2 silently; `claims` on an empty ledger printed nothing — both now say what happened.
+
+### Changed
+- **`using-subteams` 1.11.0 — pressure wording removed, content kept.** Caps MUST/NEVER/ALWAYS, `<HARD-GATE>`, "No exceptions", "non-negotiable", "process failure", STOP/SILENT/"Do NOT" became plain imperatives; every rule, number, date and the Critical Rules 1–27 numbering are unchanged, nothing moved to other files (operator: "можно что-то упустить"). Current Claude models over-trigger on aggressive emphasis (Anthropic prompting guidance). Scope/contrast caps (ONLY, NOT apply, PRIMARY, IN PARALLEL) kept — they limit triggering.
+- Section 5 "The 1% Rule" → "The Relevance Rule": invoke a skill when its description matches the task or a part of it; when unsure, load it. Same direction of error, without the pressure framing.
+- **`developer`**: no commit unless the brief explicitly asks (the orchestrator reviews and commits); runs the tests covering the changed area, the orchestrator runs the full suite. "If unsure — ask" (impossible for a background subagent) became: finish what does not depend on the answer, no irreversible step on the open point, answer-changing questions under `### Questions`, reversible assumptions under the new `### Assumptions`. Model unchanged.
+- **Secrets rule** in `developer`, `code-reviewer`, `security-auditor`: secret files (`.env`, `.env.local`, key files, token stores) are never opened or printed; templates (`.env.example`) and credential-handling code are ordinary files; found secrets reported file:line + type, value masked; a tracked `.env` is reported as leaked content without printing values. Driver: auto-mode "Credential Exploration" denials of these three agents in real sessions. `security-auditor` step 3 previously told it to scan environment files.
+
+### Review
+- coord.sh: code-reviewer (1 important, 8 minor — fixed except: other commands stay silent without opt-in, deliberately — hooks call them).
+- Prompts: prompt-engineer authored the tone pass; prompt-evaluator `fix-first` (4 important, 7 minor) — applied. Static evaluation only; no headless A/B of skill trigger rates yet.
+- GPT lane unavailable (Codex refresh token revoked); Gemini lane unavailable (`agy` not installed).
+
 ## [1.47.0] - 2026-10-28
 
 ### Fixed
