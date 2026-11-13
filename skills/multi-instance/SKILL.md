@@ -70,12 +70,12 @@ Do this **before taking any lock.** Rebasing keeps your branch's drift from `mai
 ### 7.2 Run the gate under gate-lock
 
 ```bash
-coord.sh gate-lock -- bash -c 'npx tsc --noEmit && npx vitest run && npm run test:canary'
+coord.sh gate-lock -- bash -c 'npx tsc --noEmit && npm test && npm run test:e2e'
 # bounded wait instead of indefinite:
-coord.sh gate-lock --timeout 1800 -- bash -c 'npx tsc --noEmit && npx vitest run && npm run test:canary'
+coord.sh gate-lock --timeout 1800 -- bash -c 'npx tsc --noEmit && npm test && npm run test:e2e'
 ```
 
-(Substitute your project's own gate — type-check + tests + whatever boot/smoke check it runs.) This is the main scaling guard: a full gate is CPU/RAM-heavy and minutes-long, and several of these running at once on a small box starve each other rather than finishing. `gate-lock` puts them on their own queue, separate from `commit-lock`, so one instance's long gate never blocks another instance's quick commit.
+(Substitute your project's own gate — `subteams-tests` lists the suites the project has; type-check + every `run: auto` suite + whatever boot/smoke check it runs.) This is the main scaling guard: a full gate is CPU/RAM-heavy and minutes-long, and several of these running at once on a small box starve each other rather than finishing. `gate-lock` puts them on their own queue, separate from `commit-lock`, so one instance's long gate never blocks another instance's quick commit.
 
 No `--timeout`: waits as long as it takes — queuing behind another instance's gate is expected, not exceptional. With `--timeout N`: exit **75** almost always means the lock wasn't free within Ns — `coord.sh` reserves 75 for exactly that. It is not a guarantee, though: a gate command that itself happens to exit 75 is indistinguishable from a timeout (`coord.sh`'s own comment notes this as a rare, accepted collision, not an impossibility). When the lock IS acquired, your gate command's own exit code passes straight through, so an ordinary gate failure still reads as a real failure.
 
@@ -103,9 +103,9 @@ Do this once the merge lands. You no longer own the files, and a peer waiting to
 
 ### 7.5 Restart/deploy only from the main checkout
 
-Once merged, restart or deploy from the main checkout, after confirming it is actually on `main` — never from a worktree. (This assumes the branch-guard invariant this skill relies on: some project-level assert, e.g. claudebot's `self-restart.sh`, refuses to restart off `main`. If your project has no such assert, add one before scaling past a couple of instances — a worktree accidentally left checked out elsewhere should never be able to ship.)
+Once merged, restart or deploy from the main checkout, after confirming it is actually on `main` — never from a worktree. (This assumes the branch-guard invariant this skill relies on: some project-level assert, e.g. a restart/deploy script that refuses to restart off `main`. If your project has no such assert, add one before scaling past a couple of instances — a worktree accidentally left checked out elsewhere should never be able to ship.)
 
-This restart/deploy step is also where a post-merge check belongs — `finishing-branch`'s Red Flags require "NEVER merge without verifying tests on result," and §7.2 only gates the branch's own state *before* it lands, not the result of the merge itself. Where the project's own restart/deploy already runs its quality gate (claudebot's `self-restart.sh` runs tsc+vitest+canary on every restart), this falls out for free. This skill is portable and cannot assume that in general: if your project's restart/deploy does not gate itself, run the project's test/gate command in the main checkout after the merge, before treating the branch as landed.
+This restart/deploy step is also where a post-merge check belongs — `finishing-branch`'s Red Flags require "NEVER merge without verifying tests on result," and §7.2 only gates the branch's own state *before* it lands, not the result of the merge itself. Where the project's own restart/deploy already runs its quality gate (e.g. a restart script that runs type-check + tests + a boot smoke check on every restart), this falls out for free. This skill is portable and cannot assume that in general: if your project's restart/deploy does not gate itself, run the project's test/gate command in the main checkout after the merge, before treating the branch as landed.
 
 ### 7.6 Lock nesting — the rule that prevents a deadlock
 
