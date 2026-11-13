@@ -4,7 +4,7 @@
 # (из набора символических ссылок на нужные утилиты — без системного Chrome и agent-browser).
 # Сеть, настоящий npm и боевой кэш пользователя не трогаются.
 # Отрицательный контроль: SUBTEAMS_BROWSER=<путь к изменённой копии> bash scripts/test-subteams-browser.sh
-#   (копия должна лежать в <корень>/bin/ рядом с <корень>/deps/agent-browser/).
+#   (копия должна лежать в <корень>/bin/ рядом с <корень>/deps/agent-browser/ и <корень>/scripts/lib-testclass.sh).
 # Использование: bash scripts/test-subteams-browser.sh   (exit 0 = все PASS, иначе 1)
 set -u
 
@@ -35,11 +35,13 @@ SENT="sentinel-$$-c0ffee-do-not-print"
 # --- набор утилит без браузеров и без agent-browser -------------------------
 TOOLS="$TMP/tools"; mkdir -p "$TOOLS"
 for t in bash sh env uname mkdir rm mv cp mktemp cat date find sleep sha1sum shasum openssl git \
-         dirname basename readlink wc tr cut sed ls pkill chmod touch grep head node stat; do
+         dirname basename readlink wc tr cut sed ls pkill chmod touch grep head node stat awk; do
   p=$(command -v "$t" 2>/dev/null) && [ -n "$p" ] && ln -s "$p" "$TOOLS/$t"
 done
 [ -e "$TOOLS/node" ] || { echo "node required"; exit 2; }
 [ -e "$TOOLS/git" ] || { echo "git required"; exit 2; }
+# jq — отдельно: основной набор без jq проверяет путь библиотеки без jq (литеральный префикс {"type":"shot")
+JQBIN=""; if p=$(command -v jq 2>/dev/null); then JQBIN="$TMP/jqbin"; mkdir -p "$JQBIN"; ln -s "$p" "$JQBIN/jq"; fi
 
 # --- подделки ----------------------------------------------------------------
 mkfake_ab() { # <путь> <версия> <метка>
@@ -370,44 +372,99 @@ fi
 echo "--- квитанция shot"
 newcache shot
 REPO="$TMP/repo"; mkdir -p "$REPO" && git -C "$REPO" init -q -b main && git -C "$REPO" commit -q --allow-empty -m base
+REPO_C=$(cd -P "$REPO" && pwd)
 CANON=$(cd -P "$REPO/.git" && pwd)
 if command -v sha1sum >/dev/null 2>&1; then RID=$(printf '%s' "$CANON" | sha1sum | cut -d' ' -f1)
 else RID=$(printf '%s' "$CANON" | shasum -a 1 | cut -d' ' -f1); fi
-RDIR="$CACHE/claude-subteams/receipts/$RID"
+RSTORE="$CACHE/claude-subteams/receipts"; RDIR="$RSTORE/$RID"; RLOG="$RSTORE/_recent.log"
+nshots() { names "$RDIR" | grep -c '^[0-9]*-shot-.*\.json$' | tr -d ' '; }
 mkdir -p "$TMP/shots"
 CWD="$REPO/"
 run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/a \"b\".png"
 check "screenshot: rc 0" 0 "$RC"
-nrec=$(names "$RDIR" | grep -c '^shot-.*\.json$' | tr -d ' ')
-check "screenshot: one shot receipt in repo store" 1 "$nrec"
-rec=$(cat "$RDIR"/shot-*.json 2>/dev/null)
+check "screenshot: one shot receipt in repo store (lib naming <ts>-shot-…json)" 1 "$(nshots)"
+check "screenshot: no warning on success" "" "$ERR"
+rec=$(cat "$RDIR"/*-shot-*.json 2>/dev/null)
 got=$(printf '%s' "$rec" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log([j.type,j.kind,j.path,j.size,j.session,typeof j.ts,j.root].join("|"))})' 2>&1)
-check "screenshot: receipt fields (type + kind + root)" "shot|shot|$TMP/shots/a \"b\".png|7|ui-1|number|$(cd -P "$REPO" && pwd)" "$got"
-check "screenshot: no temp files in store" "" "$(names "$RDIR" | grep -v '^shot-.*\.json$')"
+check "screenshot: receipt fields (type + kind + root)" "shot|shot|$TMP/shots/a \"b\".png|7|ui-1|number|$REPO_C" "$got"
+check "screenshot: receipt starts with {\"type\":\"shot\" (lib accepts it without jq)" 1 "$(head -c 14 "$RDIR"/*-shot-*.json | grep -c '^{"type":"shot"')"
+check "screenshot: one line in the global _recent.log (ts, store, root, type)" 1 \
+  "$(grep -cE "^[0-9]+	$RID	$REPO_C	shot\$" "$RLOG" 2>/dev/null)"
+check "screenshot: store and _recent.log not group/other readable" "" "$(find "$RSTORE" -perm -g=r -o -perm -o=r 2>/dev/null | head -2)"
+check "screenshot: no temp files in store" "" "$(names "$RDIR" | grep -v '^[0-9]*-shot-.*\.json$')"
 git -C "$REPO" worktree add -q "$TMP/wt" -b wt 2>/dev/null
 CWD="$TMP/wt"
 run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot --full "$TMP/shots/w.png"
-check "screenshot from worktree: same repo store" 2 "$(names "$RDIR" | grep -c '^shot-' | tr -d ' ')"
-check "screenshot from worktree: root = the worktree" 1 "$(cat "$RDIR"/shot-*.json | grep -c "\"root\":\"$(cd -P "$TMP/wt" && pwd)\"")"
+check "screenshot from worktree: same repo store" 2 "$(nshots)"
+check "screenshot from worktree: root = the worktree" 1 "$(cat "$RDIR"/*-shot-*.json | grep -c "\"root\":\"$(cd -P "$TMP/wt" && pwd)\"")"
+check "screenshot from worktree: _recent.log root = the worktree" 1 "$(grep -c "	$(cd -P "$TMP/wt" && pwd)	shot\$" "$RLOG")"
 CWD="$REPO"
 run "$P_BASE:$TMP/sys-same" FAKE_AB_RC=1 -- --session ui-1 screenshot "$TMP/shots/fail.png"
 check "screenshot failed: rc passed through" 1 "$RC"
-check "screenshot failed: no receipt" 2 "$(names "$RDIR" | grep -c '^shot-' | tr -d ' ')"
+check "screenshot failed: no receipt" 2 "$(nshots)"
 run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot
-check "screenshot without path: rc 0, no receipt" "0 2" "$RC $(names "$RDIR" | grep -c '^shot-' | tr -d ' ')"
+check "screenshot without path: rc 0, no receipt" "0 2" "$RC $(nshots)"
 check "screenshot without receipt in a repo: hint to pass an absolute path" yes "$(contains 'pass an absolute path' "$ERR")"
 printf 'OLDJPG' > "$TMP/shots/old.jpg"; touch -t 202001010000 "$TMP/shots/old.jpg"
 run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/old.jpg"
-check "screenshot rc 0 but file not rewritten (stale): no receipt" "0 2" "$RC $(names "$RDIR" | grep -c '^shot-' | tr -d ' ')"
+check "screenshot rc 0 but file not rewritten (stale): no receipt" "0 2" "$RC $(nshots)"
 touch -t 202001010000 "$RDIR/old.json"
 run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/c.png"
 check "receipts older than 14 days pruned on write" no "$([ -e "$RDIR/old.json" ] && echo yes || echo no)"
+if [ -n "$JQBIN" ]; then
+  run "$P_BASE:$TMP/sys-same:$JQBIN" -- --session ui-1 screenshot "$TMP/shots/jq.png"
+  check "screenshot with jq present (lib validates .type with jq): receipt written" "0 4" "$RC $(nshots)"
+fi
 CWD="$TMP/shots"
-before=$(find "$CACHE/claude-subteams/receipts" -type f | wc -l | tr -d ' ')
+before=$(find "$RSTORE" -type f | wc -l | tr -d ' '); lines=$(grep -c . "$RLOG")
 run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/d.png"
-check "screenshot outside git: rc 0, no receipt" "0 $before" "$RC $(find "$CACHE/claude-subteams/receipts" -type f | wc -l | tr -d ' ')"
+check "screenshot outside git: rc 0, no receipt, no _recent.log line" "0 $before $lines" \
+  "$RC $(find "$RSTORE" -type f | wc -l | tr -d ' ') $(grep -c . "$RLOG")"
 check "screenshot outside git: silent" "" "$ERR"
+
+newcache shot-relxdg
+CWD="$REPO"; rm -rf "$HOMEDIR/.cache"
+run "$P_BASE:$TMP/sys-same" XDG_CACHE_HOME=rel/cache -- --session ui-1 screenshot "$TMP/shots/rel.png"
+check "relative XDG_CACHE_HOME: receipt in \$HOME/.cache, nothing under the repo" "0 1 no" \
+  "$RC $(names "$HOMEDIR/.cache/claude-subteams/receipts/$RID" | grep -c -- '-shot-' | tr -d ' ') $([ -e "$REPO/rel" ] && echo yes || echo no)"
+rm -rf "$HOMEDIR/.cache"
+
+newcache shot-blocked
+mkdir -p "$CACHE/claude-subteams/receipts"; : > "$CACHE/claude-subteams/receipts/$RID"   # store path taken by a file
+run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/blocked.png"
+check "receipt store unwritable: screenshot still rc 0" 0 "$RC"
+check "receipt store unwritable: warning on stderr" yes "$(contains 'no shot receipt written' "$ERR")"
+
+mkdir -p "$TMP/nolib/bin"; ln -s "$(dirname "$(dirname "$SB")")/deps" "$TMP/nolib/deps"
+cp "$SB" "$TMP/nolib/bin/subteams-browser"
+newcache shot-nolib
+SB_SAVED="$SB"; SB="$TMP/nolib/bin/subteams-browser"
+run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/nolib.png"
+SB="$SB_SAVED"
+check "lib-testclass.sh missing: screenshot rc 0 + warning naming the lib" "0 yes" "$RC $(contains 'cannot load' "$ERR")"
 CWD="$TMP"
+
+echo "--- subagent-rails находит скриншот по квитанции (e2e)"
+if command -v jq >/dev/null 2>&1; then
+  newcache rails
+  RAILS="$(dirname "$(dirname "$SB")")/hooks/subagent-rails"
+  [ -f "$RAILS" ] || RAILS="$DIR/hooks/subagent-rails"
+  SESS="$TMP/sessrepo"; mkdir -p "$SESS" && git -C "$SESS" init -q -b main && git -C "$SESS" commit -q --allow-empty -m base
+  rails() { # <cwd> <event> <json>
+    (cd "$1" && printf '%s' "$3" | env -i HOME="$HOMEDIR" XDG_CACHE_HOME="$CACHE" PATH="$PATH" bash "$RAILS" "$2") >/dev/null 2>&1
+  }
+  TPF="$TMP/ui-transcript.jsonl"
+  jq -nc --arg t "screenshots taken in $REPO_C" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' > "$TPF"
+  rails "$SESS" SubagentStart "$(jq -nc --arg c "$SESS" '{session_id:"sx",hook_event_name:"SubagentStart",agent_id:"uiE2E",agent_type:"claude-subteams:ui-tester",cwd:$c}')"
+  CWD="$REPO"
+  run "$P_BASE:$TMP/sys-same" -- --session ui-e2e screenshot "$TMP/shots/e2e.png"
+  CWD="$TMP"
+  rails "$SESS" SubagentStop "$(jq -nc --arg c "$SESS" --arg p "$TPF" '{session_id:"sx",hook_event_name:"SubagentStop",agent_id:"uiE2E",agent_type:"claude-subteams:ui-tester",cwd:$c,agent_transcript_path:$p,last_assistant_message:"Status: pass"}')"
+  # shellcheck disable=SC1091  # the lib is sourced from the plugin tree
+  uirec=$( (. "$DIR/scripts/lib-testclass.sh"; XDG_CACHE_HOME="$CACHE" tc_receipts_load "$REPO") | jq -sc '[.[] | select(.type == "ui")] | last // {}')
+  check "e2e: session in another repo, shot in this one: rails wrote the ui receipt into the shot's store" \
+    "pass|1|$REPO_C" "$(printf '%s' "$uirec" | jq -r '[.status, (.evidence.shots // 0), .root] | map(tostring) | join("|")')"
+else echo "SKIP subagent-rails e2e: jq not installed"; fi
 
 echo "--- маркер кэша и повторная проверка версии"
 newcache marker

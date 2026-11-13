@@ -44,6 +44,13 @@
 # scopes `( cd x )` are flattened (a cd inside parentheses is taken as leaking);
 # `cd a || cd b` is read as both cds in sequence (|| / && are not modelled);
 # aliases and functions are invisible.
+# Unresolvable commit targets (decision R6, coordinator 13.11.2026): an unknown
+# $VAR / other $(…) / `cd -` / popd / `env -C` falls back to the CWD repository —
+# deny "use a literal path" only when that repo has an active contract, else allow
+# with a warning. RESIDUAL: from a cwd WITHOUT a contract, an unresolvable target
+# that really points into a contracted repository escapes the test gate (warning
+# only). The same R6 rule decides commits into different repos in one line: deny
+# only if one of the resolved target repos has a contract.
 
 CS_GITVARS='GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR'
 
@@ -77,9 +84,19 @@ cs__getvar() { # <name> -> CS_GV; rc 1 unknown (HOME comes from the hook's envir
 
 # cs_expand <word> -> CS_E; rc 1 = unresolvable (unknown $VAR, $(…), backtick).
 # Resolves ~, ~/…, $NAME and ${NAME} from literal assignments earlier in the line.
+# `$(git rev-parse --show-toplevel)` (or the backtick form) at the start of a word
+# is resolved too: it is literally the toplevel of the directory at that point.
+CS_TOPSUB1='$(git rev-parse --show-toplevel)'
+CS_TOPSUB2='`git rev-parse --show-toplevel`'
 cs_expand() {
-  local w="$1" out="" re='^([^$`]*)\$(\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))(.*)$'
+  local w="$1" out="" re='^([^$`]*)\$(\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))(.*)$' top
   case "$w" in '~') w="${HOME:-}" ;; '~/'*) w="${HOME:-}/${w#\~/}" ;; esac
+  case "$w" in
+    "$CS_TOPSUB1"*|"$CS_TOPSUB2"*)
+      [ -n "$CS_CUR" ] && top=$(git -C "$CS_CUR" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ] || return 1
+      case "$w" in "$CS_TOPSUB1"*) w="${w#"$CS_TOPSUB1"}" ;; *) w="${w#"$CS_TOPSUB2"}" ;; esac
+      out="$top" ;;
+  esac
   case "$w" in *'`'*) return 1 ;; esac
   while :; do
     case "$w" in *'$'*) ;; *) CS_E="$out$w"; return 0 ;; esac
@@ -166,6 +183,12 @@ cs__subst_ok() {
   local q='^\$\(cat[[:space:]]+<<-?[[:space:]]*['"'"'"]([A-Za-z0-9_.-]+)['"'"'"][[:space:]](.*)$'
   local u='^\$\(cat[[:space:]]+<<-?[[:space:]]*[A-Za-z0-9_.-]+[[:space:]]'
   case "$t" in *'$('*|*'`'*) ;; *) return 0 ;; esac
+  case "$t" in                                  # the read-only toplevel lookup used as a cd / -C target
+    "$CS_TOPSUB1"*|"$CS_TOPSUB2"*)
+      r="${t#"$CS_TOPSUB1"}"; r="${r#"$CS_TOPSUB2"}"
+      case "$r" in *'$('*|*'`'*) return 1 ;; esac
+      return 0 ;;
+  esac
   [ "${CS_HDOK:-0}" = 1 ] || return 1          # a malformed / extended heredoc somewhere: no exemption
   if [[ $t =~ $q ]]; then
     # quoted delimiter: the body is literal up to the line "<W>"; what follows the

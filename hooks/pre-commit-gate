@@ -272,7 +272,17 @@ _tg_in_progress() { # <repo> -> name of the operation in progress, or rc 1
   return 1
 }
 
-TG_REPO=""; TG_CK=-1; TG_NCOMMIT=0; TG_UNRES=""; TG_MULTI=""; TG_AMEND=0
+_tg_has_contract() { # <repo> -> 0 if an active test contract (marker v1 / broken) is in its HEAD
+  local m
+  [ -n "$1" ] || return 1
+  if [ "$TC_LIB" -eq 1 ]; then m=$(tc_contract_marker "$1" head)
+  elif _crude_contract_in_head "$1"; then m=v1; else m=absent; fi
+  case "$m" in v1|error) return 0 ;; esac
+  return 1
+}
+
+TG_REPO=""; TG_CK=-1; TG_NCOMMIT=0; TG_UNRES=""; TG_MULTI=""; TG_AMEND=0; TG_TOPS=""; TG_PREWARN=""
+TG_CWDREPO=$(git rev-parse --show-toplevel 2>/dev/null)
 if [ "$CS_LIB" -eq 1 ]; then
   [ "$CS_SCANNED" -eq 1 ] || { cs_scan "$COMMAND"; CS_SCANNED=1; }
   for k in ${CS_KIND[@]+"${!CS_KIND[@]}"}; do
@@ -280,8 +290,14 @@ if [ "$CS_LIB" -eq 1 ]; then
     cs_parse_commit "${CS_ARGS[k]}"
     [ "$CSP_DRY" -eq 0 ] || continue
     TG_NCOMMIT=$((TG_NCOMMIT + 1)); TG_CK=$k; TG_AMEND=$CSP_AMEND
-    if [ -z "${CS_DIR[k]}" ]; then TG_UNRES="${CS_DRAW[k]:-?}"; continue; fi
-    t=$(cs_top_of "${CS_DIR[k]}") || continue          # not a directory / not a repo: git fails there
+    if [ -z "${CS_DIR[k]}" ]; then
+      # R6: unresolvable target -> evaluate against the cwd repository
+      TG_UNRES="${CS_DRAW[k]:-?}"; t="$TG_CWDREPO"
+      [ -n "$t" ] || continue
+    else
+      t=$(cs_top_of "${CS_DIR[k]}") || continue          # not a directory / not a repo: git fails there
+    fi
+    case $'\n'"$TG_TOPS" in *$'\n'"$t"$'\n'*) ;; *) TG_TOPS="$TG_TOPS$t"$'\n' ;; esac
     if [ -n "$TG_REPO" ] && [ "$t" != "$TG_REPO" ]; then TG_MULTI="$TG_REPO and $t"; fi
     [ -n "$TG_REPO" ] || TG_REPO="$t"
   done
@@ -290,9 +306,18 @@ fi
 # best-effort target.
 [ "$TG_NCOMMIT" -gt 0 ] || TG_REPO=$(git -C "$TARGET_DIR" rev-parse --show-toplevel 2>/dev/null)
 
+# R6: a hard deny only where a contract is active; elsewhere a visible warning.
 if [ "$TG_SKIP" -eq 0 ]; then
-  [ -n "$TG_MULTI" ] && _tg_deny "Test gate: this command commits into different repositories ($TG_MULTI). Split it into separate commands, one commit each."
-  [ -n "$TG_UNRES" ] && _tg_deny "Test gate: cannot tell which repository this commit targets ('$TG_UNRES' is not a literal path or a VAR=literal set earlier in the same command). Use a literal path: cd /abs/repo && git commit … or git -C /abs/repo commit …"
+  if [ -n "$TG_MULTI" ]; then
+    _tg_any=0
+    while IFS= read -r t; do [ -n "$t" ] && _tg_has_contract "$t" && { _tg_any=1; break; }; done <<< "$TG_TOPS"
+    [ "$_tg_any" -eq 1 ] && _tg_deny "Test gate: this command commits into different repositories ($TG_MULTI), and at least one has a test contract. Split it into separate commands, one commit each."
+    TG_PREWARN="this command commits into different repositories ($TG_MULTI) — the test gate evaluated only $TG_REPO; split commits into separate commands."
+  fi
+  if [ -n "$TG_UNRES" ]; then
+    _tg_has_contract "$TG_CWDREPO" && _tg_deny "Test gate: cannot tell which repository this commit targets ('$TG_UNRES' is not a literal path or a VAR=literal set earlier in the same command), and the current repository has a test contract. Use a literal path: cd /abs/repo && git commit … or git -C /abs/repo commit …"
+    TG_PREWARN="${TG_PREWARN:+$TG_PREWARN }target repo could not be resolved ('$TG_UNRES'); test gate evaluated against ${TG_CWDREPO:-no repository (cwd is not a git repo)} — use a literal path."
+  fi
 fi
 
 TG_BASE=HEAD; TG_CSRC=head; TG_HEADMARK=absent; TG_OP=""
@@ -495,6 +520,7 @@ _tg_items() { # missing lines -> "a, b, c" (each line up to its first ": " — s
   printf '%s\n' "$1" | awk '{ i = index($0, ": "); if (i > 1) print substr($0, 1, i - 1) }' | paste -sd, - | sed 's/,/, /g'
 }
 _tg_list() { printf '%s\n' "$1" | sed '/^$/d; s/^/  - /'; }
+[ -n "${TG_PREWARN:-}" ] && _tg_warn "$TG_PREWARN"
 _tg_warns() { # TC_REQ_WARN lines -> _tg_warn each
   local w
   while IFS= read -r w; do [ -n "$w" ] && _tg_warn "$w"; done <<< "${TC_REQ_WARN:-}"

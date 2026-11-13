@@ -300,12 +300,7 @@ have_browser() {
 }
 
 # --- shot receipt (§5.3) ----------------------------------------------------
-sha1_of() { # stdin -> hex
-  if command -v sha1sum >/dev/null 2>&1; then sha1sum | cut -d' ' -f1
-  elif command -v shasum >/dev/null 2>&1; then shasum -a 1 | cut -d' ' -f1
-  elif command -v openssl >/dev/null 2>&1; then openssl sha1 | sed 's/^.*= *//'
-  else return 1; fi
-}
+LIB="$PLUGIN_ROOT/scripts/lib-testclass.sh"
 
 json_str() { # JSON string escaping; control characters other than \n\t\r — refused
   local s="$1"
@@ -315,27 +310,28 @@ json_str() { # JSON string escaping; control characters other than \n\t\r — re
   printf '"%s"' "$s"
 }
 
-write_shot_receipt() { # <absolute path> <session>; outside a git repo — silently nothing
-  local file="$1" session="$2" gcd canon id dir size ts tmp jpath jsess top jroot
-  command -v git >/dev/null 2>&1 || return 0
-  gcd=$(git rev-parse --git-common-dir 2>/dev/null) || return 0
-  [ -n "$gcd" ] || return 0
-  canon=$(cd -P -- "$gcd" 2>/dev/null && pwd) || return 0
-  id=$(printf '%s' "$canon" | sha1_of) || return 0
-  [ -n "$id" ] || return 0
-  dir="$CACHE_BASE/receipts/$id"
-  (umask 077; mkdir -p -- "$dir") 2>/dev/null || return 0
-  size=$(wc -c < "$file" | tr -d ' ') || return 0
+no_receipt() { say "warning: screenshot taken, but no shot receipt written: $*"; return 0; }
+
+# <absolute path> <session>. Written with the shared tc_receipt_write: the repo store plus a line in
+# the global _recent.log, which is how subagent-rails finds evidence left in another repository.
+# Outside a git repo — silently nothing; any other failure — a warning, never a failed screenshot.
+write_shot_receipt() {
+  local file="$1" session="$2" size ts jpath jsess top jroot
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  # shellcheck source=../scripts/lib-testclass.sh disable=SC1091
+  . "$LIB" 2>/dev/null || { no_receipt "cannot load $LIB"; return 0; }
+  size=$(wc -c < "$file" | tr -d ' ') || size=""
+  [ -n "$size" ] || { no_receipt "cannot read $file"; return 0; }
   ts=$(date +%s)
-  jpath=$(json_str "$file") || return 0
-  jsess=$(json_str "$session") || return 0
+  if ! { jpath=$(json_str "$file") && jsess=$(json_str "$session"); }; then
+    no_receipt "path or session contains control characters"; return 0
+  fi
   # root = the working tree where the screenshot was taken (worktree): subagent-rails picks the snapshot by it
   top=$(git rev-parse --show-toplevel 2>/dev/null) && jroot=$(json_str "$top") || jroot=null
-  tmp="$dir/.tmp-shot-$$-$RANDOM"
-  printf '{"type":"shot","kind":"shot","path":%s,"size":%s,"session":%s,"ts":%s,"root":%s}\n' "$jpath" "$size" "$jsess" "$ts" "$jroot" > "$tmp" 2>/dev/null \
-    && mv -f -- "$tmp" "$dir/shot-$ts-$$-$RANDOM.json" 2>/dev/null
-  rm -f -- "$tmp" 2>/dev/null
-  find "$dir" -maxdepth 1 -type f -name '*.json' -mtime +14 -exec rm -f {} + 2>/dev/null
+  # the lib reads XDG_CACHE_HOME raw; hand it the validated cache root (a relative value is ignored)
+  XDG_CACHE_HOME="$CACHE_ROOT" tc_receipt_write "$PWD" \
+    "{\"type\":\"shot\",\"kind\":\"shot\",\"path\":$jpath,\"size\":$size,\"session\":$jsess,\"ts\":$ts,\"root\":$jroot}" >/dev/null \
+    || no_receipt "${TC_ERR:-tc_receipt_write failed}"
   return 0
 }
 

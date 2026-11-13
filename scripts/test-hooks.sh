@@ -851,14 +851,38 @@ echo "--- fix B15: target repo from VAR=literal; unresolvable -> literal path; d
 R=$(mkc fx15); addl "$R/src/lib/x.ts" 20 c; stage "$R"; C=$(mkrepo fx15-clean)
 tg "$C" "R=$R; git -C \"\$R\" commit -m x"; check "KEY B15 git -C \"\$R\" with R=literal earlier: the contract repo is checked -> deny" "2:1" "$RC:$(has 'test-engineer:' "$ERR")"
 tg "$C" "D=$R; cd \"\${D}\" && git commit -m x"; check "B15 cd \"\${D}\": resolved -> deny" 2 "$RC"
-tg "$C" 'git -C "$NOPE_UNSET" commit -m x'; check "KEY B15 unresolvable target -> deny 'use a literal path'" "2:1" "$RC:$(has 'Use a literal path' "$ERR")"
-tg "$C" 'cd "$(git rev-parse --show-toplevel)" && git commit -m x'; check "B15 cd \$(…) -> deny 'literal path'" "2:1" "$RC:$(has 'Use a literal path' "$ERR")"
-tg "$C" "git -C $C commit -m a; git -C $R commit -m b"; check "B15 two commits into different repos -> deny 'split'" "2:1" "$RC:$(has 'different repositories' "$ERR")"
+tg "$C" "git -C $C commit -m a; git -C $R commit -m b"; check "KEY R6d one of two target repos has a contract -> deny 'split'" "2:1" "$RC:$(has 'different repositories' "$ERR")"
 for c in "GIT_INDEX_FILE=/tmp/i git commit -m x" "env GIT_DIR=.git git commit -m x" "export GIT_WORK_TREE=/tmp; git commit -m x" \
          "git --git-dir=.git commit -m x" "git --work-tree /tmp commit -m x" "git -c core.worktree=/tmp commit -m x"; do
   tg "$R" "$c"; check "B15 GIT_* override under a contract -> deny: $c" "2:1" "$RC:$(has 'GIT_INDEX_FILE / GIT_DIR' "$ERR")"
 done
 tg "$R" "git commit -m a && git commit -m b"; check "B15 two commits in one line under a contract -> deny" "2:1" "$RC:$(has 'several commits' "$ERR")"
+fi
+
+if sec fix15r6-target; then
+echo "--- R6 (coordinator decision): unresolvable / cross-repo targets deny only where a contract is active"
+R=$(mkc fx15r6); addl "$R/src/lib/x.ts" 20 c; stage "$R"; te_check "$R"; full "$R"   # fully checked baseline
+C=$(mkrepo fx15r6-c); echo 'y' >> "$C/a.ts"; git -C "$C" add -A
+D=$(mkrepo fx15r6-d); echo 'y' >> "$D/a.ts"; git -C "$D" add -A
+tg "$R" 'git commit -m x'; check "R6 baseline: checked content in the contract repo -> allow" 0 "$RC"
+tg "$R" 'cd "$(git rev-parse --show-toplevel)" && git commit -m x'
+check "KEY R6a cd \"\$(git rev-parse --show-toplevel)\" resolves to the repo (contract repo, checked) -> allow" 0 "$RC"
+tg "$R" 'git -C "`git rev-parse --show-toplevel`" commit -m x'; check "R6a backtick form resolves too -> allow" 0 "$RC"
+tg "$C" 'cd "$(git rev-parse --show-toplevel)" && git commit -m x'
+check "R6a in a repo without a contract: resolved, no 'unresolved' warning" 0 "$(printf '%s' "$OUT" | jq -r '.systemMessage // ""' | grep -c 'could not be resolved')"
+tg "$C" 'git -C "$NOPE_UNSET" commit -m x'
+check "KEY R6b unresolvable target, cwd repo WITHOUT a contract -> allow + warning naming the cwd repo" "0:1:1" \
+  "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c "target repo could not be resolved ('\$NOPE_UNSET'); test gate evaluated against $C"):$(printf '%s' "$OUT" | jq -r .hookSpecificOutput.additionalContext | grep -c 'could not be resolved')"
+tg "$C" 'cd - && git commit -m x'; check "R6b 'cd -' in a repo without a contract -> allow + warning" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'could not be resolved')"
+tg "$R" 'git -C "$NOPE_UNSET" commit -m x'
+check "KEY R6c unresolvable target, cwd repo WITH a contract (checked content) -> deny 'Use a literal path'" "2:1" "$RC:$(has 'Use a literal path' "$ERR")"
+tg "$R" 'cd "$(pwd)" && git commit -m x'; check "R6c other \$(…) in a contract cwd -> deny" "2:1" "$RC:$(has 'Use a literal path' "$ERR")"
+tg "$C" "git -C $C commit -m a; git -C $D commit -m b"
+check "KEY R6d two target repos, none with a contract -> allow + warning 'different repositories'" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'different repositories')"
+tg "$C" "git -C $C commit -m a; git -C $R commit -m b"; check "KEY R6d one target repo with a contract -> deny" "2:1" "$RC:$(has 'at least one has a test contract' "$ERR")"
+SID19=sNOMARKR6; tg2() { gate "$1" "$SID19" "$2"; }
+tg2 "$C" 'git -C "$NOPE_UNSET" commit -m x'
+check "R6 review gate unchanged vs 1.49: unresolvable target falls back to cwd, code without review -> review deny" "2:1" "$RC:$(has 'code-reviewer' "$ERR")"
 fi
 
 if sec fix16-amend; then
