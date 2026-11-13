@@ -13,7 +13,7 @@ This skill is a reference, not a procedure. Two other places own the substance:
 ## 1. Dispatch
 
 1. Agent: **ui-tester** (sonnet). Tools: Read, Write, Edit, Bash, Grep, Glob.
-2. Suites run through `subteams-tests run`; the live review runs through `subteams-browser` (agent-browser, installs itself on first use; needs a system Chrome, or the user runs `subteams-browser setup`). No Playwright MCP.
+2. Suites run through `subteams-tests run`; the live review runs through `subteams-browser` (agent-browser, installs itself on first use; needs a system Chrome, or the user runs `subteams-browser setup`). No Playwright MCP. The wrapper passes an allowlist of agent-browser commands: no `state save` / `state load`, no `--profile` — an app behind a login is reached with test credentials in the brief, or the user is asked for them.
 3. The app is reached only through the project contract's `app` or a URL you put in the brief. Do not give the agent start commands.
 
 ## 2. When to Use
@@ -34,6 +34,8 @@ Task: [what changed, in one line]
 Base: [git ref the change is measured from; default HEAD]
 Changed screens: [routes / views to review]
 URL: [only if the project contract has no usable `app`]
+Repo: [absolute root, when it is not the session's repository]
+Login: [test credentials, if a changed screen is behind a login — saved browser state is not allowed]
 Key flows: [user journeys to drive; or "see ## User Stories in <plan>"]
 Mode: [scenario (default) | monkey]
 Expected: [what "working correctly" looks like]

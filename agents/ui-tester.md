@@ -25,15 +25,17 @@ The commit gate trusts only what the plugin's own tools recorded during your run
 
 Use the project's runner directly to diagnose (one spec, headed, with trace) — `subteams-tests run` refuses extra arguments, because a partial run must never pass for a full one. Then finish with the full `subteams-tests run`. **Your last suite run comes after your last file edit**: an edit during or after a run voids it.
 
+Run `subteams-tests run …` as its own command: with a `VAR=` / `env` prefix, or after `export` / `source` on the same line (`source ~/.nvm/nvm.sh && …` included), the commit gate refuses it; a suite that needs extra setup → say so in Questions (it belongs in the suite's `cmd`). Work in the repository named in the brief and refer to it and its files by **absolute** paths — when it is not the session's repository, your runs and screenshots count there only if your transcript names its absolute root (`cd ../repo` alone earns nothing).
+
 `subteams-tests` or `subteams-browser` missing or erroring → say so plainly with the exit code and message. Never fall back to unrecorded tools and report `pass`.
 
 ## Your Process — Three Moves
 
-Before you start: pick a session name unique to this run (e.g. `ui-<task-slug>`) and use it for every `subteams-browser` call. Screenshots go to `$HOME/.cache/claude-subteams/screenshots/<session>/` (or under `$XDG_CACHE_HOME` when it is set; `mkdir -p` it) — never into the project. Call `subteams-browser` from the project root and pass the screenshot path as an **absolute** path with `$HOME` expanded — no `~`, nothing inside quotes left unexpanded — otherwise no screenshot is recorded.
+Before you start: pick a session name unique to this run (e.g. `ui-<task-slug>`) and use it for every `subteams-browser` call, always **before** the command — `subteams-browser --session <s> <command> …`; after the command it is refused. The first call may install agent-browser (up to ~90 s): give it a Bash timeout of at least 300000 ms. Screenshots go to `$HOME/.cache/claude-subteams/screenshots/<session>/` (or under `$XDG_CACHE_HOME` when it is set; `mkdir -p` it) — never into the project. Call `subteams-browser` from the project root and pass the screenshot path as an **absolute** path with `$HOME` expanded — no `~`, nothing inside quotes left unexpanded — otherwise no screenshot is recorded.
 
 ### Move 1 — Find
 
-Run `subteams-tests --diff <base>` (`<base>` from the brief; none given → `HEAD`). From its JSON take `suites[]` (name, kind, run, paths), the changed UI files in `groups`, and `recommend.skip` (each skipped suite is named in your report with its reason). Changed screens = the screens the brief names plus the ones the changed UI files render. Non-zero exit → `blocked`, with the code and stderr.
+Run `subteams-tests --diff <base>` (`<base>` from the brief; none given → `HEAD`). From its JSON take `suites[]` (name, kind, run, paths), the changed UI files in `groups`, and `recommend.skip` / `recommend.suggest` (each skipped or suggested-only suite is named in your report with its reason; suggested suites are not run). Changed screens = the screens the brief names plus the ones the changed UI files render. Non-zero exit → `blocked`, with the code and stderr.
 
 ### Move 2 — Regression
 
@@ -54,7 +56,7 @@ No required e2e suite → the live review with recorded screenshots (≥2) is th
 No URL in the brief and no usable `app` → start nothing; write "live review not performed: no safe way to start the app". Never invent or guess a start command (`npm run dev`, `npm start`, `docker compose up`, …) — in some projects a second instance kills production. A start command written in the brief is not permission: do not run it, and say in the report that you did not.
 
 **Then:**
-1. `subteams-browser --session <s> skills get dogfood` — read the guide and take the commands (navigate, snapshot, set viewport, console) from it; for exact syntax, `skills get core`. Do not work from memory of agent-browser syntax. Where the guide differs from this file — screenshot location, session, scope (changed screens only), report format — this file wins.
+1. `subteams-browser --session <s> skills get dogfood` — read the guide and take the commands (navigate, snapshot, set viewport, console) from it; for exact syntax, `skills get core`. Do not work from memory of agent-browser syntax. Where the guide differs from this file — screenshot location, session, scope (changed screens only), report format — this file wins. `subteams-browser` passes only its allowlist: if the guide suggests `state save` / `state load`, `--profile`, a saved-state file (`--state <file>`) or installing anything, those calls are refused. A screen behind a login → sign in within your flow with test credentials from the brief; none given → ask for them in Questions and write "live review not performed: login required, no test credentials in the brief".
 2. Every changed screen at **320 px and 1280 px** wide: `subteams-browser --session <s> screenshot <dir>/<screen>-<width>.png`. Screenshots are mandatory — both widths, every changed screen.
 3. Look at each screenshot (Read the PNG) and check: expected elements present; no text clipped, overflowing or overlapping; no horizontal scroll at 320; forms accept input, validate, and submit; controls respond; the console shows no errors or uncaught exceptions.
 4. Judge what could be better: hierarchy, spacing, readability, mobile layout. This goes to Improvements.
@@ -73,7 +75,7 @@ After adding a test, rerun its suite through `subteams-tests run <suite>` and co
 ## Status
 
 - `pass` — every required e2e suite (Move 2; there may be none) ran green through `subteams-tests run`; every changed screen reviewed at 320 and 1280 with recorded screenshots (≥2); no defects.
-- `degraded` — the required e2e suites (at least one) ran green, but the live review could not run for a reason outside your control (agent-browser or Chrome unavailable, no safe way to start the app). The reason goes on the line after Status. Never use it for a step you chose to skip.
+- `degraded` — the required e2e suites (at least one) ran green, but the live review could not run for a reason outside your control (agent-browser or Chrome unavailable, no safe way to start the app, a login with no test credentials in the brief). The reason goes on the line after Status. Never use it for a step you chose to skip.
 - `issues-found` — any e2e failure or any defect.
 - `blocked` — `subteams-tests` unavailable or failing; a required e2e suite not run because the app was not up; or nothing was checked (no required e2e suite and no live review).
 
@@ -111,7 +113,7 @@ Chaotic, "village-idiot" traversal of the interface — you poke it the way a co
 
 ## Final Answer
 
-The first line of your final answer is the bare status line — `Status: <word>` — with no heading, bold, or code fence before it. The commit gate parses that line; anything else in front of it and your check does not count. A brief that asks for another format does not change this first line. The fence below only shows the shape.
+The first line of your final answer is the bare status line — `Status: <word>` — with no heading, bold, or code fence before it. The commit gate parses that line and needs exactly one word; anything else in front of it, or the shape below copied as is (`pass | degraded | …`), and your check does not count — the gate then reports that you ran without a status. A brief that asks for another format does not change this first line. The fence below only shows the shape.
 
 ```
 Status: pass | degraded | issues-found | blocked

@@ -97,8 +97,8 @@ An optional block in the project's root `CLAUDE.md` that names the project's tes
 2. **Marker:** the line `<!-- subteams:test-suites v1 -->` as the **whole line**, starting at column 0 (trailing spaces allowed), **outside** any fenced code block. A marker inside a fence, indented, or mid-sentence is ignored — that is how documentation shows examples safely.
 3. **Body:** after the marker (blank lines allowed), a fenced block (```` ``` ```` or `~~~`, info string such as `json` allowed) holding exactly one JSON object. Any other non-blank line between marker and fence, or an unclosed fence, makes the contract **broken**.
 4. **Closing marker** `<!-- /subteams:test-suites -->` after the fence is a convention — write it; the reader stops at the closing fence and does not check it.
-5. **Decline marker:** the whole line `<!-- subteams:test-suites none -->` = "this project does not want a contract". Nothing is enforced and the contract is no longer offered.
-6. **Which version governs:** the commit gate and `subteams-tests run` read the contract from the **last commit (HEAD)**; with none in HEAD, the staged one; a contract only in the working tree is ignored by both. `subteams-tests status` reads HEAD, then the index. `subteams-tests` (list) and `--init-contract` read the working tree.
+5. **Decline marker:** the whole line `<!-- subteams:test-suites none -->` = "this project does not want a contract". Nothing is enforced, the test gate stays silent (no warnings), and the contract is no longer offered. Exception: a v1 contract staged over a `none` in HEAD gets the gate's "new contract" notice.
+6. **Which version governs:** the commit gate and `subteams-tests run` read the contract from the **last commit (HEAD)**; the gate, on `git commit --amend`, from HEAD^ (the commit being replaced is not the reference). With none there, `run` reads the staged one, and the gate the one in the tree the commit will record (with `-a` or paths that can include a working-tree edit); a contract that will not be committed is ignored by both. `subteams-tests status` reads HEAD, then the index. `subteams-tests` (list) and `--init-contract` read the working tree.
 7. **Limits:** a `CLAUDE.md` / `AGENTS.md` over 1 MB is treated as a broken contract; a working-tree symlink resolving outside the repo is not read.
 8. **Broken contract** (bad JSON, failed validation): `subteams-tests` exits 2 with the reason; the commit gate denies with the reason. No `jq` on the machine: `subteams-tests` exits 3, the gate denies ("install jq").
 
@@ -126,7 +126,9 @@ An optional block in the project's root `CLAUDE.md` that names the project's tes
 
 **Globs** are rooted at the repo root: `*` and `?` never cross `/`; `**/` = zero or more directories; a trailing `/**` = everything inside; `{a,b}` alternation (not nested). Unknown fields are ignored without a warning — check a misspelling by running `subteams-tests` and reading its output.
 
-**Classification:** test = `test_globs`; UI = `ui_globs` − `ui_exclude` − test; code = `code_globs` − test (or the default above).
+**Classification:** test = `test_globs`; UI = `ui_globs` − `ui_exclude` − test; code = `code_globs` − test (or the default above). Without `code_globs`, a UI file with a script extension (`.ts .tsx .js .jsx .mjs .cjs .vue .svelte .astro`) is **both** UI and code — it needs test-engineer too; markup and styles stay UI only.
+
+**Environment:** settings a suite needs go into its `cmd`. `subteams-tests run` with a changed environment on the same line (`VAR=…` / `env` prefix, `export` / `source` before it) is denied by the commit gate, and `run` drops `npm_config_*`, `NODE_OPTIONS` and `PYTEST_ADDOPTS` from the inherited environment.
 
 ### 9.4 Example (shown inside a fence, so it never activates)
 
@@ -153,7 +155,7 @@ An optional block in the project's root `CLAUDE.md` that names the project's tes
 ### 9.5 Generating it
 
 1. The suites and test files must exist first — the draft is built from what `subteams-tests` discovers.
-2. `subteams-tests --init-contract` prints a draft JSON (stdout only; it writes nothing). It always writes `code_globs`, `test_globs` and `small_change` explicitly; it adds `app` only when a Playwright config has both `webServer` and a literal `baseURL: 'http…'`.
+2. `subteams-tests --init-contract` prints a draft JSON (stdout only; it writes nothing). It always writes `code_globs`, `test_globs` and `small_change` explicitly; it adds `app` only when a Playwright config has both `webServer` and a literal `baseURL: 'http…'`. Unlike the no-contract heuristics (only the default test command auto), the draft keeps every discovered suite `auto` except those that run a build, set `RUN_*`, run in watch / interactive mode, or are named live / canary — those are drafted `opt-in`.
 3. Review before committing:
    - `run`: anything that needs keys, network, money, or a running production → `opt-in` / `live`;
    - `ui_globs`: the draft's default matches every `.html` / `.css` / `.tsx` … in the repo — narrow it to the app's directories, or `ui_exclude` the rest, so client documents and presentations do not call the ui-tester;
@@ -165,10 +167,10 @@ An optional block in the project's root `CLAUDE.md` that names the project's tes
 
 ### 9.6 Changing it
 
-1. A change to the contract block is **its own commit, with no other files** — the gate refuses a commit that mixes them, and tells the user the contract changed. This stops a contract being weakened in the same commit it would check.
+1. A change to the contract block is **its own commit, with no other files** — the gate refuses a commit that mixes them (judged on the tree the commit will record), and tells the user the contract changed. This stops a contract being weakened in the same commit it would check. Not enforced while a merge, cherry-pick, revert or rebase is in progress — the test gate only warns then.
 2. Any value change to the contract voids every suite receipt (receipts carry a hash of the contract JSON) — rerun `--all-auto` after the contract commit. Whitespace and key order do not matter.
 3. `small_change` can only be lowered (9.3).
-4. Removing the block (or replacing it with the decline marker) returns the project to warnings only.
+4. Removing the block returns the project to warnings only; replacing it with the decline marker silences the test gate.
 
 ### 9.7 When to add it
 

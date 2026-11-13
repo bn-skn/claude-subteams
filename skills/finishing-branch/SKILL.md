@@ -26,7 +26,7 @@ subteams-tests status            # which suite runs are recorded green for this 
 subteams-tests run --all-auto    # unless status positively shows every auto suite green on it
 ```
 
-Only a recorded green run on exactly this content replaces a rerun — "nothing missing" with nothing staged proves nothing, so in doubt run `--all-auto`. `opt-in` / `live` suites are not run — name them as skipped.
+Only a recorded green run on exactly this content replaces a rerun — "nothing missing" on a clean tree (nothing staged or modified) proves nothing, so in doubt run `--all-auto`. `opt-in` / `live` suites are not run — name them as skipped.
 
 **If tests fail:**
 ```

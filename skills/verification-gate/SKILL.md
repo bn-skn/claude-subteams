@@ -147,7 +147,7 @@ This catches what `tsc` and unit tests never will: the thing renders without err
 | Requirements met | Line-by-line checklist | Tests passing |
 | Agent completed | VCS diff shows changes | Agent reports "success" |
 | Arch docs populated (structural work) | `check-arch-docs.sh` exit 0 + output shown; choices trace to ADRs | "I filled them in", template still has stub markers |
-| UI intact | A valid ui-tester check for this content — `subteams-tests status` on the staged change does not list it as missing (`using-subteams` §6.7) | tsc passes, unit tests pass; "not listed as missing" with nothing staged — that proves nothing |
+| UI intact | A valid ui-tester check for this content — `subteams-tests status` on the staged change does not list it as missing (`using-subteams` §6.7) | tsc passes, unit tests pass; "not listed as missing" on a clean tree (nothing staged or modified) — that proves nothing |
 | Visual artifact looks good | Screenshot viewed + judged: aligned, readable, polished | "compiles" / "no regressions" (regression-free can still look broken) |
 
 ## Red Flags - STOP
