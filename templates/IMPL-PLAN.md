@@ -48,7 +48,8 @@
   ## User Stories            (trigger: user-facing feature)
   - As <role>, I want <action>, so that <value>.
     - Acceptance: <observable criterion>
-  (The ui-tester reads these as scenarios in scenario mode — keep them concrete.)
+  (The ui-tester drives these as flows in its live review — keep them concrete. A story does not by
+  itself call for a new e2e test; agents/ui-tester.md decides that.)
 
   ## Data Design             (trigger: database schema change — see database-design skill)
   - Tables/fields: <changes>

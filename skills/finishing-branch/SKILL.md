@@ -19,12 +19,14 @@ Guide completion of development work by presenting clear options and handling ch
 
 ### Step 1: Verify Tests
 
-**Before presenting options, verify tests pass:**
+**Before presenting options, verify tests pass** — the project's suites, not just its default test command (`claude-subteams:using-subteams` §6.7):
 
 ```bash
-# Run project's test suite
-npm test / cargo test / pytest / go test ./...
+subteams-tests status            # which suite runs are recorded green for this content
+subteams-tests run --all-auto    # unless status positively shows every auto suite green on it
 ```
+
+Only a recorded green run on exactly this content replaces a rerun — "nothing missing" with nothing staged proves nothing, so in doubt run `--all-auto`. `opt-in` / `live` suites are not run — name them as skipped.
 
 **If tests fail:**
 ```
@@ -72,7 +74,7 @@ Which option?
 git checkout <base-branch>
 git pull
 git merge <feature-branch>
-<test command>
+subteams-tests run --all-auto   # on the merged result; red → stop, do not delete the branch
 git branch -d <feature-branch>
 ```
 

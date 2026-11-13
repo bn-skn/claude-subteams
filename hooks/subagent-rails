@@ -25,12 +25,125 @@
 # if either is missing we simply skip marking (fail toward NOT recording a
 # review, never toward a false claim that one happened).
 #
+# 1.50 test receipts (IMPL-PLAN testing-ui §5.3), only for the CANONICAL
+# ui-tester / test-engineer (agent_type == name or ends with ":name" — never a
+# substring match, so "not-ui-tester" or "ui-tester-lite" write nothing):
+#   SubagentStart → t_start in .../claude-subteams/agent-starts/<agent_id>;
+#   SubagentStop  → a `ui` / `te` receipt in the repo's receipt store with the
+#     status (first non-empty line `Status: pass|degraded|issues-found|blocked` of
+#     last_assistant_message, else of the last SubagentHandback .input.message in
+#     agent_transcript_path — polled briefly, the transcript is written after the
+#     hook fires — else of the last assistant text there), the content snapshot at
+#     stop, t_start/t_end and an evidence summary. Unparsable status or no t_start
+#     → no receipt. Whether a receipt COUNTS (evidence during [t_start, t_end],
+#     drift) is decided at check time by tc_agent_check — the commit gate and
+#     `subteams-tests status` — so a pass without evidence never shadows a valid one.
 # Silent-fail: any internal error falls through to exit 0 (never break a session).
 
 EVENT="${1:-}"
 case "$EVENT" in SubagentStart|SubagentStop) ;; *) exit 0 ;; esac
 
 INPUT=$(cat 2>/dev/null)
+T_HOOK=$(date +%s)
+
+_test_agent_kind() { # agent_type -> ui | te | "" (canonical match only)
+  case "$1" in
+    ui-tester|*:ui-tester) echo ui ;;
+    test-engineer|*:test-engineer) echo te ;;
+  esac
+}
+
+START_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/agent-starts"
+
+# _status_of <text> -> the status word if the first non-empty line is the Status line
+_status_of() {
+  printf '%s\n' "$1" | awk 'NF { if ($0 ~ /^Status: (pass|degraded|issues-found|blocked)([^A-Za-z0-9-].*)?[ \t\r]*$/) { sub(/^Status: /, ""); sub(/[^A-Za-z-].*$/, ""); print } exit }'
+}
+
+# _reason_stated <text> -> 0 if the result says why the live review was not
+# performed: a non-empty, non-heading line right after the Status line, or the
+# phrase "not performed" / "не выполнен" anywhere.
+_reason_stated() {
+  printf '%s\n' "$1" | grep -qiE 'not performed|не выполнен' && return 0
+  printf '%s\n' "$1" | awk 'NF { n++; if (n == 2) { ok = ($0 !~ /^[ \t]*#/); exit } } END { exit !ok }'
+}
+
+_transcript_result() { # <path> -> last SubagentHandback message (rc 0) or nothing (rc 1)
+  local m
+  [ -f "$1" ] || return 1
+  m=$(grep -F 'SubagentHandback' "$1" 2>/dev/null | jq -r 'select(.type == "assistant") | .message.content[]?
+        | select(.type == "tool_use" and .name == "SubagentHandback") | .input.message // empty | @json' 2>/dev/null | tail -n 1)
+  [ -n "$m" ] || return 1
+  printf '%s' "$m" | jq -r . 2>/dev/null
+}
+
+_transcript_last_text() { # <path> -> text of the last assistant message that has text
+  [ -f "$1" ] || return 1
+  tail -n 200 "$1" 2>/dev/null | jq -r 'select(.type == "assistant") | [.message.content[]? | select(.type == "text") | .text] | select(length > 0) | join("\n") | @json' 2>/dev/null \
+    | tail -n 1 | jq -r . 2>/dev/null
+}
+
+_test_receipt() { # SubagentStop for ui-tester / test-engineer — writes the ui/te receipt
+  local kind="$1" aid tfile t_start t_end cwd repo lib rid root rr tree msg st tp rs ev rec deadline n
+  aid=$(printf '%s' "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)
+  printf '%s' "$aid" | grep -qE '^[A-Za-z0-9._-]+$' || return 0
+  case "$aid" in .|..) return 0 ;; esac
+  tfile="$START_DIR/$aid"
+  [ -f "$tfile" ] || return 0
+  t_start=$(head -n 1 "$tfile" 2>/dev/null | tr -cd '0-9')
+  rm -f "$tfile" 2>/dev/null
+  [ -n "$t_start" ] || return 0
+  t_end="$T_HOOK"
+  lib="$(dirname "$0")/../scripts/lib-testclass.sh"
+  # shellcheck source=../scripts/lib-testclass.sh
+  . "$lib" 2>/dev/null || return 0
+  cwd=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+  [ -n "$cwd" ] && [ -d "$cwd" ] || cwd="$PWD"
+  repo=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || return 0
+  rid=$(tc_repo_id "$repo") || return 0
+  # Evidence (informational here; tc_agent_check recounts at check time) and the
+  # worktree the agent actually worked in: the root of the newest in-interval
+  # suite or shot receipt, if it belongs to the same repository (a worktree) —
+  # else the session cwd.
+  ev=$(tc_receipts_load "$repo" | jq -sc --argjson s "$t_start" --argjson e "$t_end" '
+        [.[] | select(.type == "suite" and (.t_start // 0) >= $s and (.t_end // 0) <= $e)] as $su
+        | {shots: ([.[] | select(.type == "shot" and (.ts // 0) >= $s and (.ts // 0) <= $e)] | length),
+           suites_ok: ([$su[] | select(.exit == 0)] | length),
+           e2e_ok: ([$su[] | select(.exit == 0 and .kind == "e2e")] | length),
+           root: ([($su[] | {t: (.t_end // 0), root}),
+                   (.[] | select(.type == "shot" and (.ts // 0) >= $s and (.ts // 0) <= $e) | {t: (.ts // 0), root})]
+                  | map(select((.root | type) == "string")) | sort_by(.t) | last | .root // null)}' 2>/dev/null)
+  [ -n "$ev" ] || ev='{"shots":0,"suites_ok":0,"e2e_ok":0,"root":null}'
+  root="$repo"
+  rr=$(printf '%s' "$ev" | jq -r '.root // empty' 2>/dev/null)
+  if [ -n "$rr" ] && [ -d "$rr" ] && [ "$(tc_repo_id "$rr" 2>/dev/null)" = "$rid" ]; then root="$rr"; fi
+  tree=$(tc_snapshot_tree "$root") || return 0
+  # Status: last_assistant_message; else the transcript (SubagentHandback, polled
+  # until ~2 s are used, never past ~4 s of hook time; then the last assistant text).
+  msg=$(printf '%s' "$INPUT" | jq -r 'if (.last_assistant_message | type) == "string" then .last_assistant_message else empty end' 2>/dev/null)
+  st=$(_status_of "$msg")
+  if [ -z "$st" ]; then
+    tp=$(printf '%s' "$INPUT" | jq -r '.agent_transcript_path // empty' 2>/dev/null)
+    if [ -n "$tp" ]; then
+      deadline=$(( T_HOOK + 4 )); n=0
+      while :; do
+        msg=$(_transcript_result "$tp") && st=$(_status_of "$msg")
+        [ -n "$st" ] && break
+        n=$((n + 1)); [ "$n" -le 10 ] && [ "$(date +%s)" -lt "$deadline" ] || break
+        sleep 0.2
+      done
+      if [ -z "$st" ]; then msg=$(_transcript_last_text "$tp") && st=$(_status_of "$msg"); fi
+    fi
+  fi
+  [ -n "$st" ] || return 0
+  rs=false; [ "$st" = degraded ] && _reason_stated "$msg" && rs=true
+  rec=$(jq -nc --arg type "$kind" --arg st "$st" --arg tree "$tree" --argjson s "$t_start" --argjson e "$t_end" \
+        --argjson rs "$rs" --argjson ev "$ev" --arg at "$(printf '%s' "$INPUT" | jq -r '.agent_type // empty' 2>/dev/null)" --arg root "$root" \
+        '{type: $type, status: $st, tree: $tree, t_start: $s, t_end: $e, reason_stated: $rs, agent_type: $at, root: $root,
+          evidence: ($ev | del(.root))}' 2>/dev/null) || return 0
+  tc_receipt_write "$repo" "$rec" >/dev/null 2>&1
+  return 0
+}
 
 if [ "$EVENT" = "SubagentStop" ]; then
   if command -v jq >/dev/null 2>&1; then
@@ -55,8 +168,23 @@ if [ "$EVENT" = "SubagentStop" ]; then
       : > "$MARK_DIR/$SID" 2>/dev/null
       find "$MARK_DIR" -type f -mtime +7 -delete 2>/dev/null
     fi
+    TK=$(_test_agent_kind "$AGENT_TYPE")
+    [ -n "$TK" ] && _test_receipt "$TK"
   fi
   exit 0
+fi
+
+# SubagentStart: t_start for the canonical ui-tester / test-engineer (keyed by agent_id).
+if command -v jq >/dev/null 2>&1; then
+  TK=$(_test_agent_kind "$(printf '%s' "$INPUT" | jq -r '.agent_type // .subagent_type // empty' 2>/dev/null)")
+  if [ -n "$TK" ]; then
+    AID=$(printf '%s' "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)
+    if printf '%s' "$AID" | grep -qE '^[A-Za-z0-9._-]+$' && [ "$AID" != "." ] && [ "$AID" != ".." ]; then
+      (umask 077; mkdir -p "$START_DIR") 2>/dev/null
+      printf '%s\n' "$T_HOOK" > "$START_DIR/$AID" 2>/dev/null
+      find "$START_DIR" -type f -mtime +2 -exec rm -f {} + 2>/dev/null
+    fi
+  fi
 fi
 
 CTX='[subteams:rails] If present in this project, read docs/CONVENTIONS.md, docs/ARCHITECTURE.md, and the active plan under docs/plans/active/ before editing, and honor the Rails field in your brief if one was given. Honesty: if a tool call fails or a fact is unverified, say so plainly; state only verified facts as fact.'

@@ -24,6 +24,8 @@
 <LINT_COMMAND>       # lint + type-check
 ```
 
+- Test contract: not added yet. Once the app and its tests exist, it is generated with `subteams-tests --init-contract` and replaces this line, as its own commit (schema: `claude-subteams:claudemd-engineering` §9; process: `using-subteams` §6.7).
+
 ## Architecture
 
 - See `docs/ARCHITECTURE.md` for the full diagram and layer responsibilities.

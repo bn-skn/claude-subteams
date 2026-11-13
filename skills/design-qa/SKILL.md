@@ -10,7 +10,7 @@ description: "Design quality assurance: compare implementation against spec, run
 1. This skill dispatches to the design-critic agent for evaluation.
 2. Agent model: opus.
 3. Agent tools: Read, Grep, Glob, Bash.
-4. Add Playwright tools if browser verification is needed.
+4. Browser verification: the first tool is `subteams-browser --session <name> screenshot <path>` (agent-browser, installs itself on first use) — it runs through Bash, no extra tools needed.
 5. ALWAYS provide the agent with: spec/requirements, file paths to implementation, design tokens file path.
 
 ## 2. Spec Comparison Checklist
@@ -61,13 +61,13 @@ Run each heuristic against the implementation:
 5. Verify images and media scale correctly.
 6. Check that navigation adapts appropriately (hamburger menu, etc.).
 
-## 6. Screenshot Comparison (if Playwright available)
+## 6. Screenshot Comparison
 
-1. Navigate to each page/view in the implementation.
-2. Capture screenshots at 320px, 768px, and 1280px widths.
+1. Navigate to each page/view in the implementation (`subteams-browser --session <name> open <url>`; one session per run, `close` it at the end).
+2. Capture screenshots at 320px, 768px, and 1280px widths with `subteams-browser --session <name> screenshot <path>`, outside the project unless the user wants them kept there. Exit 127 (agent-browser or Chrome unavailable) → state "visual state NOT verified" with its message and `subteams-browser setup` hint; do not run `setup` yourself.
 3. Compare against spec mockups or reference screenshots if available.
 4. Flag visual regressions: layout shifts, missing elements, broken styling.
-5. Save screenshots for future regression comparisons.
+5. Report the screenshot paths so later passes can compare against them.
 
 ## 6.5 Cross-Model Visual Lane (optional)
 

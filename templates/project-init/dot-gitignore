@@ -33,6 +33,12 @@ pids/
 *.seed
 *.pid.lock
 
+# Test runner output (a run must not change the tracked tree)
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Coverage
 coverage/
 .nyc_output/

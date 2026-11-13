@@ -79,8 +79,12 @@ This is a repo-local git hook, not a plugin hook — it is not part of what `hoo
 ### Requirements
 
 - **git** — required for marketplace cloning
-- **Node.js** (via nvm or global) — required for pre-commit-gate hook (tsc check)
-- **jq** — used by hooks to parse JSON input
+- **Node.js** (via nvm or global) — required for pre-commit-gate hook (tsc check) and, with npm, for the one-time agent-browser install
+- **jq** — used by hooks to parse JSON input; mandatory in a project with a test contract (the commit gate denies without it)
+- **Chrome** (system install) — for the live UI review; or run `subteams-browser setup` once
+- **Claude Code ≥ 2.1.284** — the plugin's `bin/` commands (`subteams-tests`, `subteams-browser`) and SubagentStart/Stop with `agent_transcript_path`
+
+See [Project suites & UI verification](#project-suites--ui-verification).
 
 ### Update
 
@@ -142,11 +146,53 @@ Invoke skill "claude-subteams:using-subteams" before significant development wor
 For small fixes — act directly, invoke code-review after if logic changed. Any logic change gets code-reviewer (and devils-advocate for non-trivial logic) — no "it's just one line" exemption.
 Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect, gemini-analyst, gemini-code-reviewer, gemini-design-critic, gemini-frontend.
 Building/editing agents, prompts, skills, or multi-agent systems → invoke agent-architect + prompt-engineer + prompt-evaluator (using-subteams Section 6.5).
+Test contract (optional): a `subteams:test-suites v1` block in this file names the project's test suites and UI/code files and turns the test checks into a commit gate — schema and how to generate it: skill `claude-subteams:claudemd-engineering` §9; process: `using-subteams` §6.7.
 ```
 
-This is also available as a file: `templates/claudemd-snippet.md`.
+This is an excerpt; the full current snippet is the file `templates/claudemd-snippet.md`.
 
 **To deactivate:** remove the snippet from CLAUDE.md. No need to uninstall the plugin.
+
+## Project suites & UI verification
+
+Before a commit the plugin runs the project's own test suites and, for changes above the small-change threshold, two checks: **test-engineer** for logic and **ui-tester** for UI — the project's e2e suites plus a live look at the changed screens at 320 and 1280 px, with screenshots and a list of non-blocking improvements. The process is `using-subteams` §6.7; the design and its limits are [ADR-011](docs/adr/011-project-suites-and-ui-verification.md).
+
+**Installs itself**
+
+- `subteams-tests` and `subteams-browser` — on the Bash PATH from the plugin's `bin/`, for the main window and subagents alike.
+- agent-browser 0.43.0 — on first use of `subteams-browser`, from the plugin's lock file (`npm ci --ignore-scripts`, sha512 checked) into `~/.cache/claude-subteams/agent-browser/0.43.0/`. Needs Node/npm. Never upgraded except by a plugin release.
+
+**Per project**
+
+- Test suites: whatever the project has. `subteams-tests` finds them (package scripts, Playwright/Cypress configs, pytest, Go, Cargo, Makefile targets), or reads them from the contract. It installs nothing.
+- Playwright Test for the e2e layer: installed by you, or by `project-scaffold` when it creates a web project. In an existing project without it, ui-tester asks instead of installing.
+- A browser: the system Chrome, or `subteams-browser setup` (downloads Chrome for Testing, ~150 MB, the only place the plugin downloads a browser). Without one the live review is reported as not done; the e2e layer still runs.
+- The **test contract** — an optional block in `CLAUDE.md` (schema: `claudemd-engineering` §9). With it the commit gate **blocks** until the staged content has green runs of the required suites and the required agent checks; without it the gate only **warns** the model and you. Draft one with `subteams-tests --init-contract`; decline with the `none` marker.
+
+**Commands**
+
+```bash
+subteams-tests                       # list suites, contract state (JSON)
+subteams-tests --diff main           # + which changed files are UI / code / tests, what to run or skip
+subteams-tests run --all-auto        # run every auto suite and record receipts (or: run <suite>)
+subteams-tests status                # what the commit gate will require for the current index
+subteams-tests --init-contract       # print a contract draft
+subteams-browser --session <name> screenshot /abs/path.png   # agent-browser with a mandatory own session
+```
+
+Exit codes of `subteams-tests`: 0 ok · 1 error / something missing (`status`) · 2 broken JSON in the contract or `package.json` · 3 no `jq` · 64 bad usage; `run` exits with the suite's own code. `subteams-browser`: 2 bad usage or a blocked command (`install`, `upgrade`, `close --all`, `--executable-path`), 127 agent-browser or Chrome unavailable.
+
+**Switches** — `CLAUDE_SUBTEAMS_SKIP_TEST_GATE`, `CLAUDE_SUBTEAMS_NO_AUTO_INSTALL`, `CLAUDE_SUBTEAMS_AGENT_BROWSER`: see [Environment variables](#environment-variables).
+
+**Cost** — TODO: measured in acceptance — to be filled.
+
+### New project: UI testing in three steps
+
+1. **Create the project through the plugin** (`project-scaffold`, then the pipeline). For a web app it installs Playwright Test as part of the project, with `webServer` and a literal `baseURL` in `playwright.config`, and a first e2e test.
+2. **Add the contract** once the app and its tests exist: `subteams-tests --init-contract`, review the draft (narrow `ui_globs`, mark anything needing keys or network `opt-in`/`live`), paste it into `CLAUDE.md`, and commit it **alone**. `project-scaffold` does this as its Step 5; in an autonomous run it commits the draft and says so.
+3. **Work as usual and say "commit".** The plugin runs the suites, dispatches ui-tester / test-engineer when the change needs them, and the commit goes through only when `subteams-tests status` shows nothing missing. The final answer lists suite results, skipped suites, screenshot paths and ui-tester's improvements.
+
+For an existing project: the plugin offers the contract once, when it finds an e2e suite or UI files.
 
 ## Skills
 
@@ -178,7 +224,7 @@ All 59 skills (auto-loaded on demand by description match; `using-subteams` load
 | docs | `decision-context` | Mandatory Decision / Why / Alternatives / Risks / Linked block for every non-trivial change. Companion to `adr-tracker`. |
 | docs | `adr-tracker` | Numbered lightweight-MADR ADRs in `docs/adr/` for project-wide decision history. |
 | docs | `doc-quality-gate` | Classifies a change (cosmetic/feature/architectural/breaking) and defines the docs each class needs. |
-| docs | `claudemd-engineering` | Standards for writing and maintaining concise, prioritized, regularly-pruned CLAUDE.md files. |
+| docs | `claudemd-engineering` | Standards for writing and maintaining concise, prioritized, regularly-pruned CLAUDE.md files. Home of the test contract schema (§9). |
 | docs | `skill-engineering` | Standards for high-quality SKILL.md: one job per skill, numbered checklists, critical rules, mandatory testing. |
 | architecture | `clean-architecture` | Enforces layered architecture, dependency direction, and file-size limits (requires CONVENTIONS.md). |
 | architecture | `conventions-enforcer` | Validates project structure, file sizes, import direction, and naming against CONVENTIONS.md. |
@@ -192,7 +238,7 @@ All 59 skills (auto-loaded on demand by description match; `using-subteams` load
 | quality | `code-review` | Structured review checklist: security, correctness, performance, SOLID — and how to brief the reviewer. |
 | quality | `adversarial-testing` | Tests designed to break the code: edge cases, invalid data, race conditions, boundary violations. |
 | quality | `test-driven-development` | Red-Green-Refactor: write the test first, watch it fail, write minimal code to pass. |
-| quality | `ui-testing` | Browser UI testing via Playwright CLI: visual regression, interaction testing, CI-ready E2E. |
+| quality | `ui-testing` | Reference for UI checks: project e2e via `subteams-tests`, live review via `subteams-browser`; new e2e tests only in the project's existing framework. |
 | quality | `codebase-improvement` | Proactive codebase analysis; dispatches improvement-agent for health checks and tech-debt discovery. |
 | quality | `lint-and-style` | Consistent code style via linters, formatters, and editor config (ESLint, Prettier, EditorConfig). |
 | quality | `prompt-evaluation` | Test prompts and skills against regression cases with pass/fail metrics. |
@@ -221,7 +267,7 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | Agent | Model | Role |
 |---|---|---|
 | `code-reviewer` | opus | Senior code review: security, correctness, performance, SOLID. Read-only access. |
-| `test-engineer` | opus | Adversarial test writing and test suite maintenance. Full file access. |
+| `test-engineer` | opus | Adversarial unit and integration tests; runs new and existing suites via `subteams-tests`. Full file access. |
 | `architecture-guard` | opus | Structural and dependency drift checks. Read-only access. |
 | `design-critic` | opus | UI implementation vs. design spec compliance. Read-only access. |
 | `prompt-evaluator` | opus | Prompt and skill regression testing. Read + write. |
@@ -230,7 +276,7 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | `security-auditor` | opus | Security-sensitive changes, secrets, and auth flows. Read-only access. |
 | `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline + Standard (every logic change). |
 | `developer` | sonnet | Implementation specialist: modular code, minimal diffs, style preservation. |
-| `ui-tester` | sonnet | Browser-based UI/E2E testing via Playwright CLI. Screenshots, interactions, visual regression. |
+| `ui-tester` | sonnet | Runs the project's e2e suites via `subteams-tests`, reviews changed screens live at 320/1280 px via `subteams-browser` with mandatory screenshots, lists improvements. Monkey mode on request. |
 | `improvement-agent` | opus | Proactive codebase analyst. Finds improvement opportunities, returns prioritized proposals (read-only). |
 | `gpt-code-reviewer` | sonnet (+Codex/GPT-5.5) | Cross-model code review via `codex exec`. Finds bug classes Claude-family models under-weight. Read-only; graceful-skips if Codex unavailable. |
 | `gpt-devils-advocate` | sonnet (+Codex/GPT-5.5) | Cross-model architectural challenge via `codex exec`. Different training distribution than Claude. Read-only; graceful-skip. |
@@ -246,10 +292,10 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | Event | Hook | Purpose |
 |---|---|---|
 | `SessionStart` | `session-start` | Checks for stale BACKLOG items and active plans from previous sessions. No prompt injection — activation via CLAUDE.md. |
-| `PreToolUse` (Bash) | `pre-commit-gate` | Before a `git commit`: runs tsc / mypy / go build and requires a finished code-reviewer run in the session when the commit includes code. Counts what the command itself will commit (`git add … && git commit`, `-a`, pathspec), parsed by `hooks/lib-gitcmd.sh`; the block reason goes to stderr so the model sees it. Size signal past 400 lines. |
+| `PreToolUse` (Bash) | `pre-commit-gate` | Before a `git commit`: runs tsc / mypy / go build and requires a finished code-reviewer run in the session when the commit includes code. Counts what the command itself will commit (`git add … && git commit`, `-a`, pathspec), parsed by `hooks/lib-gitcmd.sh`; the block reason goes to stderr so the model sees it. Size signal past 400 lines. Test gate: compares the commit's content with recorded suite runs and ui-tester / test-engineer checks — blocks under a test contract, warns without one (see [Project suites & UI verification](#project-suites--ui-verification)). |
 | `PreToolUse` (Bash) | `pre-push-check` | Advisory (`additionalContext`) on a push to main/master or a force push; never blocks. |
 | `PreToolUse` (Edit/Write/MultiEdit/NotebookEdit/Bash) | `autonomy-gate` | Enforces scoped autonomy grants — blocks out-of-scope or cap-exceeding writes and edits to the grant's own run record before they land. Inert unless `CLAUDE_SUBTEAMS_AUTONOMY` is set. Delegates scope/cap checks to `scripts/autonomy-check.sh`. Contains agent drift off scope; not a sandbox against a shell-equipped agent — see [ADR-007](docs/adr/007-autonomy-enforcement-architecture.md). |
-| `SubagentStart` / `SubagentStop` | `subagent-rails` | Start: injects a static rails pointer + honesty reminder into every spawned subagent (plugin text only, never repo content). Stop: writes the review marker `pre-commit-gate` checks, when a code-reviewer subagent finishes. |
+| `SubagentStart` / `SubagentStop` | `subagent-rails` | Start: injects a static rails pointer + honesty reminder into every spawned subagent (plugin text only, never repo content). Stop: writes the review marker `pre-commit-gate` checks, when a code-reviewer subagent finishes; for ui-tester / test-engineer, a receipt with the agent's status and the content it checked. |
 | `PostToolUse` (Edit/Write) | `post-edit-check` | Async check after file edits; warnings delivered as `additionalContext`. |
 | `Stop` | `session-end-reminder` | **Advisory** documentation reminder, fired **at most once per undocumented changeset** (marker keyed on `session_id` stores the reminded file set; re-fires only for new undocumented files after a cooldown, default 45 min via `CLAUDE_SUBTEAMS_DOC_REMIND_COOLDOWN_MIN`). Detects unstaged code changes without `*.md` updates and delivers a hybrid, never-blocking notice: a framed advisory to the model via `additionalContext` ("not a task — surface to the user") + one `systemMessage` line to the operator. Escalates the advisory wording on breaking signals (file deletions, schema/migration files) — see the `doc-quality-gate` skill. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See [ADR-009](docs/adr/009-session-end-hybrid-advisory.md) and "Configuration" below. |
 | `UserPromptSubmit` | `user-prompt-check` | Scope hint (development / agentic work) as `additionalContext`. |
@@ -267,6 +313,9 @@ When `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1` (see the `multi-instance` skill), additi
 | `CLAUDE_SUBTEAMS_MULTI_INSTANCE` | Set to `1` to enable multi-instance coordination (registry, file claims, locks, mailbox). Unset means the whole subsystem is a no-op — `coord.sh` exits 0 without output and the opt-in hooks do nothing. | unset (off) |
 | `CLAUDE_SUBTEAMS_MAX_INSTANCES` | Soft cap on simultaneously live instances. Exceeding it **never blocks registration** — an already-running session cannot be un-started, and an unregistered instance would hold no claims and sit off the roster, which is the exact failure the substrate exists to prevent. It registers, warns loudly, and returns **exit 6; callers MUST treat 6 as success** (only exit 8 means registration itself failed). Non-numeric values warn and fall back to the default. | 5 |
 | `CLAUDE_SUBTEAMS_HEARTBEAT_TTL` | Liveness fallback (seconds) for harnesses where the real `claude` pid cannot be resolved. With a trusted pid, liveness is authoritative via `kill -0` and this is unused. | 1800 |
+| `CLAUDE_SUBTEAMS_SKIP_TEST_GATE` | Set to `1` to let the commit gate pass without suite runs and agent checks in a project with a test contract. Yours to set: the hook reads the environment Claude Code was started from, so the model cannot set it inline in a command. | unset (gate active) |
+| `CLAUDE_SUBTEAMS_NO_AUTO_INSTALL` | Set to `1` to stop `subteams-browser` from installing agent-browser itself. Without an installed 0.43.0 the live UI review is then reported as not done. | unset (auto-install on first use) |
+| `CLAUDE_SUBTEAMS_AGENT_BROWSER` | Path to an agent-browser executable to use instead of the plugin's cached copy. Used as is, without the version check. | unset |
 | `CLAUDE_SUBTEAMS_COORD_HOME` | Where the coordination ledgers live (instances, claims, inboxes, locks), keyed per repo. Override to isolate tests from a live registry. | `~/.claude/subteams` |
 
 ### Doc-advisory details

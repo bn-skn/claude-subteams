@@ -10,7 +10,7 @@ description: "Bootstrap an empty directory into a project skeleton (docs, CLAUDE
 1. This skill creates and maintains the documentation skeleton for a project. It has **two modes**:
    - **Init mode** — bootstrap a brand-new project from an empty directory (Sections 3-4).
    - **Retrofit mode** — fill the missing documentation set into an EXISTING project that already has source code but lacks proper docs (Section 8).
-2. It covers: `CLAUDE.md`, `README.md`, `.gitignore`, `docs/SYSTEM.md`, `docs/CONVENTIONS.md`, `docs/ARCHITECTURE.md`, `docs/BACKLOG.md`, `docs/CHANGELOG.md`, and the `docs/plans/` + `docs/specs/` + `docs/adr/` directory seeds.
+2. It covers: `CLAUDE.md`, `README.md`, `.gitignore`, `docs/SYSTEM.md`, `docs/CONVENTIONS.md`, `docs/ARCHITECTURE.md`, `docs/BACKLOG.md`, `docs/CHANGELOG.md`, and the `docs/plans/` + `docs/specs/` + `docs/adr/` directory seeds — plus the project's test contract in `CLAUDE.md`, added once the app and its tests exist (Init Step 5, Retrofit Step R5).
 3. It does NOT scaffold source-code components (services, modules, endpoints, agents). Use the `scaffolding` skill for that.
 4. **Init vs Retrofit is decided by the safety check (Step 2):** an empty/benign-only directory → Init; a directory with source files → Retrofit (never Init, which would misroute existing work).
 
@@ -84,9 +84,28 @@ Create files in this exact order, substituting all gathered placeholder values:
 3. **Hand off to the spec/plan process — this is the expected next step after scaffolding a new project:**
    - For the first feature, run `claude-subteams:brainstorming` → it writes a design spec to `docs/specs/YYYY-MM-DD-<topic>-design.md`.
    - Then `claude-subteams:writing-plans` turns the spec into an implementation plan in `docs/plans/active/`.
-   - Then implement via the pipeline (`claude-subteams:using-subteams`).
+   - Then implement via the pipeline (`claude-subteams:using-subteams`); once the app skeleton and its tests exist, Step 5.
    - **Scaffolded `docs/ARCHITECTURE.md` and `docs/CONVENTIONS.md` are STUBS, not documentation.** They carry the sentinel `> STATUS: TEMPLATE — not yet populated` and unfilled placeholders. For greenfield, this is the first structural work — they MUST be populated through the `brainstorming` Architecture Capture flow (decisions captured as ADRs during the interview, then projected into the docs by the orchestrator in-context) BEFORE any structural implementation. `scripts/check-arch-docs.sh <target>` mechanically verifies the stub markers are gone, and the Full+Architecture pipeline blocks IMPLEMENT until it passes (using-subteams Critical Rule 24). Do NOT begin building modules against a stub architecture doc — a confidently wrong or empty architecture doc is read as ground truth by `architecture-guard` and future sessions.
 4. For adding source-code components later (services, modules, endpoints), use the `scaffolding` skill.
+
+### Step 5 — Tests and the test contract (after the app skeleton exists)
+
+Runs when the user asked for a working project, not only a doc skeleton. The app itself is written through the pipeline, not by this skill; this step makes sure it is tested from its first commit. The contract comes **after** the skeleton and its tests exist — it is generated from them — but **before** the app's first commit: hold that commit until the contract commit is in. Schema: `claudemd-engineering` §9.
+
+1. **Web project** (serves pages to a browser): Playwright Test is part of the requested project — install it explicitly, as a project dev dependency, together with:
+   - a `playwright.config.*` with `webServer` (the command that starts the app, its `url`, `reuseExistingServer: true`) and a literal `use.baseURL: 'http://localhost:<port>'` — `--init-contract` fills `app` only from this pair;
+   - at least one e2e test of the main user flow, and a package script that runs the suite (e.g. `"test:e2e": "playwright test"`);
+   - the browser for it: the system Chrome (`channel: 'chrome'`) or `npx playwright install chromium`;
+   - `test-results/` and `playwright-report/` in `.gitignore` (the template has them) — otherwise every e2e run changes the tree and its receipt is marked dirty.
+   This is the one exception to "never install Playwright silently": here it is part of what the user ordered. In an existing project, never install it — ask.
+2. **Other projects with code:** the stack's own test runner with at least one test. No Playwright. **Content project without code:** no contract — write the decline marker `<!-- subteams:test-suites none -->` instead of the block and skip items 3-4.
+3. Run `subteams-tests --init-contract`, review the draft (`claudemd-engineering` §9.5), and replace the "Test contract: not added yet" line in `CLAUDE.md` with the block. Run `subteams-tests` — it must list the suites (exit 2 = broken contract, fix it).
+   - **No placeholders inside the JSON.** An unknown value is left out, never `<TEST_COMMAND>`.
+   - A project with UI or code gets at least one suite in the contract — test-engineer's check counts only with a green suite run. The e2e layer is required only when a `run: auto` suite of kind `e2e` covers at least one changed UI file through its `paths` (a suite without `paths` covers every file); with no such suite, ui-tester's live review with recorded screenshots (≥2) is the whole check.
+4. **Order of commits:** first the contract alone — `git add CLAUDE.md` as its own command, then `git commit` (the rest of the tree stays uncommitted). Then the app skeleton, tests and remaining docs go through `using-subteams` §6.7 (suites, ui-tester, test-engineer) and are committed under the contract.
+5. **Confirm:**
+   - interactive — show the draft and commit after the user's OK;
+   - autonomous run (nobody to ask) — commit the draft and say in the final answer: "test contract committed as a **draft** — review suites, globs and `app`".
 
 ## 4. Relationship to `scaffolding` Skill
 
@@ -134,6 +153,7 @@ Create files in this exact order, substituting all gathered placeholder values:
 | `docs/plans/active/` | (empty, `.gitkeep`) |
 | `docs/plans/completed/` | (empty, `.gitkeep`) |
 | `docs/specs/` | (empty, `.gitkeep`) — `brainstorming` writes specs here |
+| Test contract block in `CLAUDE.md` | `subteams-tests --init-contract`, after the app and tests exist (Step 5 / R5) |
 
 ## 8. Retrofit Mode (existing project, missing/weak docs)
 
@@ -165,6 +185,10 @@ Use when a project already has source code but its documentation is missing, spa
 1. Print what was created vs left untouched vs flagged-for-user.
 2. List every unfilled `<PLACEHOLDER>` for the user to complete.
 3. **If `docs/SYSTEM.md` or `docs/ARCHITECTURE.md` were generated, a `doc-agent` audit pass against the actual code is REQUIRED before they count as done** — these two files describe architecture and are the ones a model is most tempted to narrate plausibly-but-wrongly. A confidently wrong architecture doc is worse than no doc: future sessions read it as ground truth. Other generated docs (BACKLOG, CHANGELOG, CONVENTIONS) get an optional `doc-agent` audit; `decision-context` applies going forward.
+
+### Step R5 — Offer the test contract
+
+If `CLAUDE.md` (or `AGENTS.md`) has neither a contract nor the decline marker, offer the contract as part of the gap report, exactly as `using-subteams` §11 item 5 describes (draft from `subteams-tests --init-contract`, schema in `claudemd-engineering` §9). Retrofit Critical Rule 3 applies: nothing is written without the go-ahead. Never install a test framework here — no e2e suite in the project → say so and ask.
 
 ### Retrofit Critical Rules
 

@@ -42,11 +42,11 @@ description: "Pipeline from text spec to working code with design system, browse
 ## 5. Browser Preview and Feedback Loop
 
 1. After initial implementation, open in browser for visual verification.
-2. If Playwright MCP is available, use it for browser automation and screenshots to capture current state.
+2. Capture the current state with `subteams-browser --session <name> screenshot <path>` (agent-browser through Bash, installs itself on first use; screenshots outside the project, `close` your session at the end). Playwright MCP, if present, is an optional extra for live previews — not required.
 3. Compare against the original spec — check layout, spacing, colors, typography.
 4. Iterate: identify gaps, fix, re-preview. Maximum 3 feedback rounds.
-5. If Playwright MCP is unavailable, describe the expected visual result and ask user to confirm.
-6. Graceful degradation: all preview steps are optional enhancements — the skill works without Playwright.
+5. `subteams-browser` exits 127 (agent-browser or Chrome unavailable) → quote its message and `subteams-browser setup` hint, describe the expected visual result, and ask the user to confirm. Say that the visual state was NOT verified.
+6. These previews are design iteration. The check before commit is separate — `using-subteams` §6.7.
 
 ## 6. Consistency Enforcement
 

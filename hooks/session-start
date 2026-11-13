@@ -2,6 +2,20 @@
 # SessionStart hook — minimal, no prompt injection
 # Only checks for stale state from previous session.
 # Methodology activation is controlled by CLAUDE.md, not by this hook.
+#
+# 1.50 (IMPL-PLAN testing-ui): (a) jq missing → a warning the USER sees
+# (systemMessage; the hook's whole output becomes one JSON object only in that
+# case — otherwise output stays plain text exactly as before); (b) once per repo,
+# a suggestion to add a test contract when there is none (no `none` marker either)
+# and the repo has UI files or an e2e suite. Both never block and stay fast.
+
+SS_NOJQ=0
+if ! command -v jq >/dev/null 2>&1; then
+  if SS_BUF=$(mktemp "${TMPDIR:-/tmp}/subteams-ss.XXXXXX" 2>/dev/null); then
+    SS_NOJQ=1
+    exec 3>&1 >"$SS_BUF"
+  fi
+fi
 
 # Check for stale state from previous session
 if [ -f "BACKLOG.md" ]; then
@@ -116,4 +130,42 @@ if [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = "1" ] && command -v jq >/dev/null 
       echo "[subteams:multi-instance] Tip: export GIT_OPTIONAL_LOCKS=0 to avoid stale .git/index.lock from background git polling across worktrees."
     fi
   fi
+fi
+
+# ---- Test contract suggestion (1.50, once per repo) ----
+# Cheap prechecks first (jq, git repo, library, marker file, no contract in the
+# working tree or HEAD); `git ls-files` for UI files; discovery only when there are
+# none. The marker lives in the repo's receipt store and is written only when the
+# suggestion is actually shown.
+if [ "$SS_NOJQ" -eq 0 ] && command -v jq >/dev/null 2>&1 \
+   && SS_TOP=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$SS_TOP" ] \
+   && . "$(dirname "$0")/../scripts/lib-testclass.sh" 2>/dev/null \
+   && SS_RD=$(tc_receipt_dir "$SS_TOP") && [ ! -e "$SS_RD/contract-offered" ] \
+   && [ "$(tc_contract_marker "$SS_TOP" worktree)" = absent ] \
+   && [ "$(tc_contract_marker "$SS_TOP" head)" = absent ]; then
+  SS_WHY=""
+  _ss_globs=()
+  while IFS= read -r _g; do [ -n "$_g" ] && _ss_globs+=("$_g"); done < <(printf '%s' "$TC_DEFAULT_UI_GLOBS" | jq -r '.[]' 2>/dev/null)
+  tc_globs_re ${_ss_globs[@]+"${_ss_globs[@]}"}
+  if [ -n "$TC_RE" ] && git -C "$SS_TOP" -c core.quotePath=false ls-files 2>/dev/null | grep -Eq "$TC_RE"; then
+    SS_WHY="UI files"
+  elif bash "$(dirname "$0")/../scripts/discover-tests.sh" --root "$SS_TOP" 2>/dev/null \
+       | jq -e '[.suites[]? | select(.kind == "e2e")] | length > 0' >/dev/null 2>&1; then
+    SS_WHY="an e2e suite"
+  fi
+  if [ -n "$SS_WHY" ] && (umask 077; mkdir -p "$SS_RD") 2>/dev/null && : > "$SS_RD/contract-offered" 2>/dev/null; then
+    echo "[subteams] This repo has $SS_WHY but no test contract. Offer the user ONCE (one line, when it fits the conversation): 'subteams-tests --init-contract' prints a draft for CLAUDE.md (committed alone); with it the commit gate requires suites + ui-tester/test-engineer on the exact content. If the user declines, add the line '<!-- subteams:test-suites none -->' to CLAUDE.md. (Shown once per repository.)"
+  fi
+fi
+
+if [ "$SS_NOJQ" -eq 1 ]; then
+  exec 1>&3 3>&-
+  SS_WARN="[subteams] jq is not installed — the plugin's hooks need it: the review gate, the test gate and the test receipts are OFF, and in a repo with a test contract every commit is blocked until jq is installed. Install: apt install jq / brew install jq."
+  SS_CTX="$(cat "$SS_BUF" 2>/dev/null)"
+  rm -f "$SS_BUF" 2>/dev/null
+  SS_CTX="${SS_WARN}${SS_CTX:+
+
+$SS_CTX}"
+  _ss_esc() { printf '%s' "$1" | awk 'BEGIN{ORS="\\n"} { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/[\001-\037]/, ""); print }' | sed 's/\\n$//'; }
+  printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(_ss_esc "$SS_WARN")" "$(_ss_esc "$SS_CTX")"
 fi

@@ -1,7 +1,7 @@
 ---
 name: using-subteams
 description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, planning architecture, or building/editing agents, prompts, skills, and multi-agent systems. Also invoke before producing a document deliverable with subagents — spec, requirements, TZ, report, proposal — to set the size budget before any writer starts (Section 1.1)."
-version: 1.12.0
+version: 1.13.0
 ---
 
 # Using Subteams — Orchestrator Meta-Skill
@@ -58,7 +58,7 @@ Measured on a 2026-08-28 requirements run: five parallel writers plus stitching 
 | # | Agent | Model | Tools | When to Spawn | Output |
 |---|-------|-------|-------|---------------|--------|
 | 1 | code-reviewer | opus | Read, Grep, Glob, Bash | After implementation, before testing | Findings list + severity |
-| 2 | test-engineer | opus | Read, Write, Edit, Bash, Grep, Glob | After code review passes, adversarial testing | Test files + run results |
+| 2 | test-engineer | opus | Read, Write, Edit, Bash, Grep, Glob | Logic change above the small-change threshold, after review fixes — adversarial + integration tests (Section 6.7) | `Status:` line + test files + recorded suite runs |
 | 3 | architecture-guard | opus | Read, Grep, Glob, Bash | Structural changes, new modules, dependency drift | Architecture compliance report |
 | 4 | design-critic | opus | Read, Grep, Glob, Bash | UI/UX changes, design spec compliance | Design findings + recommendations |
 | 5 | prompt-evaluator | opus | Read, Write, Bash, Grep, Glob | Prompt/skill changes, regression testing | Eval results + regressions |
@@ -67,7 +67,7 @@ Measured on a 2026-08-28 requirements run: five parallel writers plus stitching 
 | 8 | security-auditor | opus | Read, Grep, Glob, Bash | Security-sensitive changes, secrets, auth, crypto | Vulnerability report + severity |
 | 9 | developer | sonnet | Read, Write, Edit, Bash, Grep, Glob | Implementation tasks dispatched via executing-plans | Code changes + test results + risks |
 | 10 | devils-advocate | opus | Read, Grep, Glob, Bash | Full pipeline: challenges assumptions, edge cases, scale, necessity | Challenge report + rebuttals |
-| 11 | ui-tester | sonnet | Read, Write, Edit, Bash, Grep, Glob | After UI implementation: browser testing, screenshots, E2E | Test files + screenshots + visual findings |
+| 11 | ui-tester | sonnet | Read, Write, Edit, Bash, Grep, Glob | UI change above the small-change threshold — project e2e + live review at 320/1280 (Section 6.7) | `Status:` line + e2e results + screenshot paths + improvements |
 | 12 | improvement-agent | opus | Read, Grep, Glob, Bash | Periodic codebase health checks, tech debt discovery, sprint planning | Prioritized proposals (read-only, no code changes) |
 | 13 | gpt-code-reviewer | sonnet (+Codex/GPT) | Read, Grep, Glob, Bash | Cross-model review — Full pipeline, cross-review triggers (security, money, breaking/public contract, data schema, destructive migration), explicit request; not by default on Standard — shells out to Codex for bug classes Claude under-weights | Structured cross-model findings |
 | 14 | gpt-devils-advocate | sonnet (+Codex/GPT) | Read, Grep, Glob, Bash | Cross-model architectural challenge alongside `devils-advocate` when a cross-review runs (Full pipeline incl. Plan Defense, cross-review triggers, explicit request) — not by default on Standard | Cross-model challenge report |
@@ -202,7 +202,10 @@ This calibration is deliberate: a single isolated one-line fix does not need an 
    ├── architecture-guard (structure, dependencies, drift)
    └── devils-advocate   (assumptions, edge cases, scale)
 7. FIX FINDINGS   → Address critical/important findings from all 3 reviewers
-8. TEST           → test-engineer writes adversarial tests
+8. TEST & UI      → Section 6.7, in this order: ui-tester (UI changed) → test-engineer
+                    (logic changed) — each only above the small-change threshold
+8b. SUITES        → final `subteams-tests run --all-auto` → stage → `subteams-tests status`
+                    (Section 6.7) — before any commit
 9. VERIFY         → verification-gate (evidence before claims)
 10. RISKS & DOCS  → Document risks, nuances, update docs (doc-agent)
 11. FINISH        → finishing-branch (merge/PR)
@@ -266,7 +269,7 @@ For moderate tasks (3-8 files, business logic, but single-module scope):
 4. tsc/lint check
 5. Review: **code-reviewer** (correctness, SOLID, security) — always. For non-trivial logic (multi-file, branching, touches a contract/shared state, or any uncertainty), **also devils-advocate** in parallel — dispatch both in one message. The GPT critics and the Gemini lane are not part of Standard by default (operator decision 29.10.2026). Run a cross-review (`claude-subteams:cross-review` §3.1 — code-reviewer + devils-advocate, both GPT critics, Gemini lane) only when a cross-review trigger applies — security boundary, money, breaking/public contract, data schema, destructive migration (`cross-review` §1 item 3) — or the user asks for one. This list is narrower than the §6 artifact risk-triggers: a new dependency, ambiguous intent or a large blast radius alone do not add cross-model lanes. If a lane is unavailable, say so and do not block
 6. Fix critical findings
-7. Run tests
+7. Test & UI check — Section 6.7: ui-tester / test-engineer when the change crosses the small-change threshold, then `subteams-tests run --all-auto`, stage, `subteams-tests status`
 8. Commit and merge to main
 
 No brainstorming, no plan defense, no architecture-guard, no backup tag — but review is NOT optional. Every logic change gets at least code-reviewer; non-trivial logic also gets devils-advocate. If you discover it is more complex — escalate to Full.
@@ -294,10 +297,35 @@ When the task is **building or editing agents, system prompts, skills, tool/func
 Before you declare work done or commit, confirm with EVIDENCE that the required gates actually ran — do not trust your own memory of the process any more than you trust a subagent's report.
 
 1. Run `claude-subteams:verification-gate` — evidence before assertions.
-2. Confirm, with real output (not claims): the required review(s) ran and critical/important findings were addressed; tsc/lint/tests are actually green (paste/observe the output); docs were updated per `doc-quality-gate`.
+2. Confirm, with real output (not claims): the required review(s) ran and critical/important findings were addressed; tsc/lint are actually green (paste/observe the output); `subteams-tests status` shows nothing missing for the staged content (Section 6.7); docs were updated per `doc-quality-gate`.
 3. If any required gate was skipped (e.g. user said "skip review"), state that explicitly in your summary — never let a skipped gate read as a passed one.
 
 The pipeline only protects you if it actually ran. A green checkbox you cannot show evidence for is not green. This is self-attestation, not an external control — which is exactly why it must rest on observable output (command results, review findings) and not on your recollection that "it passed."
+
+### 6.7 Project suites, tests & UI check
+
+The one description of how a change is tested before it is committed — Standard step 7, Full steps 8/8b. What ui-tester and test-engineer do inside their run lives in their agent files; the project contract's schema lives in `claudemd-engineering`. Do not restate either here or in a brief.
+
+**When:** after review findings are fixed. In a project with a contract the commit gate requires suite runs for any commit that touches non-docs files — Lightweight included — so run `subteams-tests status` before every commit there.
+
+1. **Find.** `subteams-tests --diff <base>` lists the project's suites, which changed files are UI, code, or tests, and which suites to run or skip. `opt-in` and `live` suites are never run automatically — they are named as skipped in the final answer.
+2. **Decide who is needed.** Stage the change and run `subteams-tests status`: it names what the commit gate will require for exactly the staged content — suite runs, a ui-tester check, a test-engineer check. Per group (UI → ui-tester, logic → test-engineer): within the small-change threshold of the last check by that agent (or of the anchor set when the group first passed as a small change) → no agent; above it → the agent is needed. Docs only or tests only → no agent, suites still run. Follow `status`; never split commits. A change with no UI and no logic never gets either agent.
+3. **Order: ui-tester → test-engineer → final `subteams-tests run --all-auto` → stage → `subteams-tests status` → commit.** Sequential, never parallel: each check is bound to the content the agent saw, and one agent's edits void the other's suite runs.
+4. **Brief.** The base ref. ui-tester: the changed screens, plus a URL only when the contract has no usable `app` — never a start command. test-engineer: the changed modules and the risk. Each agent answers with a first line `Status: …`; read it, then read the evidence it reports. Do not add an output template to their briefs (`orchestrator-briefing` exception) — the commit gate parses their own first line.
+5. **Act on the status.**
+   - `issues-found` → fix, and treat the fix as a new change: review it per Section 6 if it is logic, re-dispatch whatever `subteams-tests status` asks for, rerun `--all-auto`.
+   - The e2e layer is required only when a `run: auto` suite of kind `e2e` covers at least one changed UI file through its `paths` (a suite without `paths` covers every file); with no such suite, ui-tester's live review with recorded screenshots (≥2) is the whole check.
+   - ui-tester `degraded` (required e2e green, live review not possible for a reason outside the agent's control) → accepted; the reason goes to the user.
+   - `blocked` → escalate (Section 9).
+6. **Any red suite blocks the commit.** "It was failing before us" is the user's decision, not yours — show the failure and ask.
+7. **An edit after the final `--all-auto` voids it** — rerun before committing. What you stage must be exactly what was verified.
+8. **Commit discipline** (enforced by the gate when the project has a contract):
+   - stage explicitly — `git add <paths>` as its own command, then `git commit`; no `git commit -a`, no `git add … && git commit`;
+   - **do not split commits to stay under the small-change threshold** — it counts cumulatively from the last agent check, so splitting gains nothing and only hides the change from the check;
+   - a change to the contract block is its own commit, with no other files.
+9. **Gate denial.** The gate lists everything missing at once — do all of it, then commit again. The bypass `CLAUDE_SUBTEAMS_SKIP_TEST_GATE=1` belongs to the user: it works only in the environment Claude Code was started from, never inline in a command, and it is never your way past a red suite or a missing check.
+10. **Final answer to the user** carries: each suite run with its result and each skipped suite with its reason; whether the live UI review ran, and if not, why; the screenshot paths; ui-tester's Improvements list; any review or check that did not run. A skipped check never reads as a passed one (Section 6.6).
+11. **Without a contract** the same flow is expected; the gate only warns. Pass its warning to the user in one line. `status` then classifies by default globs (any `.html` / `.css` / `.tsx` … is UI, any non-docs file is code), so treat its agent lines as a hint: ui-tester only for screens the app actually serves, test-engineer only for executable logic — and name in the final answer what you skipped and why.
 
 ## 7. Dynamic User Interviewing
 
@@ -412,11 +440,11 @@ Optional MCP servers that enhance capabilities. None are required — all skills
 | MCP Server | Purpose | Used By | Graceful Degradation |
 |------------|---------|---------|---------------------|
 | **context7** | Up-to-date library/framework documentation (replaces stale training data) | All development skills, researcher agent, deep research | Falls back to training data (risk: outdated APIs) |
-| **playwright** | Browser automation, screenshots, E2E testing | design-qa, design-to-code, adversarial-testing | Skips visual verification, uses code review only |
+| **playwright** | Optional live previews while designing | design-to-code, brainstorming | Describe the expected result and ask the user to confirm. The UI check does not depend on it (Section 6.7) |
 
 **When to use context7:** Any time you or a subagent will call an API, use a library feature, or configure a framework. Training data goes stale. Documentation does not.
 
-**When to use playwright:** UI verification, screenshot comparison, E2E test execution. Not needed for backend-only work.
+**When to use playwright (MCP):** only for previews while designing. UI verification, screenshots and E2E runs do not go through it — they go through `subteams-tests` and `subteams-browser` (Section 6.7), so a missing Playwright MCP never means "skip the visual check".
 
 ### Multi-instance coordination (opt-in)
 
@@ -430,6 +458,7 @@ Every session begins with orientation. Do not start work until you understand th
 2. Read active plan from `docs/plans/active/` if one exists — understand current implementation state.
 3. Orient: what was done last session, what is pending, what is blocked.
 4. If no backlog or plan exists — ask the user what they want to work on.
+5. **Test contract, offered once per project.** Before the first development task in a project, if `subteams-tests` reports `contract: none` (not `declined`) and lists an e2e suite or UI files, offer the contract once: show the draft from `subteams-tests --init-contract` and say what it changes (the commit gate starts blocking instead of warning — Section 6.7). Accepted → add it to `CLAUDE.md` as its own commit. Declined → add `<!-- subteams:test-suites none -->` so it is not offered again. Schema: `claudemd-engineering`.
 
 ## 12. Red Flags Table
 
@@ -438,7 +467,7 @@ These are the rationalizations that lead to broken software. When you catch your
 | Rationalization | Why It Is Wrong | Correct Action |
 |-----------------|-----------------|----------------|
 | "This is simple, no need for review" | Simple changes cause cascading bugs. The simpler it seems, the less attention you pay. | Run code-reviewer for any logic change. |
-| "I'll skip testing, it obviously works" | "Obviously works" is the #1 predictor of production bugs. | Run test-engineer for any logic change. |
+| "I'll skip testing, it obviously works" | "Obviously works" is the #1 predictor of production bugs. | Run the project's suites on every change and test-engineer on logic above the small-change threshold (Section 6.7). |
 | "I'll just commit and fix later" | Later never comes. Bugs compound. Technical debt accrues interest. | Verify before every commit. |
 | "I'll have a subagent shorten it" | Compression makes the agent re-read the document around every edit — trimming routinely costs more than the writing did, and the result loses the thread. | Rewrite it yourself in one pass, or re-agree the size with the user (Section 1.1). |
 | "Five writers will finish this document faster" | Parallel authors diverge on names, thresholds and identifiers; reconciling them costs more than the writing. | One writer per deliverable file. Parallelize the research feeding them (Section 1.1). |
@@ -468,7 +497,7 @@ These are the rationalizations that lead to broken software. When you catch your
 These rules hold on every task; skipping one is a defect in the work, not a shortcut.
 
 1. Do not commit before the pipeline passes (tsc, review, tests). A green pipeline is the minimum bar, not the goal.
-2. Do not spawn more than 3 subagents for a single task without making the user aware. Subagent sprawl wastes tokens and creates coordination overhead.
+2. Do not spawn more than 3 subagents for a single task without making the user aware. Subagent sprawl wastes tokens and creates coordination overhead. ui-tester and test-engineer dispatched per Section 6.7 — on Standard too — are sanctioned on top of the reviewers and do not count toward this line.
 3. Use the orchestrator-briefing protocol (see orchestrator-briefing skill) before every Agent tool call. No brief = no subagent.
 4. Use model-selection guidance when choosing sonnet vs opus. When uncertain, opus.
 5. Check the context-management skill when the session is getting long. Do not let context pressure degrade your output quality.

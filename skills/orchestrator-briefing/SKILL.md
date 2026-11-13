@@ -236,7 +236,7 @@ Every subagent MUST return this structure:
 - Observations, risks, suggestions for orchestrator
 ```
 
-**Include this output contract template in every brief** so the subagent knows what format you expect.
+**Include this output contract template in every brief** so the subagent knows what format you expect. **Exception — ui-tester and test-engineer:** do not include the output template; their own Final Answer (first line a bare `Status: …`) is what the commit gate parses.
 
 The `Rails read:` line is mandatory. It names the rails path(s) the subagent actually read and ONE concrete constraint it took from them and applied — quoted briefly from the rails doc, with the diff file:line where it was applied. This is an attention prime and a spot-check anchor, not a guarantee: the quote + file:line pair gives the orchestrator two cross-referable anchors to verify in seconds when it matters. A brief that shipped a `Rails:` field but returns with no `Rails read:` line means the rails were ignored — treat the result as incomplete.
 

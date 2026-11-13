@@ -89,7 +89,7 @@ You are ready to move to approaches when you can answer ALL of these:
 - [ ] For whom? Who uses this?
 - [ ] What are the hard constraints? (tech stack, integrations, performance)
 - [ ] What does "done" look like? (acceptance criteria)
-- [ ] User-facing feature? → capture **User Stories** in the spec ("As <role>, I want <action>, so that <value>" + acceptance per story) — they flow into the plan's `## User Stories` section and the ui-tester reads them as test scenarios. Schema change? → capture the **Data Design** essentials. New/changed public API? → note the **Interface Contract** (docs/openapi.yaml). Same risk-triggers as writing-plans; skip all three when no trigger fires.
+- [ ] User-facing feature? → capture **User Stories** in the spec ("As <role>, I want <action>, so that <value>" + acceptance per story) — they flow into the plan's `## User Stories` section and the ui-tester drives them as flows in its live review. Schema change? → capture the **Data Design** essentials. New/changed public API? → note the **Interface Contract** (docs/openapi.yaml). Same risk-triggers as writing-plans; skip all three when no trigger fires.
 - [ ] What is explicitly NOT in scope?
 
 If you cannot confidently check all boxes — ask more questions. If you can — move to approaches.
@@ -244,7 +244,7 @@ Wait for the user's response. Only proceed once the user approves.
 
 When brainstorming involves visual questions (UI mockups, architecture diagrams, layout comparisons), use available tools:
 
-- **Playwright browser** (if available via MCP) — render components, take screenshots, show mockups
+- **Browser** — render components and take screenshots with `subteams-browser --session <name> screenshot <path>` (Bash, no MCP needed); Playwright MCP, if present, is an optional extra for live previews
 - **Excalidraw diagrams** — architecture, data flow, system diagrams
 - **Terminal** — for text-based questions (requirements, tradeoffs, scope decisions)
 

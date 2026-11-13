@@ -1,15 +1,60 @@
 #!/bin/bash
 # PreToolUse hook for Bash — checks git commit commands
-# Review gate first (cheap, blocks immediately), then the compilation check, then
-# a size signal for large files.
+# Review gate first (cheap, blocks immediately), then the test gate (1.50: suites
+# and ui-tester / test-engineer checks bound to the commit's exact content —
+# IMPL-PLAN testing-ui §5.4), then the compilation check, then a size signal for
+# large files.
 
-# Check jq availability
-if ! command -v jq &>/dev/null; then
-  exit 0
-fi
+HAVE_JQ=1
+command -v jq &>/dev/null || HAVE_JQ=0
 
 INPUT=$(cat)
-COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+
+# jq-less fallback: the value of the first "command" key, JSON-unescaped (\" \\ \/
+# \n \t \r; \uXXXX kept as is). Used ONLY to learn whether a repo with a test
+# contract is being committed to (→ deny "install jq"); without a contract the
+# gate stays fail-open exactly as before 1.50.
+_crude_command() {
+  printf '%s' "$INPUT" | LC_ALL=C awk 'BEGIN { RS = "\001" } { s = s $0 } END {
+    i = index(s, "\"command\""); if (!i) exit
+    s = substr(s, i + 9)
+    if (!match(s, /^[ \t\r\n]*:[ \t\r\n]*"/)) exit
+    s = substr(s, RLENGTH + 1); n = length(s); out = ""
+    for (k = 1; k <= n; k++) {
+      c = substr(s, k, 1)
+      if (c == "\\") {
+        k++; e = substr(s, k, 1)
+        if (e == "n") out = out "\n"; else if (e == "t") out = out "\t"; else if (e == "r") out = out "\r"
+        else if (e == "\"" || e == "\\" || e == "/") out = out e; else out = out "\\" e
+      } else if (c == "\"") break
+      else out = out c
+    }
+    printf "%s", out }'
+}
+
+# Contract marker in HEAD without the library (it failed to load): a marker line at
+# column 0 in CLAUDE.md / AGENTS.md. Coarser than tc_contract_marker (ignores code
+# fences) — used only on the broken-plugin path, where erring toward "contract
+# present" (deny) is the safe side.
+_crude_contract_in_head() { # <dir>
+  local n
+  for n in CLAUDE.md AGENTS.md; do
+    git -C "$1" show "HEAD:$n" 2>/dev/null | grep -q '^<!-- subteams:test-suites v1 -->' && return 0
+  done
+  return 1
+}
+
+_tg_bypass_line="Bypass is the user's only: CLAUDE_SUBTEAMS_SKIP_TEST_GATE=1 in the environment Claude Code runs in — the model cannot set it (an inline VAR=1 in the command line does not reach this hook)."
+_tg_deny() { # <reason…> — test-gate block: reason on stderr (the model sees only stderr on exit 2)
+  printf '[subteams:pre-commit-gate] %s\n%s\n' "$*" "$_tg_bypass_line" >&2
+  exit 2
+}
+
+if [ "$HAVE_JQ" -eq 1 ]; then
+  COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+else
+  COMMAND=$(_crude_command)
+fi
 
 # Only act on a real `git commit`. hooks/lib-gitcmd.sh tokenizes the command line
 # (quote-aware, so `echo "…git commit…"` is just an echo) and lists every git
@@ -20,7 +65,21 @@ COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/nul
 # (the vast majority) skip the tokenizer entirely.
 case "$COMMAND" in *commit*) ;; *) exit 0 ;; esac
 # shellcheck source=lib-gitcmd.sh
-. "$(dirname "$0")/lib-gitcmd.sh" 2>/dev/null || exit 0
+if ! . "$(dirname "$0")/lib-gitcmd.sh" 2>/dev/null; then
+  # Cannot parse the command at all. Before 1.50: fail open. A repo with a test
+  # contract in HEAD must not lose its gate to a broken plugin install → deny.
+  if [ "${CLAUDE_SUBTEAMS_SKIP_TEST_GATE:-0}" != "1" ] && _crude_contract_in_head "$PWD"; then
+    _tg_deny "Test gate: this repo has a test contract, but the plugin file hooks/lib-gitcmd.sh did not load, so the commit cannot be checked. Reinstall/update the claude-subteams plugin, then retry."
+  fi
+  exit 0
+fi
+# Shared test rules (docs-class for the review gate below, contract, receipts).
+# A load failure no longer exits here: with a contract in HEAD it must deny (see
+# the test gate), without one the gate keeps the old fail-open (exit 0 below).
+TC_LIB=1
+SCRIPTS_DIR="$(dirname "$0")/../scripts"
+# shellcheck source=../scripts/lib-testclass.sh
+. "$SCRIPTS_DIR/lib-testclass.sh" 2>/dev/null || TC_LIB=0
 
 # Legacy detection (the pre-1.49 regex): used ONLY when the tokenizer says its
 # parse is unreliable (unterminated quote, awk died, nesting cap). The principle
@@ -155,6 +214,85 @@ if [ -n "$RAW_TARGET" ]; then
   fi
 fi
 
+# ---- Test gate, cheap part (1.50, IMPL-PLAN testing-ui §5.4 steps 2-3) ----
+# Contract detection WITHOUT jq: marker in HEAD of the TARGET repo (awk only; the
+# crude grep when the library itself failed to load). Contract in HEAD = enforce:
+#   - no jq / no library → deny with the reason (fail closed);
+#   - forms where the committed content is decided AT commit time (commit -a,
+#     commit <paths> / -i / -o / -p, any index-changing git command before the
+#     commit in the same line) → deny: the gate checks the staged tree, so it must
+#     be the tree that gets committed. Read-only git commands before it are fine.
+# No contract in HEAD: nothing changes here (old fail-open on missing jq/lib).
+TG_SKIP=0; [ "${CLAUDE_SUBTEAMS_SKIP_TEST_GATE:-0}" = "1" ] && TG_SKIP=1
+TG_REPO=$(git -C "$TARGET_DIR" rev-parse --show-toplevel 2>/dev/null)
+TG_HEADMARK=absent
+if [ -n "$TG_REPO" ]; then
+  if [ "$TC_LIB" -eq 1 ]; then TG_HEADMARK=$(tc_contract_marker "$TG_REPO" head)
+  elif _crude_contract_in_head "$TG_REPO"; then TG_HEADMARK=v1; fi
+fi
+TG_ENFORCE=0
+case "$TG_HEADMARK" in v1|error) TG_ENFORCE=1 ;; esac
+
+if [ "$TG_ENFORCE" -eq 1 ] && [ "$TG_SKIP" -eq 0 ]; then
+  if [ "$HAVE_JQ" -eq 0 ]; then
+    _tg_deny "Test gate: this repo has a test contract (subteams:test-suites in CLAUDE.md/AGENTS.md of HEAD), but jq is not installed, so the commit cannot be checked. Install jq (apt install jq / brew install jq), then retry."
+  fi
+  if [ "$TC_LIB" -eq 0 ]; then
+    _tg_deny "Test gate: this repo has a test contract, but the plugin file scripts/lib-testclass.sh did not load, so the commit cannot be checked. Reinstall/update the claude-subteams plugin, then retry."
+  fi
+  # Judged by EFFECT, not by token: a mis-parsed message (heredoc with quotes) can
+  # leave garbage "pathspecs" or a stray "-a" — harmless unless they would really
+  # change what is committed. Unsafe: -a/--all with unstaged tracked changes;
+  # <paths> / -i / -o that match an existing file (git refuses unmatched ones);
+  # --pathspec-from-file (unknowable); any index-changing git command before the
+  # last commit in the same line (read-only ones are fine).
+  TG_UNSAFE=""
+  _tg_dirty_tracked() { ! git -C "$TG_REPO" diff --quiet 2>/dev/null; }
+  if [ "${#CM_I[@]}" -gt 0 ]; then
+    last=-1
+    for k in "${!CM_I[@]}"; do
+      [ "${CM_I[$k]}" -gt "$last" ] && last=${CM_I[$k]}
+      [ "${CM_ALL[$k]}" -eq 1 ] && _tg_dirty_tracked && TG_UNSAFE="git commit -a/--all (unstaged changes would be added)"
+      if [ -n "${CM_PATHS[$k]}" ]; then
+        IFS=$'\037' read -r -a PS <<< "${CM_PATHS[$k]}"
+        git -c core.quotePath=false -C "$TARGET_DIR" ls-files -c -o --exclude-standard -- "${PS[@]}" 2>/dev/null | grep -q . \
+          && TG_UNSAFE="git commit <paths> (commits the working-tree version of those paths, not the staged tree)"
+      fi
+      skip=0
+      IFS=$'\037' read -r -a CARGS <<< "${GC_ARGS[${CM_I[$k]}]}"
+      for a in "${CARGS[@]}"; do
+        if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+        case "$a" in
+          --) break ;;
+          --pathspec-from-file|--pathspec-from-file=*) TG_UNSAFE="git commit $a" ;;
+          --message|--file|--author|--date|--reuse-message|--reedit-message|--fixup|--squash|--cleanup|--template|--trailer) skip=1 ;;
+        esac
+      done
+    done
+    for i in "${!GC_SUB[@]}"; do
+      [ "$i" -lt "$last" ] || continue
+      case "${GC_SUB[$i]}" in
+        commit|status|diff|log|show|rev-parse|ls-files|ls-tree|cat-file|branch|tag|describe|blame|grep|shortlog|config|remote|fetch|version|help|check-ignore|rev-list|show-ref|symbolic-ref|for-each-ref|reflog|var|name-rev|count-objects|merge-base|whatchanged) ;;
+        *) TG_UNSAFE="git ${GC_SUB[$i]} before the commit in the same command" ;;
+      esac
+    done
+  else
+    # Unreliable parse: an add/stage seen in the parsed prefix → unsafe; a "-a"
+    # only seen by the raw-text regex → unsafe only with unstaged tracked changes.
+    for i in "${!GC_SUB[@]}"; do
+      case "${GC_SUB[$i]}" in add|stage) TG_UNSAFE="git ${GC_SUB[$i]} in the same command as the commit" ;; esac
+    done
+    [ -z "$TG_UNSAFE" ] && [ "$FB_WIDE" -eq 1 ] && _tg_dirty_tracked && TG_UNSAFE="git commit -a (unstaged changes would be added)"
+  fi
+  if [ -n "$TG_UNSAFE" ]; then
+    _tg_deny "Test gate: this repo has a test contract, and the gate checks exactly the STAGED content — but '$TG_UNSAFE' changes what gets committed at commit time. Stage separately first (git add …), check with 'subteams-tests status', then commit with a plain 'git commit -m …' as its own command."
+  fi
+fi
+
+# Without jq or the library the review gate below cannot run either: the old
+# fail-open (a contract repo was already handled above).
+[ "$HAVE_JQ" -eq 1 ] && [ "$TC_LIB" -eq 1 ] || exit 0
+
 # FILES = what THIS command can commit, not just what is staged now (PreToolUse
 # runs before the command, so `git add -A && git commit` and `git commit -am`
 # had an empty index here and sailed through). The set only ever WIDENS, never
@@ -241,21 +379,13 @@ if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ]; then
   SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
   if [ -n "$SID" ] && printf '%s' "$SID" | grep -qE '^[A-Za-z0-9._-]+$' \
      && [ "$SID" != "." ] && [ "$SID" != ".." ]; then
-    NEUTRAL_RE='^(\.gitignore|\.editorconfig|\.gitattributes|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|composer\.lock)$|(^|/)\.DS_Store$'
     HAS_CODE=0
     while IFS= read -r f; do
       [ -z "$f" ] && continue
-      printf '%s\n' "$f" | grep -qE "$NEUTRAL_RE" && continue
-      # Docs-class: prose/data text formats skip the review gate (.md always;
-      # .txt/.csv/.rst/.adoc added 15.07, operator decision). Deliberately NOT
-      # here: .html (site code), .yaml/.json (behavior-bearing configs — CI
-      # workflows, manifests — their edits are exactly what review exists for).
-      # Exception inside .txt (review finding): requirements/constraints .txt
-      # are dependency MANIFESTS, not prose — they stay gated.
-      if printf '%s\n' "$f" | grep -qE '\.(md|txt|csv|rst|adoc)$' \
-         && ! printf '%s\n' "$f" | grep -qiE '(^|/)[^/]*(requirements|constraints)[^/]*\.txt$'; then
-        continue
-      fi
+      # Docs-class (neutral repo metadata + prose/data formats; requirements /
+      # constraints .txt stay gated) — one definition, shared with the test
+      # gate: tc_is_docs_class in scripts/lib-testclass.sh.
+      tc_is_docs_class "$f" && continue
       HAS_CODE=1
       CODE_EXAMPLE="$f"
       break
@@ -273,6 +403,113 @@ if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ]; then
         exit 2
       fi
     fi
+  fi
+fi
+
+# ---- Test gate, full part (1.50, IMPL-PLAN testing-ui §5.4 steps 4-8) ----
+# The rules themselves live in ONE place: tc_requirements (scripts/lib-testclass.sh),
+# the same function `subteams-tests status` reports. Here: which tree, which
+# contract, and what to do with the verdict.
+#   commit tree = write-tree of a COPY of the real index (never written);
+#   contract    = from HEAD (R11). A commit that changes the effective contract
+#                 (file, state or content; removal and `none` included) passes only
+#                 if it contains nothing but the contract file(s) — with a warning;
+#   HEAD contract → deny listing EVERYTHING missing; staged-only contract ("new
+#   contract") or no contract → allow + a warning to the user and the model.
+# Without a contract the heuristic config comes from `discover-tests.sh config`;
+# any failure on that warn-only path is a silent allow.
+TG_WARN=""      # one-line summary for the user (systemMessage)
+TG_DETAIL=""    # details for the model (additionalContext)
+_tg_warn() { TG_WARN="${TG_WARN}${TG_WARN:+ | }$1"; [ -n "${2:-}" ] && TG_DETAIL="${TG_DETAIL}${TG_DETAIL:+
+}$2"; return 0; }
+_tg_items() { # missing lines -> "a, b, c" (the part before the first ':')
+  printf '%s\n' "$1" | sed -n 's/^\([^:]*\):.*/\1/p' | paste -sd, - | sed 's/,/, /g'
+}
+_tg_list() { printf '%s\n' "$1" | sed '/^$/d; s/^/  - /'; }
+_tg_anchor() { # on allow only: write the drift anchors tc_requirements asked for (TC_REQ_ANCHORS)
+  local g t
+  while read -r g t; do [ -n "$t" ] && tc_anchor_write "$TG_REPO" "$g" "$t"; done <<< "${TC_REQ_ANCHORS:-}"
+  [ -n "${TC_REQ_WARN:-}" ] && _tg_warn "$TC_REQ_WARN"
+  return 0
+}
+
+_test_gate() {
+  local tree base btree files hrc irc hst ist hfile ifile hsha isha hjson ijson herr ierr f only cfg names
+  tree=$(tc_index_tree "$TG_REPO") || {
+    [ "$TG_ENFORCE" -eq 1 ] && _tg_deny "Test gate: cannot compute the tree of the staged commit (unresolved merge in the index?). Resolve and stage, then retry."
+    return 0; }
+  if tc_has_head "$TG_REPO"; then base=HEAD; btree=$(git -C "$TG_REPO" rev-parse 'HEAD^{tree}' 2>/dev/null)
+  else base=$(tc_empty_tree "$TG_REPO"); btree="$base"; fi
+  [ "$tree" = "$btree" ] && return 0          # nothing staged: nothing to check
+  files=$(tc_changed_files "$TG_REPO" "$base" "$tree") || {
+    [ "$TG_ENFORCE" -eq 1 ] && _tg_deny "Test gate: git diff of the staged commit failed — cannot check it. Retry; if it persists, check the repository state."
+    return 0; }
+
+  tc_contract_load "$TG_REPO" head; hrc=$?
+  hst="$TC_CONTRACT_STATE"; hfile="$TC_CONTRACT_FILE"; hsha="$TC_CONTRACT_SHA"; hjson="$TC_CONTRACT_JSON"; herr="$TC_ERR"
+  tc_contract_load "$TG_REPO" index; irc=$?
+  ist="$TC_CONTRACT_STATE"; ifile="$TC_CONTRACT_FILE"; isha="$TC_CONTRACT_SHA"; ijson="$TC_CONTRACT_JSON"; ierr="$TC_ERR"
+
+  if [ "$TG_ENFORCE" -eq 1 ] && [ "$hrc" -ne 1 ] && [ "$hrc" -ne 4 ]; then
+    if [ "$hst|$hfile|$hsha" != "$ist|$ifile|$isha" ]; then          # step 5: contract changed
+      [ "$irc" -eq 2 ] && _tg_deny "Test gate: the staged test contract is invalid — ${ierr:-broken}. Fix it; a contract change is committed alone."
+      only=1
+      while IFS= read -r f; do
+        [ -z "$f" ] || [ "$f" = "$hfile" ] || [ "$f" = "$ifile" ] || { only=0; break; }
+      done <<< "$files"
+      [ "$only" -eq 1 ] || _tg_deny "Test gate: this commit changes the test contract (${ifile:-$hfile}) together with other files. Commit the contract change ALONE (only that file staged), then the rest: code is checked against the contract that is already committed."
+      case "$ist" in
+        v1) names=$(printf '%s' "$ijson" | jq -r '[.suites[] | "\(.name) (\(.run))"] | join(", ")' 2>/dev/null)
+            _tg_warn "test contract changed in ${ifile} — suites now: ${names:-none}. This commit is not checked against the new rules; they apply from the next commit." ;;
+        none) _tg_warn "test contract replaced by the 'none' marker in ${ifile} — from the next commit the test gate only warns." ;;
+        *) _tg_warn "test contract removed from ${hfile} — from the next commit the test gate only warns." ;;
+      esac
+      return 0
+    fi
+    [ "$hrc" -eq 0 ] || _tg_deny "Test gate: the test contract in HEAD (${hfile:-CLAUDE.md}) is broken — ${herr:-unreadable}. Fix it in a commit that contains only ${hfile:-that file}, then retry this one."
+    tc_requirements "$TG_REPO" "$tree" "$base" "$hjson" "$hsha" \
+      || _tg_deny "Test gate: cannot evaluate the checks for this commit — ${TC_ERR:-unknown error}."
+    if [ "$TC_REQ_OK" -eq 1 ]; then _tg_anchor; return 0; fi
+    _tg_deny "Test gate (contract in ${hfile}): the exact content of this commit is not covered by the required checks. Missing:
+$(_tg_list "$TC_REQ_MISSING")
+Follow using-subteams §6.7 (ui-tester → test-engineer → subteams-tests run --all-auto); 'subteams-tests status' shows what is still missing. Then retry the commit.${TC_REQ_WARN:+
+Note: small_change in the contract is above the built-in ceiling and was clamped to it.}"
+  fi
+
+  if [ "$irc" -eq 0 ] && [ "$hst" != v1 ]; then                       # "new contract" mode
+    if tc_requirements "$TG_REPO" "$tree" "$base" "$ijson" "$isha"; then
+      _tg_anchor
+      if [ "$TC_REQ_OK" -eq 1 ]; then
+        _tg_warn "new test contract staged in ${ifile} — enforced from the next commit."
+      else
+        _tg_warn "new test contract staged in ${ifile} (enforced from the next commit); not checked in this commit: $(_tg_items "$TC_REQ_MISSING")." \
+          "Missing for this commit (warning only — the contract is not in HEAD yet):
+$(_tg_list "$TC_REQ_MISSING")"
+      fi
+    fi
+    return 0
+  fi
+  [ "$irc" -eq 2 ] && [ "$hst" != v1 ] && _tg_warn "the staged test contract in ${ifile:-CLAUDE.md} is invalid — ${ierr:-broken}; it will not be enforced."
+
+  # No contract (or declined): heuristics, warning only. Docs-only → nothing to say.
+  only=1
+  while IFS= read -r f; do [ -n "$f" ] && ! tc_is_docs_class "$f" && { only=0; break; }; done <<< "$files"
+  [ "$only" -eq 0 ] || return 0
+  cfg=$(bash "$SCRIPTS_DIR/discover-tests.sh" --root "$TG_REPO" config 2>/dev/null | jq -c '.config' 2>/dev/null) || return 0
+  [ -n "$cfg" ] && [ "$cfg" != null ] || return 0
+  tc_requirements "$TG_REPO" "$tree" "$base" "$cfg" none || return 0
+  _tg_anchor
+  [ "$TC_REQ_OK" -eq 1 ] && return 0
+  _tg_warn "no test contract (warning only, not blocking): this commit has no matching checks — $(_tg_items "$TC_REQ_MISSING")." \
+    "Missing checks (no contract → not enforced; using-subteams §6.7 describes the flow):
+$(_tg_list "$TC_REQ_MISSING")"
+}
+
+if [ -n "$TG_REPO" ]; then
+  if [ "$TG_SKIP" -eq 0 ]; then
+    _test_gate
+  elif [ "$TG_ENFORCE" -eq 1 ]; then
+    _tg_warn "test gate bypassed: CLAUDE_SUBTEAMS_SKIP_TEST_GATE=1 is set in Claude Code's environment — this commit is not checked against the test contract."
   fi
 fi
 
@@ -359,7 +596,19 @@ $LARGE_FILES
 Check: is each still one semantic unit (cohesion)? If yes, keep with a one-line justification; if no, split along its actual seams."
 fi
 
-if [ -n "$NOTES" ]; then
+# One JSON object for the whole hook output. Test-gate warnings go to BOTH
+# channels (IMPL-PLAN §5.4: systemMessage visibility from PreToolUse is not
+# guaranteed, so additionalContext asks the model to relay it — as
+# hooks/session-end-reminder does); NOTES stay model-only as before.
+if [ -n "$TG_WARN" ]; then
+  TG_MSG="[subteams:test-gate] $TG_WARN"
+  TG_CTX="[subteams:test-gate] Automated commit-gate warning — NOT a user message, NOT a block (the commit proceeds). Relay it to the user in ONE short line in your next message; do not start extra work only because of it unless the user asks.
+$TG_MSG${TG_DETAIL:+
+$TG_DETAIL}${NOTES:+
+
+$NOTES}"
+  jq -nc --arg m "$TG_MSG" --arg c "$TG_CTX" '{systemMessage:$m, hookSpecificOutput:{hookEventName:"PreToolUse", additionalContext:$c}}'
+elif [ -n "$NOTES" ]; then
   jq -nc --arg c "$NOTES" '{hookSpecificOutput:{hookEventName:"PreToolUse", additionalContext:$c}}'
 fi
 

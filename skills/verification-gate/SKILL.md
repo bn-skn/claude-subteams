@@ -127,7 +127,7 @@ For greenfield projects and non-trivial structural changes (new module, new laye
 
 Compilation and tests prove code RUNS — not that it LOOKS right. When the work produced a visual artifact — a UI page, component, landing page, rendered diagram, generated image, chart, or any human-facing layout — verification MUST include looking at it, whenever a way to see it exists.
 
-1. **Render and look.** Capture a screenshot (`ui-testing` / Playwright / chrome-devtools for web UI; open the file for generated images, diagrams, PDFs). Actually view the result — never infer appearance from the code alone.
+1. **Render and look.** Capture a screenshot (web UI: `subteams-browser --session <name> screenshot <path>`, or the ui-tester per `using-subteams` §6.7; open the file for generated images, diagrams, PDFs). Actually view the result — never infer appearance from the code alone.
 2. **Judge quality, not just "no crash".** Is the layout aligned, spaced, readable? Does it look intentional and polished, or broken / cramped / overflowing / off? Run the `design-qa` skill for a structured pass (hierarchy, consistency, contrast, spacing, responsiveness).
 3. **Fix what looks wrong.** Misaligned, overflowing, low-contrast, clipped, or just ugly → fix it and re-screenshot. "It compiles" is not "it looks good."
 4. **If you genuinely cannot see it** (headless env, no screenshot tooling, non-visual task) — say so explicitly: *"visual state NOT verified — needs a human/visual check."* Never silently claim a visual artifact is done without having looked at it.
@@ -143,11 +143,11 @@ This catches what `tsc` and unit tests never will: the thing renders without err
 | Build succeeds | Build command: exit 0 | Linter passing, logs look good |
 | Bug fixed | Test original symptom: passes | Code changed, assumed fixed |
 | Types correct | Type checker: 0 errors | "TypeScript compiles" without running tsc |
-| No regressions | Full test suite: all pass | Running only new tests |
+| No regressions | `subteams-tests status` on the staged content shows every required suite recorded green (`using-subteams` §6.7); nothing staged → `subteams-tests run --all-auto` output | Running only new tests; the default `npm test` alone |
 | Requirements met | Line-by-line checklist | Tests passing |
 | Agent completed | VCS diff shows changes | Agent reports "success" |
 | Arch docs populated (structural work) | `check-arch-docs.sh` exit 0 + output shown; choices trace to ADRs | "I filled them in", template still has stub markers |
-| UI intact | Screenshot comparison: no visual regressions | tsc passes, unit tests pass |
+| UI intact | A valid ui-tester check for this content — `subteams-tests status` on the staged change does not list it as missing (`using-subteams` §6.7) | tsc passes, unit tests pass; "not listed as missing" with nothing staged — that proves nothing |
 | Visual artifact looks good | Screenshot viewed + judged: aligned, readable, polished | "compiles" / "no regressions" (regression-free can still look broken) |
 
 ## Red Flags - STOP

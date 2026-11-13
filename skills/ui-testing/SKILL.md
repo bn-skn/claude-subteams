@@ -1,56 +1,55 @@
 ---
 name: ui-testing
-description: "Browser-based UI testing with Playwright CLI. Dispatches ui-tester agent for visual verification, interaction testing, and CI-ready E2E test generation."
+description: "Reference for browser UI checks: when to dispatch the ui-tester agent and what to put in its brief. The agent's procedure lives in agents/ui-tester.md; where the check sits in the pipeline lives in using-subteams §6.7."
 ---
 
 # UI Testing
 
-## 1. Dispatch Protocol
+This skill is a reference, not a procedure. Two other places own the substance:
 
-1. This skill dispatches to the **ui-tester** agent for browser-based testing.
-2. Agent model: sonnet (token-efficient for screenshot-heavy work).
-3. Agent tools: Read, Write, Edit, Bash, Grep, Glob.
-4. The agent uses Playwright CLI via Bash — NOT Playwright MCP.
-5. ALWAYS provide: base URL, pages to test, expected behavior, design tokens path (if visual testing).
+- **When the UI check runs, in what order, and what reaches the user** — `using-subteams` §6.7.
+- **What the ui-tester does** (find suites → run the project's e2e → live review with screenshots at 320 and 1280 → improvements) — `agents/ui-tester.md`.
+
+## 1. Dispatch
+
+1. Agent: **ui-tester** (sonnet). Tools: Read, Write, Edit, Bash, Grep, Glob.
+2. Suites run through `subteams-tests run`; the live review runs through `subteams-browser` (agent-browser, installs itself on first use; needs a system Chrome, or the user runs `subteams-browser setup`). No Playwright MCP.
+3. The app is reached only through the project contract's `app` or a URL you put in the brief. Do not give the agent start commands.
 
 ## 2. When to Use
 
-| Scenario | Use This Skill |
-|----------|---------------|
-| After implementing a UI feature | Yes — verify it works in browser |
-| Visual regression check before merge | Yes — screenshot comparison |
-| Testing form flows and interactions | Yes — click, fill, submit |
-| Generating E2E tests for CI | Yes — write .spec.ts files |
-| Unit testing pure functions | No — use test-engineer instead |
-| API endpoint testing | No — use test-engineer instead |
+| Scenario | ui-tester? |
+|----------|-----------|
+| UI change above the small-change threshold (using-subteams §6.7) | Yes |
+| New or changed user flow, form, or state | Yes — it may add an e2e test in the project's existing framework |
+| Cosmetic change (color, spacing, copy) above the threshold | Yes — review and screenshots; no new test |
+| Chaos / fuzz pass on an interface | Yes — `mode: monkey` |
+| Unit testing pure functions, API endpoints | No — test-engineer |
+| Docs, emails or pages excluded by the contract's `ui_exclude` | No |
 
-## 3. Testing Levels
+## 3. Brief Template
 
-### Quick Check (ad-hoc)
-For fast verification during development:
-1. Start dev server if not running.
-2. Dispatch ui-tester with specific pages and viewports.
-3. Review screenshots and test output.
-4. No test files saved — one-off verification.
+```
+Task: [what changed, in one line]
+Base: [git ref the change is measured from; default HEAD]
+Changed screens: [routes / views to review]
+URL: [only if the project contract has no usable `app`]
+Key flows: [user journeys to drive; or "see ## User Stories in <plan>"]
+Mode: [scenario (default) | monkey]
+Expected: [what "working correctly" looks like]
+```
 
-### Standard Testing (feature work)
-For feature branches and PRs:
-1. Write `.spec.ts` test files covering critical user flows.
-2. Run at 3 viewports: 320px (mobile), 768px (tablet), 1280px (desktop).
-3. Generate screenshot baselines for visual regression.
-4. Verify all tests pass before merge.
+## 4. Token Budget
 
-### Full E2E Suite (CI pipeline)
-For GitHub Actions integration:
-1. All Standard tests plus cross-browser (Chromium + Firefox).
-2. Visual regression against committed baselines.
-3. Accessibility checks (axe-core via Playwright).
-4. Performance metrics (LCP, CLS, FID).
-5. Test results and screenshots as CI artifacts.
+| Action | Token Cost | Rule |
+|--------|-----------|------|
+| Screenshot (take) | Low | Through `subteams-browser screenshot`, into the plugin cache — never the project |
+| Screenshot (read) | High | Read each one once to judge it; report the path, do not inline |
+| Element lookup | Low | `snapshot -i` and targeted selectors |
+| Full DOM dump | Very High | Never |
+| Suite run | Low | `subteams-tests run`, minimal output |
 
-## 4. CI Integration Template
-
-The ui-tester agent can generate this GitHub Actions workflow:
+## 5. CI Workflow (only on request, only when the project already has Playwright Test)
 
 ```yaml
 # .github/workflows/e2e.yml
@@ -75,40 +74,8 @@ jobs:
           retention-days: 7
 ```
 
-## 5. Brief Template for ui-tester
+## 6. Critical Rules
 
-When dispatching the ui-tester agent, include:
-
-```
-Task: [what to test]
-Base URL: [http://localhost:XXXX or deployed URL]
-Pages: [list of routes to test]
-Key flows: [user journeys to verify]
-Design tokens: [path to tokens.json or tailwind.config.ts]
-Viewports: [320, 768, 1280] (default) or custom
-Mode: [quick-check | standard | full-e2e]
-Expected: [what "working correctly" looks like]
-```
-
-## 6. Token Budget Guidelines
-
-UI testing can be expensive. Control costs:
-
-| Action | Token Cost | Rule |
-|--------|-----------|------|
-| Screenshot (take) | Low | Save to file, don't read |
-| Screenshot (read/analyze) | High | Only when verifying specific visual issue |
-| DOM inspection | Very High | NEVER read full DOM — use targeted selectors |
-| Test file writing | Low | Write once, run many times |
-| Test execution | Low | Playwright runs in Bash, minimal output |
-
-**Target:** Aim for < 50k tokens for standard testing of 5-10 pages. Actual usage depends on failure count and diagnosis complexity.
-
-## 7. Critical Rules
-
-1. NEVER use Playwright MCP for routine testing. CLI via Bash only.
-2. ALWAYS test at minimum 2 viewports (mobile + desktop).
-3. MUST save screenshots to files — never inline in agent output unless explicitly asked.
-4. MUST generate CI-ready test files for any feature that has UI.
-5. Test files MUST use Playwright's built-in waiting — no arbitrary `sleep()` or `waitForTimeout()`.
-6. Visual regression baselines MUST be committed to the repo.
+1. NEVER use Playwright MCP for the UI check.
+2. Widths, screenshots, new-test rules and the defect/improvement line are the agent's — `agents/ui-tester.md`. Do not override them in a brief.
+3. Nothing is installed into the project silently: no framework → the agent asks, you pass the question to the user.

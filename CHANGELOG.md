@@ -3,6 +3,36 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.50.0] - 2026-11-13
+
+Project tests and UI checks that actually run. Audit of 31 days of claudebot sessions (13.11.2026): test-engineer and ui-tester never dispatched, the project's e2e suite never run. Decisions R1–R11 and residuals: [ADR-011](docs/adr/011-project-suites-and-ui-verification.md); plan `docs/plans/completed/2026-11-13-testing-ui-1.50.0.md`.
+
+### Added
+- **`subteams-tests`** (`bin/`, `scripts/discover-tests.sh`, `scripts/lib-testclass.sh`): finds the project's suites (package scripts with the lockfile's package manager, monorepo packages, Playwright/Cypress configs, pytest, Go, Cargo, Makefile), classifies changed files as UI / code / tests / docs, runs suites with a **receipt** — a git-tree snapshot of the content the run saw plus the real exit code (`run <suite>`, `run --all-auto`), reports what the commit gate will require (`status`), and drafts a contract (`--init-contract`).
+- **`subteams-browser`** (`bin/`, `deps/agent-browser/`): agent-browser 0.43.0 for the live UI review, installed on first use from the plugin's lock file into `~/.cache/claude-subteams/agent-browser/`; system Chrome, or `subteams-browser setup`; a mandatory own `--session`; `screenshot` records a receipt.
+- **Project test contract v1** — an optional block in `CLAUDE.md` (schema: `claudemd-engineering` §9). With it the commit gate blocks until the staged content has green suite runs and, above the small-change threshold (cumulative drift of 10 lines / 2 files since the last agent check), a ui-tester / test-engineer receipt with evidence. Without it the gate warns the model and the user.
+- `using-subteams` §6.7 "Project suites, tests & UI check" — the one description of the flow (ui-tester → test-engineer → final `--all-auto` → stage → `status` → commit); Standard step 7, Full steps 8/8b, §6.6, `verification-gate`, `finishing-branch`, `executing-plans` link to it. §11 item 5: the contract is offered once per project.
+- `project-scaffold` Init Step 5 (a web project gets Playwright Test with `webServer` as part of the project; the contract is generated after the app and tests exist and committed alone) and Retrofit Step R5 (offer the contract). README "Project suites & UI verification"; ADR-011.
+- Env switches: `CLAUDE_SUBTEAMS_SKIP_TEST_GATE` (user-only bypass), `CLAUDE_SUBTEAMS_NO_AUTO_INSTALL`, `CLAUDE_SUBTEAMS_AGENT_BROWSER`.
+
+### Changed
+- **ui-tester** rewritten as three moves: run the project's e2e suites through `subteams-tests`; review changed screens live at 320 and 1280 px through `subteams-browser` with mandatory screenshots; list non-blocking improvements. Starts the app only via the brief's URL or the contract's `app`; new e2e tests only inside an existing framework; first line `Status: pass | degraded | issues-found | blocked`.
+- **test-engineer**: integration tests first-class across process / DB / HTTP boundaries; final runs through `subteams-tests run`; first line `Status: pass | issues-found | blocked`.
+- `pre-commit-gate` takes the docs-class from `lib-testclass.sh` (shared with the test gate); `subagent-rails` writes ui / te receipts on SubagentStop.
+- A missing Playwright MCP no longer means "skip the visual check" — it stays an optional preview (`using-subteams` §10, `design-to-code`, `brainstorming`).
+- Stale text: `install.sh` snippet synced to `templates/claudemd-snippet.md`; the snippet no longer calls cross-model review a Standard default (1.49.0); claudebot-specific hints removed from shared files; `finishing-branch` post-merge check is `subteams-tests run --all-auto`.
+- `using-subteams` 1.13.0.
+
+### Security
+- agent-browser is installed with `npm ci --ignore-scripts` from a committed lock (sha512 for every platform package), checked by version before first use, and changed only by a plugin release. Chrome is the system one; Playwright's Chromium (needs `--no-sandbox`) is not used. `subteams-browser` refuses `install`, `upgrade`, `close --all`, `--executable-path`.
+- Under a contract the gate reads the contract from HEAD; a contract change must be its own commit. Suite commands come from the contract, never from the model's command line, and extra arguments to `run` are refused.
+- `subteams-tests` parses project files only with `jq`, skips files over 1 MB and symlinks leaving the repo, and executes nothing from the project except the suite `cmd` in `run`.
+
+### Notes
+- Requirements: `jq` (mandatory under a contract), git, Node/npm for the auto-install, system Chrome or `subteams-browser setup`, Claude Code ≥ 2.1.284.
+- Not covered (ADR-011): commits outside the model's Bash, deliberate receipt forgery, the quality of an agent's check (only that it ran with evidence). `systemMessage` visibility from PreToolUse is unverified; `additionalContext` is the primary channel.
+- Under a contract `git commit -a` and `git add … && git commit` are refused — stage, then commit.
+
 ## [1.49.0] - 2026-10-30
 
 Fixes from the 29.10.2026 plugin audit (six lanes: Anthropic practice research, prompts/context, October session logs, hook engineering, Codex, Gemini). Operator decisions (Богдан, 30.10.2026): fix the hook bugs; take the GPT and Gemini lanes out of the Standard default; keep the Focused tier, the Stop-hook verbatim repeat and the `using-subteams` size as they are for now (filed in BACKLOG).

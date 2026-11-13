@@ -54,7 +54,7 @@ For each task in the current batch:
    - [ ] **Code review** — dispatch reviewer subagent for spec compliance
    - [ ] **Devils-advocate challenge** (full pipeline, and any non-trivial logic — see using-subteams Section 6) — dispatch devils-advocate to challenge assumptions, edge cases, scale, necessity
    - [ ] **Test verification** — run tests, verify new + existing pass
-   - [ ] **UI verification** (if UI changed) — dispatch ui-tester for screenshot comparison and interaction testing
+   - [ ] **UI & test agents** — per using-subteams §6.7: ui-tester if UI changed, then test-engineer if logic changed (each above the small-change threshold), then `subteams-tests run --all-auto`
    - [ ] Gate passes: proceed to next task
    - [ ] Gate fails: retry with feedback (max 3 retries)
 
@@ -138,8 +138,8 @@ Autonomy is the manual pipeline minus the human pause, plus bounded, evidence-ca
 | Simple implementation | sonnet | Single file, clear spec, utility function |
 | Complex implementation | opus | Multi-file, integration, architecture |
 | Code review | opus | Needs broad codebase understanding |
-| Test writing | sonnet | Focused scope, clear assertions |
-| UI/E2E testing | sonnet | Playwright tests, screenshots, visual regression |
+| Test writing (test-engineer) | opus | Adversarial unit and integration tests, suite runs via `subteams-tests` |
+| UI check (ui-tester) | sonnet | Project e2e via `subteams-tests`, live review with screenshots via `subteams-browser` (using-subteams §6.7) |
 | Codebase analysis | opus | Health check, tech debt discovery, improvement proposals |
 
 ## Red Flags

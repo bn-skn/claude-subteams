@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# subteams-tests — project test suites: list, run with a receipt, contract draft, status.
+# Thin entry point; everything lives in scripts/discover-tests.sh (see its header).
+# The plugin root is resolved from this file's real path: bin scripts do not get
+# CLAUDE_PLUGIN_ROOT, and CLAUDE_PLUGIN_DATA may belong to another plugin (spike 0.2).
+self="$0"
+if real=$(readlink -f "$self" 2>/dev/null) && [ -n "$real" ]; then
+  self="$real"
+else # old macOS without readlink -f
+  while [ -L "$self" ]; do
+    dir=$(cd -P "$(dirname "$self")" && pwd) || exit 1
+    self=$(readlink "$self") || exit 1
+    case "$self" in /*) ;; *) self="$dir/$self" ;; esac
+  done
+fi
+root=$(cd -P "$(dirname "$self")/.." && pwd) || { echo "[subteams-tests] cannot resolve the plugin root" >&2; exit 1; }
+exec bash "$root/scripts/discover-tests.sh" "$@"

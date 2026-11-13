@@ -157,7 +157,7 @@ If you cannot identify ANY risks — you have not thought hard enough. Re-read t
 
 Three sections are added to the plan ONLY when a specific risk-trigger fires. They are not written by default: a change that is not user-facing, touches no schema, and adds no API gets **none** of them. Do not pad a plan with empty stubs — omit the section entirely when its trigger is absent.
 
-- **`## User Stories`** — write when the feature is **user-facing**. One story per user-visible behavior: `As <role>, I want <action>, so that <value>`, each with its own acceptance criterion. This section doubles as the test spec: the ui-tester reads it as scenarios in its default (scenario) mode, so vague stories produce vague tests.
+- **`## User Stories`** — write when the feature is **user-facing**. One story per user-visible behavior: `As <role>, I want <action>, so that <value>`, each with its own acceptance criterion. The ui-tester drives each story as a flow in its live review of the changed screens (`agents/ui-tester.md`), so vague stories produce a vague check.
 - **`## Data Design`** — write when the change **alters the database schema**. Cover affected tables/fields, indexes, and the migration (forward + rollback). Follow the `database-design` skill for modeling guidelines.
 - **`## Interface Contract`** — write when the change **introduces or changes a public API**. Reference the contract in `docs/openapi.yaml` (the source of truth), and follow the `api-design` skill. Do not restate the whole spec inline — link it.
 
