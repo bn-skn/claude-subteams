@@ -1,36 +1,40 @@
 #!/usr/bin/env bash
-# subteams-browser — точка входа в agent-browser 0.43.0 для ui-tester и осмотра интерфейса.
+# subteams-browser — entry point to agent-browser 0.43.0 for ui-tester and live UI review.
 #
-# Поиск agent-browser (план 1.50.0, R3 и Задача 2):
-#   1. CLAUDE_SUBTEAMS_AGENT_BROWSER — явный путь пользователя, берётся как есть;
-#   2. кэш ${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/agent-browser/0.43.0/;
-#   3. системный `agent-browser`, только если `--version` ровно 0.43.0;
-#   4. автоустановка (если не CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1): `npm ci --ignore-scripts`
-#      из deps/agent-browser/ плагина (sha512 из lock) во временный каталог рядом с кэшем,
-#      проверка платформенного бинаря и `--version`, атомарное переименование в кэш.
-# Из кэша запускается платформенный бинарь напрямую: JS-лаунчер пакета при первом запуске
-# переписывает установку (спайк 0.3). Пути — от readlink -f "$0": bin-скрипт не получает
-# CLAUDE_PLUGIN_ROOT, а CLAUDE_PLUGIN_DATA может принадлежать чужому плагину (спайк 0.2).
+# Finding agent-browser (plan 1.50.0, R3 and Task 2):
+#   1. CLAUDE_SUBTEAMS_AGENT_BROWSER — explicit user path, taken as is;
+#   2. cache ${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/agent-browser/0.43.0/
+#      (marker must name a platform candidate; version re-checked, result cached per binary mtime/size/inode);
+#   3. system `agent-browser`, only if `--version` is exactly 0.43.0;
+#   4. auto-install (unless CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1): `npm ci --ignore-scripts`
+#      from the plugin's deps/agent-browser/ (sha512 from the lock) into a temp dir next to the cache,
+#      platform binary and `--version` checked, atomic rename into the cache.
+# From the cache the platform binary is run directly: the package's JS launcher rewrites the install
+# on first run (spike 0.3). Paths come from readlink -f "$0": a bin script gets no CLAUDE_PLUGIN_ROOT,
+# and CLAUDE_PLUGIN_DATA may belong to another plugin (spike 0.2).
 #
-# Браузер — только системный Chrome/Chromium или скачанный явным `subteams-browser setup`
-# (Chromium из кэша Playwright требует --no-sandbox — не используется, спайк 0.4).
-# Каждая команда браузера требует `--session <имя>`; аргументы передаются как есть.
-# `screenshot` после успеха пишет квитанцию `shot` (§5.3). Окружение не печатается.
+# Browser — only system Chrome/Chromium or one downloaded by an explicit `subteams-browser setup`
+# (Playwright's Chromium needs --no-sandbox here — refused, spike 0.4).
+# Every browser command needs `--session <name>`. Commands and options pass an allowlist (see the
+# argument policy below); allowed arguments are passed through verbatim.
+# `screenshot` writes a `shot` receipt after success (§5.3). The environment is never printed.
 #
-# Коды выхода: 2 — неверный вызов (нет --session); 127 — нет agent-browser / браузера /
-# установка не удалась; иначе — код agent-browser.
+# Exit codes: 2 — invalid or denied call; 127 — no agent-browser / browser / install failed;
+# otherwise — agent-browser's code.
 set -u
+CALLER_UMASK=$(umask)
+umask 077   # for what the wrapper itself creates; agent-browser runs with the caller's umask
 
 AB_VERSION=0.43.0
-INSTALL_TIMEOUT=120   # с, на npm ci
-LOCK_WAIT=200         # с, ожидание чужой установки
-LOCK_STALE_AGE=180    # с, после этого блокировка считается протухшей даже при живом pid
+INSTALL_TIMEOUT=90    # s, for npm ci; below the Bash tool's 120 s so our own failure is reported first
+LOCK_WAIT=100         # s, waiting for another install
+LOCK_STALE_AGE=180    # s, after this a lock is stale even if its pid is alive
 
 say() { printf 'subteams-browser: %s\n' "$*" >&2; }
 die() { local rc="$1"; shift; say "$*"; exit "$rc"; }
 
-# --- пути -------------------------------------------------------------------
-resolve_self() { # readlink -f; запасной путь для старого macOS без -f
+# --- paths ------------------------------------------------------------------
+resolve_self() { # readlink -f; fallback for old macOS without -f
   local p="$0" d r
   if r=$(readlink -f -- "$p" 2>/dev/null) && [ -n "$r" ]; then printf '%s' "$r"; return; fi
   while [ -L "$p" ]; do
@@ -42,17 +46,19 @@ resolve_self() { # readlink -f; запасной путь для старого 
   printf '%s/%s' "$d" "$(basename -- "$p")"
 }
 
-SELF=$(resolve_self) || die 127 "не удалось определить путь к себе"
+SELF=$(resolve_self) || die 127 "cannot resolve own path"
 PLUGIN_ROOT=$(dirname -- "$(dirname -- "$SELF")")
 DEPS="$PLUGIN_ROOT/deps/agent-browser"
-CACHE_BASE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams"
+# XDG spec: a relative XDG_CACHE_HOME is invalid and must be ignored
+case "${XDG_CACHE_HOME:-}" in /*) CACHE_ROOT="$XDG_CACHE_HOME" ;; *) CACHE_ROOT="$HOME/.cache" ;; esac
+CACHE_BASE="$CACHE_ROOT/claude-subteams"
 AB_DIR="$CACHE_BASE/agent-browser"
 INSTALL="$AB_DIR/$AB_VERSION"
 LOCK="$AB_DIR/$AB_VERSION.lock"
 
 AB_BIN=""; AB_SKILLS=""
 TMP_INSTALL=""; LOCK_HELD=0
-# shellcheck disable=SC2317  # вызывается из trap
+# shellcheck disable=SC2317  # called from trap
 cleanup() {
   [ -n "$TMP_INSTALL" ] && rm -rf -- "$TMP_INSTALL"
   [ "$LOCK_HELD" = 1 ] && rm -rf -- "$LOCK"
@@ -60,14 +66,62 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-# --- версия и платформенный бинарь -------------------------------------------
-version_ok() { # <исполняемый файл>
+# --- environment ------------------------------------------------------------
+# Env twins of denied options: real profile / running Chrome / code loading / browser swap / disk state.
+scrub_env() {
+  local v
+  for v in $(compgen -e); do
+    case "$v" in
+      AGENT_BROWSER_ARGS|AGENT_BROWSER_CONFIG|AGENT_BROWSER_PROFILE|AGENT_BROWSER_INIT_SCRIPTS| \
+      AGENT_BROWSER_EXTENSIONS|AGENT_BROWSER_CDP*|AGENT_BROWSER_AUTO_CONNECT|AGENT_BROWSER_PLUGINS| \
+      AGENT_BROWSER_ALLOW_FILE_ACCESS|AGENT_BROWSER_PROVIDER|AGENT_BROWSER_ENGINE|AGENT_BROWSER_STATE| \
+      AGENT_BROWSER_RESTORE*|AGENT_BROWSER_SESSION_NAME|AGENT_BROWSER_HEADED|AGENT_BROWSER_DOWNLOAD_PATH| \
+      AGENT_BROWSER_CA_CERT)
+        unset "$v" ;;
+    esac
+  done
+}
+scrub_env
+
+# AGENT_BROWSER_EXECUTABLE_PATH is how the user picks a browser — honoured, except Playwright's Chromium
+if [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]; then
+  exe_real=$(readlink -f -- "$AGENT_BROWSER_EXECUTABLE_PATH" 2>/dev/null) || exe_real=""
+  case "$AGENT_BROWSER_EXECUTABLE_PATH:$exe_real" in
+    */ms-playwright/*) die 2 "AGENT_BROWSER_EXECUTABLE_PATH points to Playwright's Chromium, which needs --no-sandbox here; use system Chrome or \`subteams-browser setup\`" ;;
+  esac
+fi
+
+# --- version and platform binary ---------------------------------------------
+version_ok() { # <executable>
   local out
   out=$("$1" --version 2>/dev/null) || return 1
   [ "$out" = "agent-browser $AB_VERSION" ]
 }
 
-# Кандидаты (пути относительно каталога установки) в порядке предпочтения для этой машины.
+file_sig() { # <file> -> "mtime size inode" (GNU stat, then BSD stat)
+  stat -c '%Y %s %i' -- "$1" 2>/dev/null || stat -f '%m %z %i' -- "$1" 2>/dev/null
+}
+
+write_verified() { # <install dir> <rel>: record that this exact binary passed version_ok
+  local sig
+  sig=$(file_sig "$1/$2") && [ -n "$sig" ] || return 0
+  { printf '%s %s\n' "$AB_VERSION" "$sig" > "$1/.subteams-verified.$$" \
+      && mv -f -- "$1/.subteams-verified.$$" "$1/.subteams-verified"; } 2>/dev/null
+  rm -f -- "$1/.subteams-verified.$$" 2>/dev/null
+  return 0
+}
+
+verified_cached() { # <install dir> <rel>: version check, skipped while the binary's signature is unchanged
+  local sig got
+  sig=$(file_sig "$1/$2") || sig=""
+  if [ -n "$sig" ] && got=$(cat -- "$1/.subteams-verified" 2>/dev/null) && [ "$got" = "$AB_VERSION $sig" ]; then
+    return 0
+  fi
+  version_ok "$1/$2" || return 1
+  write_verified "$1" "$2"
+}
+
+# Candidates (paths relative to the install dir) in order of preference for this machine.
 platform_candidates() {
   local os arch libc other
   case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) return 0 ;; esac
@@ -86,25 +140,35 @@ platform_candidates() {
   done
 }
 
-pick_platform_binary() { # <каталог установки> -> относительный путь первого рабочего бинаря
-  local dir="$1" rel
+pick_platform_binary() { # <install dir> -> relative path of the first working binary
+  local dir="$1" rel first=""
   while IFS= read -r rel; do
+    [ -n "$first" ] || first="$rel"
     if ! { [ -f "$dir/$rel" ] && [ -x "$dir/$rel" ]; }; then continue; fi
-    if version_ok "$dir/$rel"; then printf '%s' "$rel"; return 0; fi
+    if version_ok "$dir/$rel"; then
+      # npm skips an optional dependency that fails (e.g. integrity) and goes on: say so once
+      case "$first|$rel" in *-gnu/*'|'*musl*)
+        say "warning: the glibc build of agent-browser is missing or failed its check (see $AB_DIR/install.log); using the musl build" ;;
+      esac
+      printf '%s' "$rel"; return 0
+    fi
   done < <(platform_candidates)
   return 1
 }
 
-cache_valid() { # маркер пишется только после проверки бинаря и версии
-  local rel
+cache_valid() { # the marker is written only after the binary and version were checked
+  local rel cand known=0
   [ -f "$INSTALL/.subteams-bin" ] || return 1
   rel=$(cat -- "$INSTALL/.subteams-bin" 2>/dev/null) || return 1
-  [ -n "$rel" ] && [ -x "$INSTALL/$rel" ] || return 1
+  while IFS= read -r cand; do [ "$rel" = "$cand" ] && known=1; done < <(platform_candidates)
+  [ "$known" = 1 ] || return 1
+  [ -f "$INSTALL/$rel" ] && [ -x "$INSTALL/$rel" ] || return 1
+  verified_cached "$INSTALL" "$rel" || return 1
   AB_BIN="$INSTALL/$rel"
   AB_SKILLS="$INSTALL/node_modules/agent-browser/skill-data"
 }
 
-# --- блокировка mkdir (flock нет в macOS) ------------------------------------
+# --- mkdir lock (no flock on macOS) -------------------------------------------
 lock_stale() {
   local pid="" ts="" now
   if [ -f "$LOCK/owner" ]; then
@@ -116,21 +180,21 @@ lock_stale() {
     [ $((now - ts)) -gt "$LOCK_STALE_AGE" ]
     return
   fi
-  # каталог есть, владельца ещё нет: протухший, только если старый
+  # dir exists but no owner yet: stale only if old
   [ -n "$(find "$LOCK" -maxdepth 0 -mmin +3 2>/dev/null)" ]
 }
 
 acquire_lock() {
   local waited=0 aside
   while ! mkdir -- "$LOCK" 2>/dev/null; do
-    [ -d "$LOCK" ] || die 127 "не удалось создать блокировку $LOCK"
+    [ -d "$LOCK" ] || die 127 "cannot create lock $LOCK"
     if lock_stale; then
       aside="$LOCK.stale.$$"
-      # переименование атомарно: из двух ожидающих протухшую забирает один
+      # rename is atomic: of two waiters only one takes the stale lock
       mv -- "$LOCK" "$aside" 2>/dev/null && rm -rf -- "$aside"
       continue
     fi
-    [ "$waited" -ge "$LOCK_WAIT" ] && die 127 "чужая установка agent-browser идёт дольше ${LOCK_WAIT} с (блокировка $LOCK)"
+    [ "$waited" -ge "$LOCK_WAIT" ] && die 127 "another agent-browser install has run longer than ${LOCK_WAIT} s (lock $LOCK)"
     sleep 1; waited=$((waited + 1))
   done
   LOCK_HELD=1
@@ -139,35 +203,35 @@ acquire_lock() {
 
 release_lock() { [ "$LOCK_HELD" = 1 ] && rm -rf -- "$LOCK"; LOCK_HELD=0; }
 
-# --- автоустановка ----------------------------------------------------------
+# --- auto-install -----------------------------------------------------------
 install_fail() {
   [ -n "$TMP_INSTALL" ] && rm -rf -- "$TMP_INSTALL"
   TMP_INSTALL=""
   release_lock
-  die 127 "установка agent-browser $AB_VERSION не удалась: $*"
+  die 127 "agent-browser $AB_VERSION install failed: $*"
 }
 
 auto_install() {
   local log pid rc waited rel
-  command -v npm >/dev/null 2>&1 || die 127 "agent-browser $AB_VERSION не найден, а для автоустановки нужен npm (Node.js)"
-  command -v node >/dev/null 2>&1 || die 127 "agent-browser $AB_VERSION не найден, а для автоустановки нужен Node.js"
+  command -v npm >/dev/null 2>&1 || die 127 "agent-browser $AB_VERSION not found, and auto-install needs npm (Node.js)"
+  command -v node >/dev/null 2>&1 || die 127 "agent-browser $AB_VERSION not found, and auto-install needs Node.js"
   if ! { [ -f "$DEPS/package.json" ] && [ -f "$DEPS/package-lock.json" ]; }; then
-    die 127 "нет зафиксированного дерева зависимостей: $DEPS"
+    die 127 "pinned dependency tree missing: $DEPS"
   fi
-  mkdir -p -- "$AB_DIR" || die 127 "не удалось создать каталог кэша $AB_DIR"
+  mkdir -p -- "$AB_DIR" || die 127 "cannot create cache dir $AB_DIR"
 
   acquire_lock
-  if cache_valid; then release_lock; return 0; fi   # поставил параллельный запуск
-  if [ -e "$INSTALL" ]; then                         # битая установка без маркера
+  if cache_valid; then release_lock; return 0; fi   # a parallel run installed it
+  if [ -e "$INSTALL" ]; then                         # broken install (no valid marker)
     mv -- "$INSTALL" "$AB_DIR/.broken.$$" 2>/dev/null && rm -rf -- "$AB_DIR/.broken.$$"
-    [ -e "$INSTALL" ] && install_fail "не удалось убрать битую установку $INSTALL"
+    [ -e "$INSTALL" ] && install_fail "cannot remove broken install $INSTALL"
   fi
 
-  # хвосты прерванных установок (обёртку убили посреди npm ci); активная установка — только у владельца блокировки
+  # leftovers of interrupted installs (wrapper killed mid npm ci); an active install belongs to the lock owner only
   find "$AB_DIR" -maxdepth 1 -type d -name '.install-*' -mmin +5 -exec rm -rf {} + 2>/dev/null
-  printf 'subteams: устанавливаю agent-browser %s в %s (один раз)\n' "$AB_VERSION" "$INSTALL" >&2
-  TMP_INSTALL=$(mktemp -d "$AB_DIR/.install-XXXXXX") || install_fail "не удалось создать временный каталог"
-  cp -- "$DEPS/package.json" "$DEPS/package-lock.json" "$TMP_INSTALL/" || install_fail "не удалось скопировать lock-файл"
+  printf 'subteams: installing agent-browser %s into %s (one time)\n' "$AB_VERSION" "$INSTALL" >&2
+  TMP_INSTALL=$(mktemp -d "$AB_DIR/.install-XXXXXX") || install_fail "cannot create temp dir"
+  cp -- "$DEPS/package.json" "$DEPS/package-lock.json" "$TMP_INSTALL/" || install_fail "cannot copy the lock file"
   log="$AB_DIR/install.log"
 
   (cd -- "$TMP_INSTALL" && exec npm ci --ignore-scripts --no-fund --no-audit) >"$log" 2>&1 &
@@ -179,32 +243,33 @@ auto_install() {
       sleep 2
       pkill -KILL -P "$pid" 2>/dev/null; kill -KILL "$pid" 2>/dev/null
       wait "$pid" 2>/dev/null
-      install_fail "npm ci не уложился в ${INSTALL_TIMEOUT} с; лог: $log"
+      install_fail "npm ci did not finish within ${INSTALL_TIMEOUT} s; log: $log"
     fi
     sleep 1; waited=$((waited + 1))
   done
   wait "$pid"; rc=$?
-  [ "$rc" -eq 0 ] || install_fail "npm ci завершился с кодом $rc; лог: $log"
+  [ "$rc" -eq 0 ] || install_fail "npm ci exited with code $rc; log: $log"
 
   rel=$(pick_platform_binary "$TMP_INSTALL") \
-    || install_fail "платформенный бинарь для $(uname -s)/$(uname -m) не найден или его версия не $AB_VERSION; лог: $log"
-  printf '%s\n' "$rel" > "$TMP_INSTALL/.subteams-bin" || install_fail "не удалось записать маркер установки"
+    || install_fail "no platform binary for $(uname -s)/$(uname -m), or its version is not $AB_VERSION; log: $log"
+  printf '%s\n' "$rel" > "$TMP_INSTALL/.subteams-bin" || install_fail "cannot write install marker"
+  write_verified "$TMP_INSTALL" "$rel"   # rename keeps mtime/size/inode, so the cached check stays valid
 
-  # rename(2): атомарно и отказывает, если цель уже есть (у mv такой гарантии нет)
+  # rename(2): atomic and fails if the target exists (mv gives no such guarantee)
   if ! node -e 'require("fs").renameSync(process.argv[1], process.argv[2])' "$TMP_INSTALL" "$INSTALL" 2>/dev/null; then
     cache_valid && { rm -rf -- "$TMP_INSTALL"; TMP_INSTALL=""; release_lock; return 0; }
-    install_fail "не удалось переместить установку в $INSTALL"
+    install_fail "cannot move the install into $INSTALL"
   fi
   TMP_INSTALL=""
   release_lock
-  cache_valid || die 127 "установка в $INSTALL не прошла проверку"
+  cache_valid || die 127 "install in $INSTALL failed verification"
 }
 
 resolve_agent_browser() {
   local sys
   if [ -n "${CLAUDE_SUBTEAMS_AGENT_BROWSER:-}" ]; then
     if ! { [ -f "$CLAUDE_SUBTEAMS_AGENT_BROWSER" ] && [ -x "$CLAUDE_SUBTEAMS_AGENT_BROWSER" ]; }; then
-      die 127 "CLAUDE_SUBTEAMS_AGENT_BROWSER указывает не на исполняемый файл"
+      die 127 "CLAUDE_SUBTEAMS_AGENT_BROWSER does not point to an executable file"
     fi
     AB_BIN="$CLAUDE_SUBTEAMS_AGENT_BROWSER"; return 0
   fi
@@ -213,11 +278,11 @@ resolve_agent_browser() {
     AB_BIN="$sys"; return 0
   fi
   [ "${CLAUDE_SUBTEAMS_NO_AUTO_INSTALL:-}" = 1 ] \
-    && die 127 "agent-browser $AB_VERSION не найден, автоустановка выключена (CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1). Осмотр интерфейса не выполнен"
+    && die 127 "agent-browser $AB_VERSION not found, auto-install is off (CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1). Live UI review not performed"
   auto_install
 }
 
-# --- браузер ----------------------------------------------------------------
+# --- browser ----------------------------------------------------------------
 have_browser() {
   local n a
   if [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ] && [ -x "$AGENT_BROWSER_EXECUTABLE_PATH" ]; then return 0; fi
@@ -230,11 +295,11 @@ have_browser() {
       [ -d "$a" ] && return 0
     done
   fi
-  # Chrome for Testing от `subteams-browser setup` (agent-browser install): ~/.agent-browser/browsers
+  # Chrome for Testing from `subteams-browser setup` (agent-browser install): ~/.agent-browser/browsers
   [ -n "$(ls -A "$HOME/.agent-browser/browsers" 2>/dev/null)" ]
 }
 
-# --- квитанция shot (§5.3) --------------------------------------------------
+# --- shot receipt (§5.3) ----------------------------------------------------
 sha1_of() { # stdin -> hex
   if command -v sha1sum >/dev/null 2>&1; then sha1sum | cut -d' ' -f1
   elif command -v shasum >/dev/null 2>&1; then shasum -a 1 | cut -d' ' -f1
@@ -242,7 +307,7 @@ sha1_of() { # stdin -> hex
   else return 1; fi
 }
 
-json_str() { # экранирование строки для JSON; управляющие символы кроме \n\t\r — отказ
+json_str() { # JSON string escaping; control characters other than \n\t\r — refused
   local s="$1"
   s=${s//\\/\\\\}; s=${s//\"/\\\"}
   s=${s//$'\n'/\\n}; s=${s//$'\t'/\\t}; s=${s//$'\r'/\\r}
@@ -250,7 +315,7 @@ json_str() { # экранирование строки для JSON; управл
   printf '"%s"' "$s"
 }
 
-write_shot_receipt() { # <абсолютный путь> <сессия>; вне git-репозитория — молча ничего
+write_shot_receipt() { # <absolute path> <session>; outside a git repo — silently nothing
   local file="$1" session="$2" gcd canon id dir size ts tmp jpath jsess top jroot
   command -v git >/dev/null 2>&1 || return 0
   gcd=$(git rev-parse --git-common-dir 2>/dev/null) || return 0
@@ -264,7 +329,7 @@ write_shot_receipt() { # <абсолютный путь> <сессия>; вне 
   ts=$(date +%s)
   jpath=$(json_str "$file") || return 0
   jsess=$(json_str "$session") || return 0
-  # root = рабочее дерево, где снят скриншот (worktree): по нему subagent-rails выбирает снимок
+  # root = the working tree where the screenshot was taken (worktree): subagent-rails picks the snapshot by it
   top=$(git rev-parse --show-toplevel 2>/dev/null) && jroot=$(json_str "$top") || jroot=null
   tmp="$dir/.tmp-shot-$$-$RANDOM"
   printf '{"type":"shot","kind":"shot","path":%s,"size":%s,"session":%s,"ts":%s,"root":%s}\n' "$jpath" "$size" "$jsess" "$ts" "$jroot" > "$tmp" 2>/dev/null \
@@ -274,81 +339,129 @@ write_shot_receipt() { # <абсолютный путь> <сессия>; вне 
   return 0
 }
 
-abs_path() { # <путь> -> абсолютный, каталог канонизирован
+abs_path() { # <path> -> absolute, directory canonicalized
   local d b
   d=$(cd -P -- "$(dirname -- "$1")" 2>/dev/null && pwd) || return 1
   b=$(basename -- "$1")
   printf '%s/%s' "$d" "$b"
 }
 
-# --- разбор аргументов ------------------------------------------------------
-first="${1:-}"
-if [ "$first" = setup ]; then
+# --- argument policy --------------------------------------------------------
+# agent-browser 0.43.0 strips its global options anywhere in argv and takes the first remaining token
+# as the command (an unknown option becomes the "command"); `--opt=value` is not parsed. A value option
+# consumes the next token even if it starts with a dash; a boolean one consumes a following true/false.
+# Arity below was probed against 0.43.0 with `session` as the stand-in command.
+VALUE_OPTS=" --session --user-agent --color-scheme --screenshot-dir --screenshot-quality --screenshot-format --max-output --idle-timeout --input-mode --allowed-domains "
+BOOL_OPTS=" --json --annotate --debug --content-boundaries --ignore-https-errors --no-auto-dialog --pin-tab --no-pin-tab --relaunch --no-webmcp --hide-scrollbars "
+# Denied anywhere in argv (also as --opt=value): the user's real Chrome/profile/saved state, code loading,
+# file access, another browser binary or engine, cloud/plugin providers, arbitrary download paths.
+DENY_OPTS=" --profile --auto-connect --cdp --cdp-headers --args --config --extension --init-script --init-scripts --allow-file-access --executable-path --user-data-dir --headed --state --restore --restore-save --restore-check-url --restore-check-text --restore-check-fn --session-name -p --provider --engine --ca-cert --download-path "
+COMMANDS=" open snapshot click dblclick fill type press hover focus select check uncheck scroll scrollintoview wait get is find screenshot eval console errors set tab close back forward reload record skills session "
+
+inlist() { # <word> <" list ">
+  case "$1" in ''|*[[:space:]]*) return 1 ;; esac
+  case "$2" in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+if [ "${1:-}" = setup ]; then
   shift
+  case "$*" in ''|--with-deps) ;; *) die 2 "setup takes no arguments other than --with-deps" ;; esac
   resolve_agent_browser
   [ -n "$AB_SKILLS" ] && [ -z "${AGENT_BROWSER_SKILLS_DIR:-}" ] && export AGENT_BROWSER_SKILLS_DIR="$AB_SKILLS"
+  umask "$CALLER_UMASK"
   exec "$AB_BIN" install "$@"
 fi
 
-SESSION=""; CMD=""; CMD_IDX=-1
 args=("$@")
-i=0
-while [ "$i" -lt "${#args[@]}" ]; do
-  a="${args[$i]}"
-  if [ "$a" = --session ]; then
-    SESSION="${args[$((i + 1))]:-}"
-    i=$((i + 2)); continue
-  fi
-  if [ -z "$CMD" ] && [ "${a#-}" = "$a" ]; then CMD="$a"; CMD_IDX=$i; fi
-  i=$((i + 1))
-done
-
-# Запреты (R3 и «только своя сессия»): Chrome — только через setup, версия закреплена плагином
-case "$CMD" in
-  install) die 2 "install через обёртку запрещён: используй \`subteams-browser setup\`" ;;
-  upgrade) die 2 "upgrade запрещён: версия agent-browser $AB_VERSION закреплена плагином и меняется только его релизом" ;;
-esac
-for a in "$@"; do
-  case "$a" in
-    --all) [ "$CMD" = close ] && die 2 "close --all запрещён: закрывай только свою сессию (subteams-browser --session <имя> close)" ;;
-    --executable-path|--executable-path=*)
-      die 2 "--executable-path запрещён: браузер задаётся пользователем через AGENT_BROWSER_EXECUTABLE_PATH; Chromium Playwright не использовать — требует --no-sandbox" ;;
-  esac
-done
-
-# Без сессии — только справка, версия и встроенные скиллы agent-browser
+SESSION=""; SESSION_LATE=0; CMD=""; CMD_IDX=-1; SUB=""
 exempt=0
-if [ "$#" -eq 0 ]; then exempt=1; else
-  case "$first" in --version|-V|--help|-h|help|skills) exempt=1 ;; esac
-  case "$CMD" in skills) [ "$CMD_IDX" -le 2 ] && exempt=1 ;; esac
+if [ "$#" -eq 0 ]; then exempt=1
+elif [ "$#" -eq 1 ]; then case "$1" in --version|-V|--help|-h) exempt=1 ;; esac
 fi
 
 if [ "$exempt" = 0 ]; then
-  case "$SESSION" in
-    ''|-*) die 2 "нужна своя сессия: subteams-browser --session <имя> <команда> … (общая сессия по умолчанию не используется)" ;;
-  esac
-  need_browser=1
-  for a in "$@"; do
-    case "$a" in --cdp|--auto-connect) need_browser=0 ;; esac
+  i=0
+  while [ "$i" -lt "${#args[@]}" ]; do
+    a="${args[$i]}"
+    if inlist "$a" "$VALUE_OPTS"; then
+      if [ "$a" = --session ]; then
+        # after the command agent-browser may never see it (`--` or an unlisted value option swallows it)
+        if [ "$CMD_IDX" -lt 0 ]; then SESSION="${args[$((i + 1))]:-}"; else SESSION_LATE=1; fi
+      fi
+      i=$((i + 2)); continue
+    fi
+    if inlist "$a" "$BOOL_OPTS"; then
+      case "${args[$((i + 1))]:-}" in true|false) i=$((i + 2)) ;; *) i=$((i + 1)) ;; esac
+      continue
+    fi
+    if [ "$CMD_IDX" -lt 0 ]; then CMD="$a"; CMD_IDX=$i
+    elif [ -z "$SUB" ]; then SUB="$a"; fi
+    i=$((i + 1))
   done
-  if [ "$need_browser" = 1 ] && ! have_browser; then
-    die 127 "браузер не найден: поставь Chrome или \`subteams-browser setup\` (~150 МБ). Осмотр интерфейса не выполнен"
-  fi
+
+  for ((k = 0; k < ${#args[@]}; k++)); do
+    a="${args[$k]}"
+    if inlist "${a%%=*}" "$DENY_OPTS"; then
+      # after `wait`, --state is the selector state (visible/hidden/...), not the auth-state file;
+      # placed before `wait` it is itself parsed as the command, so CMD is not wait there
+      if [ "$a" = --state ] && [ "$CMD" = wait ]; then
+        case "${args[$((k + 1))]:-}" in visible|hidden|attached|detached) continue ;; esac
+      fi
+      case "${a%%=*}" in
+        --executable-path) die 2 "--executable-path is not allowed: the user picks the browser via AGENT_BROWSER_EXECUTABLE_PATH (not Playwright's Chromium — it needs --no-sandbox)" ;;
+        --headed) die 2 "--headed is not allowed: the browser runs headless" ;;
+      esac
+      die 2 "option ${a%%=*} is not allowed: it reaches the real browser profile, files, credentials or the browser binary"
+    fi
+  done
+
+  case "$CMD" in
+    install) die 2 "install is not allowed through the wrapper: use \`subteams-browser setup\`" ;;
+    upgrade) die 2 "upgrade is not allowed: agent-browser $AB_VERSION is pinned by the plugin and changes only with its release" ;;
+    -*) die 2 "option $CMD is not allowed before the command" ;;
+    '') die 2 "no command given: subteams-browser --session <name> <command> ..." ;;
+  esac
+  [ "$SESSION_LATE" = 0 ] || die 2 "--session must come before the command: subteams-browser --session <name> <command> ..."
+  inlist "$CMD" "$COMMANDS" \
+    || die 2 "command '$CMD' is not allowed. Allowed:${COMMANDS% } (set viewport|device|media, skills get|list, session list, record start|stop), --version, --help, setup"
+  bad_sub() { die 2 "'$CMD ${SUB:-}' is not allowed; allowed: $CMD $1"; }
+  case "$CMD" in
+    set) case "$SUB" in viewport|device|media) ;; *) bad_sub "viewport|device|media" ;; esac ;;
+    skills) case "$SUB" in ''|list|get) ;; *) bad_sub "get|list" ;; esac ;;
+    session) case "$SUB" in list) ;; *) bad_sub "list" ;; esac ;;
+    record) case "$SUB" in start|stop) ;; *) bad_sub "start|stop" ;; esac ;;
+  esac
+  for ((k = CMD_IDX + 1; k < ${#args[@]}; k++)); do
+    case "$CMD:${args[$k]}" in
+      close:--all) die 2 "close --all is not allowed: close only your own session (subteams-browser --session <name> close)" ;;
+      wait:--download) die 2 "wait --download is not allowed: it writes a page-supplied file to an arbitrary path" ;;
+    esac
+  done
+
+  # skills and session list touch no browser session: no --session and no browser needed
+  case "$CMD" in skills|session) ;; *)
+    case "$SESSION" in
+      ''|-*) die 2 "own session required: subteams-browser --session <name> <command> ... (the shared default session is not used)" ;;
+    esac
+    have_browser || die 127 "no browser found: install Chrome or run \`subteams-browser setup\` (~150 MB). Live UI review not performed" ;;
+  esac
 fi
 
 resolve_agent_browser
 [ -n "$AB_SKILLS" ] && [ -z "${AGENT_BROWSER_SKILLS_DIR:-}" ] && export AGENT_BROWSER_SKILLS_DIR="$AB_SKILLS"
 
 if [ "$CMD" != screenshot ]; then
+  umask "$CALLER_UMASK"
   exec "$AB_BIN" "$@"
 fi
 
-# screenshot: запуск дочерним процессом, чтобы после успеха записать квитанцию
+# screenshot: run as a child so a receipt can be written after success
 stamp=$(mktemp "${TMPDIR:-/tmp}/subteams-shot-XXXXXX") || stamp=""
-"$AB_BIN" "$@"
+(umask "$CALLER_UMASK"; exec "$AB_BIN" "$@")
 rc=$?
 if [ "$rc" -eq 0 ] && [ -n "$stamp" ]; then
-  # путь — последний позиционный аргумент после screenshot, который стал свежим непустым файлом
+  # path = the last positional argument after screenshot that became a fresh non-empty file
   shot=""
   j=$((CMD_IDX + 1))
   while [ "$j" -lt "${#args[@]}" ]; do
@@ -359,8 +472,8 @@ if [ "$rc" -eq 0 ] && [ -n "$stamp" ]; then
   if [ -n "$shot" ] && shot_abs=$(abs_path "$shot"); then
     write_shot_receipt "$shot_abs" "$SESSION"
   elif git rev-parse --git-dir >/dev/null 2>&1; then
-    # относительный путь agent-browser считает от каталога, где сессия была открыта, а не от текущего
-    say "скриншот снят, но квитанция shot не записана: передай абсолютный путь к файлу"
+    # agent-browser resolves a relative path from where the session was opened, not from the cwd
+    say "screenshot taken, but no shot receipt written: pass an absolute path to the file"
   fi
 fi
 [ -n "$stamp" ] && rm -f -- "$stamp"

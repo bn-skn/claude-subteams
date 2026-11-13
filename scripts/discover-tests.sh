@@ -122,6 +122,7 @@ if type != "object" then error("not a JSON object") else . end
 | .key as $k | .value as $v
 | if ($k | test("^[A-Za-z0-9_][A-Za-z0-9_:.@/+-]*$") | not) then empty else
   ($v | test("RUN_[A-Za-z0-9_]*=")) as $runenv
+  | ($v | test("build")) as $build
   | ($k | test("live|canary"; "i")) as $live
   | (($k | test("watch|(^|:)ui($|:)|debug|headed|update"; "i"))
      or ($v | test("--watch|--ui( |$)|--headed|--debug|--update|(^| )-u( |$)"))) as $inter
@@ -130,20 +131,22 @@ if type != "object" then error("not a JSON object") else . end
      cwd: $dir,
      kind: (if (($k + " " + $v) | test("e2e|playwright|cypress"; "i")) then "e2e"
             elif ($k | test("integration|(^|:)int($|:)"; "i")) then "integration" else "unit" end),
-     run: (if $runenv or $live or $inter then "opt-in" else "auto" end),
+     run: (if $runenv or $live or $inter or $build then "opt-in" else "auto" end),
      paths: (if $dir == "." then null else ["\($dir)/**"] end),
      source: "heuristic",
      why: (if $runenv then "command sets RUN_*" elif $live then "name says live/canary"
-           elif $inter then "watch/interactive/update mode" else null end),
+           elif $inter then "watch/interactive/update mode" elif $build then "command runs a build" else null end),
+     _default: ($k == "test"),
      _pw: ($v | test("playwright")), _cy: ($v | test("cypress"))}
   end'
 
 SUITES_JL="$WORK/suites.jsonl"
 
-add_suite() { # name cmd cwd kind run why [cfg]
+add_suite() { # name cmd cwd kind run why [cfg] [default 0/1]
   jq -nc --arg name "$1" --arg cmd "$2" --arg cwd "$3" --arg kind "$4" --arg run "$5" --arg why "$6" --arg cfg "${7:-}" \
+    --argjson def "$([ "${8:-0}" = 1 ] && echo true || echo false)" \
     '{name: $name, cmd: $cmd, cwd: $cwd, kind: $kind, run: $run, paths: null, source: "heuristic",
-      why: (if $why == "" then null else $why end)} + (if $cfg == "" then {} else {_cfg: $cfg} end)' >> "$SUITES_JL"
+      why: (if $why == "" then null else $why end), _default: $def} + (if $cfg == "" then {} else {_cfg: $cfg} end)' >> "$SUITES_JL"
 }
 
 workspace_globs() { # root package.json workspaces + pnpm-workspace.yaml packages
@@ -213,12 +216,12 @@ discover_heuristic() {
   if [ "$pyc" -eq 0 ] && { [ -f "$ROOT/pyproject.toml" ] || [ -f "$ROOT/setup.py" ] || [ -f "$ROOT/setup.cfg" ]; } \
      && { [ -d "$ROOT/tests" ] || [ -f "$ROOT/conftest.py" ]; }; then pyc=1; fi
   if [ "$pyc" -eq 1 ]; then
-    if [ -f "$ROOT/uv.lock" ]; then add_suite pytest "uv run pytest" . unit auto ""
-    elif [ -f "$ROOT/poetry.lock" ]; then add_suite pytest "poetry run pytest" . unit auto ""
-    else add_suite pytest "python3 -m pytest" . unit auto ""; fi
+    if [ -f "$ROOT/uv.lock" ]; then add_suite pytest "uv run pytest" . unit auto "" "" 1
+    elif [ -f "$ROOT/poetry.lock" ]; then add_suite pytest "poetry run pytest" . unit auto "" "" 1
+    else add_suite pytest "python3 -m pytest" . unit auto "" "" 1; fi
   fi
-  [ -f "$ROOT/go.mod" ] && add_suite go-test "go test ./..." . unit auto ""
-  [ -f "$ROOT/Cargo.toml" ] && add_suite cargo-test "cargo test" . unit auto ""
+  [ -f "$ROOT/go.mod" ] && add_suite go-test "go test ./..." . unit auto "" "" 1
+  [ -f "$ROOT/Cargo.toml" ] && add_suite cargo-test "cargo test" . unit auto "" "" 1
   for mk in GNUmakefile makefile Makefile; do
     [ -f "$ROOT/$mk" ] || continue
     tc_safe_file "$ROOT" "$ROOT/$mk" || { say "skipped: $TC_ERR"; break; }
@@ -255,9 +258,22 @@ discover_heuristic() {
   return 0
 }
 
+# Without a contract only the DEFAULT test command of each ecosystem (package.json
+# `test`, pytest, go test, cargo test) runs automatically — in `run --all-auto`,
+# `recommend.run` and the gate's no-contract warnings. Every other discovered suite
+# (e2e, test:*, Playwright/Cypress configs, Makefile targets) becomes opt-in with
+# suggest: true (listed under recommend.suggest, never auto): an unknown suite can
+# have side effects (a `test:e2e` that runs a build overwrites a live dist/). A
+# command that runs a build is never auto, default or not. --init-contract keeps
+# the fuller draft (a contract is reviewed and committed by the user).
 heuristic_config() { # -> CONFIG from HEUR_SUITES + default globs
   CONFIG=$(jq -nc --argjson s "$HEUR_SUITES" --argjson ui "$TC_DEFAULT_UI_GLOBS" --argjson te "$TC_DEFAULT_TEST_GLOBS" \
-    '{suites: $s, ui_globs: $ui, ui_exclude: [], test_globs: $te, code_globs: null, small_change: null}')
+    '{suites: [$s[] | if (._default != true) and .run == "auto"
+                       then .run = "opt-in" | .suggest = true
+                            | .why = "not the default test command of its ecosystem — suggested, not run automatically without a contract"
+                       elif .why == "command runs a build" then .suggest = true
+                       else . end],
+      ui_globs: $ui, ui_exclude: [], test_globs: $te, code_globs: null, small_change: null}')
 }
 
 run_discovery() { # sets CONFIG from heuristics or dies
@@ -323,13 +339,15 @@ mode_list() {
     | [range(0; $s | length) as $i | $s[$i] as $x
         | (if $hasfiles then ($groups.suites[$x.name] | length) > 0 else true end) as $hit
         | if $x.run == "live" then {skip: {name: $x.name, reason: "live: never run automatically"}}
+          elif $x.suggest == true then (if $hit then {suggest: {name: $x.name, cmd: $x.cmd, reason: $x.why}}
+                                     else {skip: {name: $x.name, reason: "suggested suite, not affected by these changes"}} end)
           elif $x.run == "opt-in" then {skip: {name: $x.name, reason: ("opt-in: run only on explicit request" + (if $x.why then " (\($x.why))" else "" end))}}
           elif $hit then {run: $x.name}
           else {skip: {name: $x.name, reason: (if $x.paths == null then "no non-docs file changed" else "no changed file in its paths" end)}} end] as $rec
     | {root: $root, git: $git, contract: $contract, contract_file: (if $cfile == "" then null else $cfile end),
        suites: [$s[] | {name, cmd, cwd, kind, run, paths, source}],
        groups: $groups,
-       recommend: {run: [$rec[] | .run // empty], skip: [$rec[] | .skip // empty]}}' < "$WORK/rows"
+       recommend: {run: [$rec[] | .run // empty], suggest: [$rec[] | .suggest // empty], skip: [$rec[] | .skip // empty]}}' < "$WORK/rows"
 }
 
 mode_init() {
@@ -391,7 +409,15 @@ run_one() { # <suite index> -> the suite's exit code
   tree0=$(tc_snapshot_tree "$ROOT") || { say "$name: cannot snapshot the working tree"; return 1; }
   t0=$(date +%s)
   say "run $name: $cmd   (cwd: $cwd)"
-  ( cd "$dir" && exec bash -c "$cmd" ) </dev/null
+  # B17: environment overrides that silently change what a suite runs are removed
+  # (npm_config_* in any case — npm reads them case-insensitively — NODE_OPTIONS,
+  # PYTEST_ADDOPTS); the suite gets the project's own command, as the receipt says.
+  ( cd "$dir" || exit 1
+    while IFS= read -r v; do
+      case "$v" in [Nn][Pp][Mm]_[Cc][Oo][Nn][Ff][Ii][Gg]_*) unset "$v" ;; esac
+    done < <(compgen -e)
+    unset NODE_OPTIONS PYTEST_ADDOPTS
+    exec bash -c "$cmd" ) </dev/null
   rc=$?
   t1=$(date +%s)
   tree1=$(tc_snapshot_tree "$ROOT") || tree1=""
@@ -432,7 +458,7 @@ mode_run() {
 }
 
 mode_status() {
-  local tree base btree target=index
+  local tree base btree target=index big
   [ "$IS_GIT" -eq 1 ] || die 1 "status needs a git repository"
   resolve_config
   tree=$(tc_index_tree "$ROOT") || die 1 "cannot read the index (unresolved merge?)"
@@ -443,13 +469,17 @@ mode_status() {
     # orchestrator sees what is missing before staging. Labelled; exit code is for
     # that snapshot (the gate itself always checks the staged tree).
     tree=$(tc_snapshot_tree "$ROOT") || die 1 "cannot snapshot the working tree"
-    target=worktree
+    target=worktree; TC_NO_UNSTAGED=1
     say "nothing staged — evaluating the WORKING TREE (what 'git add -A' would commit) instead of the index"
   fi
   tc_requirements "$ROOT" "$tree" "$base" "$CONFIG" "$CSHA" || die 1 "cannot evaluate: $TC_ERR"
-  printf '%s' "$TC_REQ_JSON" | jq --arg root "$ROOT" --arg contract "$CSTATE" --arg target "$target" \
-    '{root: $root, contract: $contract, enforced: ($contract == "v1"), target: $target} + .'
-  [ -n "$TC_REQ_WARN" ] && say "WARNING: $TC_REQ_WARN"
+  big=$(tc_large_untracked "$ROOT")
+  printf '%s' "$TC_REQ_JSON" | jq --arg root "$ROOT" --arg contract "$CSTATE" --arg target "$target" --arg big "$big" \
+    '{root: $root, contract: $contract, enforced: ($contract == "v1"), target: $target} + .
+     + {large_untracked: ($big | split("\n") | map(select(length > 0)))}'
+  printf '%s\n' "$TC_REQ_WARN" | while IFS= read -r f; do [ -n "$f" ] && say "WARNING: $f"; done
+  big=$(printf '%s\n' "$big" | paste -sd, - | sed 's/,/, /g')
+  [ -n "$big" ] && say "WARNING: large untracked files make every content snapshot slow: $big — add them to .gitignore or move them out"
   [ -n "$TC_REQ_ANCHORS" ] && say "note: small change without an agent check — the commit gate will create a drift anchor ($(printf '%s' "$TC_REQ_ANCHORS" | awk '{print $1}' | paste -sd, -)) on commit; further small commits accumulate from it"
   if [ "$TC_REQ_OK" -eq 1 ]; then say "status ($target): everything the gate checks is in place (contract: $CSTATE)"
   else

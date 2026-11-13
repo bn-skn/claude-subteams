@@ -54,7 +54,7 @@
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-rails SubagentStart",
           "async": false,
-          "timeout": 5
+          "timeout": 20
         }]
       }
     ],
@@ -65,7 +65,7 @@
           "type": "command",
           "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-rails SubagentStop",
           "async": false,
-          "timeout": 5
+          "timeout": 20
         }]
       }
     ],

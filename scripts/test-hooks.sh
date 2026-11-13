@@ -39,6 +39,10 @@ bash_json() { jq -nc --arg sid "$1" --arg c "$2" '{session_id:$sid,tool_name:"Ba
 bash_json_file() { jq -nc --arg sid "$1" --rawfile c "$2" '{session_id:$sid,tool_name:"Bash",tool_input:{command:$c}}'; }  # for >128 KiB commands (no argv)
 # gate <repo> <sid> <command> -> RC
 gate() { run_hook "$1" pre-commit-gate "$(bash_json "$2" "$3")"; }
+# Sections: TH_ONLY=<regex> runs only the sections whose name matches (e.g.
+# TH_ONLY='^fix' for the review-fix sections; used by mutation runs). Default: all.
+sec() { [ -z "${TH_ONLY:-}" ] || [[ $1 =~ $TH_ONLY ]]; }
+HD_MSG=$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nfix: handle "foo bar" case\nEOF\n)"')
 
 mkrepo() { # <name> -> path; base commit with a.ts + doc.md
   local r="$TMP/$1"
@@ -48,6 +52,7 @@ mkrepo() { # <name> -> path; base commit with a.ts + doc.md
   echo "$r"
 }
 
+if sec legacy; then
 # R_DIRTY: tracked a.ts modified, NOTHING staged (+ untracked new.ts)
 R_DIRTY=$(mkrepo dirty); echo 'x' >> "$R_DIRTY/a.ts"; echo 'y' > "$R_DIRTY/new.ts"
 # R_STAGED: a.ts staged
@@ -84,7 +89,6 @@ gate "$R_MD" "$SID" 'git add -A && git commit -m all'; check "block: add -A drag
 gate "$R_MD" "$SID" 'git commit -am all';             check "block: -am drags the dirty .ts in" 2 "$RC"
 
 echo "--- gate: hardening (review round 1) — parse mistakes must err toward BLOCK, never toward open"
-HD_MSG=$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nfix: handle "foo bar" case\nEOF\n)"')
 gate "$R_STAGED" "$SID" "$HD_MSG";  check "block: C1 heredoc message with \"a b\" inside" 2 "$RC"
 HD_APOS=$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nDon'"'"'t break it; really\nEOF\n)"')
 gate "$R_STAGED" "$SID" "$HD_APOS"; check "block: C1 heredoc message with apostrophe and ;" 2 "$RC"
@@ -217,6 +221,8 @@ CLAUDE_SUBTEAMS_AUTONOMY=1 run_hook "$R_STAGED" convention-preflight "$(jq -nc -
 check "preflight deny rc" 2 "$RC"
 check "preflight reason in stderr" 1 "$([ -n "$ERR" ] && echo 1 || echo 0)"
 
+fi   # sec legacy
+
 # ============================================================== 1.50 test gate
 LIB="$DIR/scripts/lib-testclass.sh"
 STS="$DIR/bin/subteams-tests"
@@ -264,6 +270,7 @@ new tests: 2}"
 full() { sts "$1" run unit; sts "$1" run e2e; }        # final suite runs on the current content
 stage() { git -C "$1" add -A; }
 
+if sec gate150; then
 echo "--- test gate: no contract -> allow + ONE JSON with systemMessage + additionalContext"
 R=$(mkrepo tg-nocontract); echo '<b>x</b>' > "$R/page.html"; echo 'y' >> "$R/a.ts"; git -C "$R" add -A
 tg "$R" 'git commit -m x'
@@ -290,20 +297,44 @@ te_check "$RC1"; full "$RC1"
 tg "$RC1" 'git commit -m x'; check "all checks on this content: allow (rc 0)" 0 "$RC"
 sts "$RC1" status; check "status agrees with the gate (rc 0, ok)" "0:true" "$?:$(jq -r .ok "$TMP/sout")"
 
-echo "--- test gate: forms that decide content at commit time (contract) -> deny"
+echo "--- test gate: forms that decide content at commit time (contract) — B13/B14: computed, not refused"
 tg "$RC1" 'git commit -am x'; check "commit -am with NO unstaged changes (same content as the index): allow" 0 "$RC"
-tg "$RC1" "$HD_MSG"; check "heredoc message with quotes (garbage pathspecs in the parse): allow" 0 "$RC"
+tg "$RC1" "$HD_MSG"; check "heredoc message with quotes (two readings, same tree): allow" 0 "$RC"
 tg "$RC1" "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nfix: "x" -a and -i src/lib/x.ts\n\nCo-Authored-By: X <x@y>\nEOF\n)"')"
 check "heredoc message mentioning -a / -i and a real path: allow" 0 "$RC"
-tg "$RC1" 'git commit -m "unterminated -a'; check "unreliable parse, raw '-a', clean worktree: allow" 0 "$RC"
-echo 'unstaged' >> "$RC1/tests/t.test.ts"
+tg "$RC1" 'git commit -m "unterminated -a'; check "B13 unreliable parse under a contract: deny, names the heredoc form" "2:1" "$RC:$(has 'cannot be parsed reliably' "$ERR")"
+echo 'unchecked' >> "$RC1/src/lib/x.ts"           # an UNSTAGED change inside the suites' paths
 for c in 'git commit -am x' 'git commit -a -m x' 'git add -A && git commit -m x' 'git add src && git commit -m x' \
-         'git commit src/lib/x.ts -m x' 'git commit -i src/lib/x.ts -m x' 'git rm -q --cached tests/t.test.ts; git commit -m x' \
-         'git stash && git commit -m x' 'git commit -m "unterminated -a' 'git add -A && git commit -m "unterminated'; do
-  tg "$RC1" "$c"; check "deny: $c" "2:1" "$RC:$(has 'Stage separately' "$ERR")"
+         'git commit src/lib/x.ts -m x' 'git commit -o src/lib/x.ts -m x' 'git commit -i src/lib/x.ts -m x' \
+         'git commit -F - -- src/lib/x.ts <<EOF
+msg
+EOF'; do
+  tg "$RC1" "$c"; check "B14 computed tree has the unchecked change -> deny names the suite: $c" "2:1" "$RC:$(has 'suite unit' "$ERR")"
+done
+tg "$RC1" 'git commit -m x'; check "B14 plain commit (the index = the checked content), unstaged change elsewhere: allow" 0 "$RC"
+for c in 'git stash && git commit -m x' 'npm run lint:fix && git commit -a -m x' 'seq 1 200 > src/lib/a.js && git commit -am x' \
+         'echo x>src/lib/a.js; git commit -m x' 'git checkout -- src && git commit -m x' 'touch src/lib/n.ts && git add -A && git commit -m x'; do
+  tg "$RC1" "$c"; check "B13 state-changing command before the commit -> deny 'separately': $c" "2:1" "$RC:$(has 'separately first' "$ERR")"
+done
+tg "$RC1" 'git log --oneline > src/lib/log.txt && git commit -m x'; check "B13 read-only git redirected INTO the repo -> deny" "2:1" "$RC:$(has 'inside the repository' "$ERR")"
+tg "$RC1" "git log --oneline > $TMP/log.txt && git commit -m x"; check "B13 redirect outside the repo -> allow" 0 "$RC"
+tg "$RC1" 'git commit -m x > src/lib/x.ts'; check "B13 the commit's own output redirected into a repo file -> deny" "2:1" "$RC:$(has 'truncated' "$ERR")"
+for c in 'git commit -p -m x' 'git commit --patch -m x' 'git commit --interactive' 'git commit --patc -m x' 'git add -p && git commit -m x'; do
+  tg "$RC1" "$c"; check "B13 interactive staging -> deny: $c" 2 "$RC"
 done
 tg "$RC1" 'git status && git diff --cached --stat && git commit -m x'; check "read-only git before commit: allow" 0 "$RC"
+tg "$RC1" "$(printf 'R=x; cd . && echo "msg" && printf "%%s" y && coord.sh commit-lock -- git commit -m x')"; check "B13 allowed prefix: assignment, cd, echo, printf, coord lock" 0 "$RC"
+tg "$RC1" "$(printf 'cat <<'"'"'EOF'"'"' | git commit -F -\nfix: "quoted" and; semicolons\nEOF')"; check "B13 cat heredoc piped into commit -F -: allow" 0 "$RC"
 tg "$RC1" 'git commit -m "msg with -a and -i in it"'; check "-a/-i inside the message: allow" 0 "$RC"
+git -C "$RC1" checkout -q -- src/lib/x.ts
+echo 'unstaged' >> "$RC1/tests/t.test.ts"         # a change no suite / group covers
+tg "$RC1" 'git commit -am x'; check "B14 -a picks up only a change outside every suite/group: allow" 0 "$RC"
+tg "$RC1" 'git rm -q --cached tests/t.test.ts; git commit -m x'; check "B14 git rm --cached replayed on a temp index (test file): allow" 0 "$RC"
+check "B14 replay never touches the real index or the file" "1:1" "$(git -C "$RC1" ls-files --error-unmatch tests/t.test.ts >/dev/null 2>&1 && echo 1):$([ -f "$RC1/tests/t.test.ts" ] && echo 1)"
+tg "$RC1" 'git rm -q tests/t.test.ts && git commit -m x'; check "B14 git rm (no --cached) replayed: worktree file still there" "1" "$([ -f "$RC1/tests/t.test.ts" ] && echo 1)"
+tg "$RC1" 'git commit -m x -- nosuchpath'; check "B14 pathspec that matches nothing: deny (git would refuse)" "2:1" "$RC:$(has 'git would refuse' "$ERR")"
+tg "$RC1" "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nfix: "x -a -m" y\nEOF\n)"')"
+check "B14 split heredoc whose garbage reads as -a: the two readings differ -> deny '-F -'" "2:1" "$RC:$(has 'two readings' "$ERR")"
 git -C "$RC1" checkout -q -- tests/t.test.ts
 R=$(mkrepo tg-nc-forms); echo 'y' >> "$R/a.ts"
 tg "$R" 'git commit -am x'; check "twin: commit -am without contract -> allow" 0 "$RC"
@@ -356,12 +387,18 @@ tg "$R2" 'git commit -m x'; check "another repository with identical content: re
 echo "--- subagent-rails: ui/te receipts"
 R=$(mkc tg-rails); addl "$R/src/ui/a.html" 20 u; stage "$R"
 N0=$(nrec "$R" ui)
-ui_check "$R" "" ; check "ui-tester with an empty result: no receipt" "$N0" "$(nrec "$R" ui)"
+ui_check "$R" "" ; check "B6 ui-tester with an empty result: a rejected receipt with the reason" "$((N0+1)):rejected:1" "$(nrec "$R" ui):$(lastrec "$R" ui | jq -r .status):$(lastrec "$R" ui | jq -r .reason | grep -c 'empty')"
+full "$R"; tg "$R" 'git commit -m x'
+check "B6 deny says ui-tester ran without a Status line (not a bare 'run ui-tester')" "2:1" "$RC:$(has 'ui-tester ran but its final answer had no first-line' "$ERR")"
+sts "$R" status; check "B6 status says the same" 1 "$(jq -r '.missing[]' "$TMP/sout" | grep -c 'final answer had no first-line')"
+N0=$(nrec "$R" ui)
 AGN=$((AGN+1)); ag_start "$R" claude-subteams:ui-tester "ui$AGN"
 run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "ui$AGN" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:ui-tester"}')"
-check "ui-tester aborted (no message, no transcript): no receipt" "$N0" "$(nrec "$R" ui)"
+check "ui-tester aborted (no message, no transcript): rejected receipt" "$((N0+1)):rejected" "$(nrec "$R" ui):$(lastrec "$R" ui | jq -r .status)"
 ui_check "$R" "Some preamble
-Status: pass"; check "Status not on the first non-empty line: no receipt" "$N0" "$(nrec "$R" ui)"
+Status: pass"; check "Status not on the first non-empty line: rejected, reason quotes the first line" "rejected:1" "$(lastrec "$R" ui | jq -r .status):$(lastrec "$R" ui | jq -r .reason | grep -c 'Some preamble')"
+ui_check "$R" "Status: pass | degraded | issues-found | blocked"; check "B6 the copied template line is not a verdict: rejected" rejected "$(lastrec "$R" ui | jq -r .status)"
+N0=$(nrec "$R" ui)
 AGN=$((AGN+1)); ag_start "$R" not-ui-tester "x$AGN"; ag_stop "$R" not-ui-tester "x$AGN" "Status: pass"
 ag_start "$R" ui-tester-lite "y$AGN"; ag_stop "$R" ui-tester-lite "y$AGN" "Status: pass"
 check "not-ui-tester / ui-tester-lite: no receipt (canonical match only)" "$N0" "$(nrec "$R" ui)"
@@ -553,10 +590,354 @@ check "no jq: one JSON object with a visible systemMessage" "1:1" "$(printf '%s'
 TIMEFORMAT=%R; R=$(mkrepo ss-fast); { time run_hook "$R" session-start '{}'; } 2>"$TMP/time"; T=$(tail -n 1 "$TMP/time")
 check "session-start < 1 s (took ${T}s)" 1 "$(awk -v t="$T" 'BEGIN{print (t<1)?1:0}')"
 
+fi   # sec gate150
+
+# ====================================================== review fixes (1.50, B1-B19)
+# Each section is a regression test for one finding of the full review; the
+# mutation table in the fix report names the change that turns each one red.
+
+if sec fix01-untracked; then
+echo "--- fix B1: untracked files at test time do not invalidate receipts; unstaged files are named"
+R=$(mkc fx1); addl "$R/src/lib/x.ts" 20 c; stage "$R"
+echo 'scratch' > "$R/src/lib/scratch.ts"; echo 'tmp' > "$R/notes.swp"          # untracked, not committed
+te_check "$R"; full "$R"
+tg "$R" 'git commit -m x'; check "KEY B1 untracked scratch file in the suite paths during the run: allow" 0 "$RC"
+sts "$R" status; check "B1 status agrees" true "$(jq -r .ok "$TMP/sout")"
+R=$(mkc fx1b); addl "$R/src/lib/x.ts" 3 a; stage "$R"; addl "$R/src/lib/x.ts" 1 unstaged
+te_check "$R"; full "$R"; tg "$R" 'git commit -m x'
+check "KEY B1 unstaged hunk: deny names the file and says re-running alone will not help" "2:1:1:1" \
+  "$RC:$(has 'src/lib/x.ts has unstaged changes' "$ERR"):$(has 're-running alone will not help' "$ERR"):$(has 'git stash push --keep-index --include-untracked' "$ERR")"
+sts "$R" status; check "B1 status names it too" 1 "$(jq -r '.missing[]' "$TMP/sout" | grep -c 'src/lib/x.ts has unstaged changes')"
+fi
+
+if sec fix02-mindrift; then
+echo "--- fix B2: agent receipts by minimal drift across worktrees; anchors bound to the branch"
+R=$(mkc fx2); git -C "$R" worktree add -q -b other "$TMP/fx2-w" 2>/dev/null; W="$TMP/fx2-w"
+addl "$R/src/lib/x.ts" 20 mine; stage "$R"; te_check "$R"
+sleep 1; addl "$W/src/lib/x.ts" 30 theirs; stage "$W"; te_check "$W"        # newer receipt, other content
+full "$R"; tg "$R" 'git commit -m x'
+check "KEY B2 the newest te receipt is from another worktree: the one with minimal drift is used -> allow" 0 "$RC"
+sleep 1; te_check "$W" "Status: issues-found
+broken in their branch"; full "$R"; tg "$R" 'git commit -m x'
+check "B2 a newer issues-found on FARTHER content does not shadow the closer pass" 0 "$RC"
+sleep 1; te_check "$R" "Status: issues-found
+found a bug here"; full "$R"; tg "$R" 'git commit -m x'
+check "B2 issues-found on the same content does shadow it -> deny" "2:1" "$RC:$(has 'issues-found' "$ERR")"
+# anchors: an anchor written on branch b1 is ignored on b2 (its commit is not an ancestor)
+R=$(mkc fx2a); git -C "$R" checkout -q -b b1
+addl "$R/src/lib/x.ts" 20 c; git -C "$R" commit -q -am b1work                 # raw commit: no agent receipt anywhere
+addl "$R/src/lib/x.ts" 5 s1; stage "$R"; full "$R"; tg "$R" 'git commit -m s1'
+check "B2 small commit on b1 writes an anchor bound to its base commit" "0:$(git -C "$R" rev-parse HEAD)" "$RC:$(lastrec "$R" anchor | jq -r .commit)"
+git -C "$R" commit -q -m s1; git -C "$R" checkout -q main
+addl "$R/src/lib/y.ts" 6 m; stage "$R"; full "$R"; tg "$R" 'git commit -m m1'
+check "KEY B2 on main the b1 anchor (not an ancestor) is ignored: base = HEAD, small change allowed" 0 "$RC"
+R=$(mkc fx2c); git -C "$R" checkout -q -b feat; git -C "$R" commit -q --allow-empty -m feat
+addl "$R/src/lib/x.ts" 40 big; stage "$R"; te_check "$R"; git -C "$R" commit -q -m featwork; git -C "$R" checkout -q main
+addl "$R/src/lib/y.ts" 3 small; stage "$R"; full "$R"; tg "$R" 'git commit -m small'
+check "KEY B2 a valid te receipt from an unrelated branch (big drift) does not block a small change on main" 0 "$RC"
+check "B2 receipts carry the HEAD they were taken on" "$(git -C "$R" rev-parse feat~1)" "$(lastrec "$R" te | jq -r .head)"
+fi
+
+if sec fix03-crossrepo; then
+echo "--- fix B3: session in repo A, agent works in repo B — the receipt lands in B's store"
+A=$(mkrepo fx3-a); B=$(mkc fx3-b); addl "$B/src/lib/x.ts" 20 c; stage "$B"
+C=$(mkc fx3-c); addl "$C/src/lib/x.ts" 20 c; stage "$C"
+TP3="$TMP/transcript-fx3.jsonl"
+jq -nc --arg c "cd $B && subteams-tests run unit" '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",name:"Bash",input:{command:$c}}]}}' > "$TP3"
+ag_stop3() { run_hook "$A" "subagent-rails SubagentStop" "$(jq -nc --arg a "$1" --arg c "$A" --arg p "$TP3" --arg m "$2" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",cwd:$c,agent_transcript_path:$p,last_assistant_message:$m}')"; }
+AGN=$((AGN+1)); ag_start "$A" claude-subteams:test-engineer "te$AGN"; sts "$B" run unit
+sts "$C" run unit                                   # another session's run in an unrelated repo, same interval
+ag_stop3 "te$AGN" "Status: pass"
+check "KEY B3 te receipt written into B's store (with B's snapshot)" "1:$(. "$LIB"; tc_snapshot_tree "$B")" "$(nrec "$B" te):$(lastrec "$B" te | jq -r .tree)"
+check "B3 nothing written into A's store (no evidence there)" 0 "$(nrec "$A" te)"
+check "KEY B3 nothing written into C's store (its run is not in the agent's transcript)" 0 "$(nrec "$C" te)"
+full "$B"; tg "$A" "git -C $B commit -m x"; check "B3 commit in B (from A's cwd) passes" 0 "$RC"
+check "B3 recent index has suite lines for B" 1 "$(awk -F'\t' -v r="$B" '$3 == r && $4 == "suite"' "$XDG_CACHE_HOME/claude-subteams/receipts/_recent.log" | grep -c . | awk '{print ($1 > 0)}')"
+LOG="$XDG_CACHE_HOME/claude-subteams/receipts/_recent.log"; cp "$LOG" "$TMP/log.bak"
+{ printf '%s\tdeadbeef\t/nonexistent\tsuite\n' 1000; cat "$TMP/log.bak"; } > "$LOG"
+shot "$B"; check "B3 an expired first line triggers the rewrite (lines older than 14 days dropped)" 0 "$(grep -c '^1000	' "$LOG")"
+check "B3 the rewrite keeps current lines" 1 "$(awk -F'\t' -v r="$B" '$3 == r' "$LOG" | grep -c . | awk '{print ($1 > 0)}')"
+printf '%s\t%s\t%s\tsuite\n' "$(date +%s)" "$(. "$LIB"; tc_repo_id "$B")" "/nonexistent/evil" >> "$LOG"
+AGN=$((AGN+1)); ag_start "$A" claude-subteams:test-engineer "te$AGN"; ag_stop3 "te$AGN" "Status: pass"
+check "B3 a forged index line with a missing root is ignored (receipt falls back to the cwd store)" 1 "$(nrec "$A" te)"
+fi
+
+if sec fix04-merge; then
+echo "--- fix B4: merge / cherry-pick / revert / rebase in progress -> warning only"
+R=$(mkc fx4); addl "$R/src/lib/x.ts" 20 c; stage "$R"
+git -C "$R" rev-parse HEAD > "$(git -C "$R" rev-parse --absolute-git-dir)/MERGE_HEAD"
+tg "$R" 'git commit -m merge'
+check "KEY B4 merge in progress, nothing checked: allow + visible warning" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'merge in progress')"
+ctr "$R/CLAUDE.md" '{"suites":[],"ui_globs":[],"code_globs":[]}'; stage "$R"
+tg "$R" 'git commit -m merge'; check "B4 merge: the 'contract change alone' rule is not applied" 0 "$RC"
+rm -f "$(git -C "$R" rev-parse --absolute-git-dir)/MERGE_HEAD"
+tg "$R" 'git commit -m x'; check "B4 twin: no merge -> the same commit is denied" 2 "$RC"
+R=$(mkc fx4r); addl "$R/src/lib/x.ts" 20 c; stage "$R"; mkdir -p "$(git -C "$R" rev-parse --absolute-git-dir)/rebase-merge"
+tg "$R" 'git commit -m x'; check "B4 rebase in progress: allow + warning" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'rebase in progress')"
+fi
+
+if sec fix05-none; then
+echo "--- fix B5: 'none' marker -> the test gate is completely silent"
+R=$(mkrepo fx5); printf '<!-- subteams:test-suites none -->\n' > "$R/CLAUDE.md"; git -C "$R" add -A; git -C "$R" commit -q -m none
+echo '<p>x</p>' > "$R/page.html"; echo 'y' >> "$R/a.ts"; git -C "$R" add -A
+tg "$R" 'git commit -m x'; check "KEY B5 none marker: rc 0, no output at all" "0::" "$RC:$OUT:$ERR"
+R=$(mkrepo fx5n); printf '<!-- subteams:test-suites none -->\n' > "$R/CLAUDE.md"; git -C "$R" add -A; git -C "$R" commit -q -m none
+ctr "$R/CLAUDE.md" "$CJSON"; git -C "$R" add -A; tg "$R" 'git commit -m contract'
+check "B5 'none' in HEAD + a staged v1 contract: the new-contract notice is still shown" 1 "$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'test contract')"
+R=$(mkrepo fx5t); echo '<p>x</p>' > "$R/page.html"; echo 'y' >> "$R/a.ts"; git -C "$R" add -A
+tg "$R" 'git commit -m x'; check "B5 twin without the marker: a warning" 1 "$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'no test contract')"
+fi
+
+if sec fix06-status; then
+echo "--- fix B6: tolerant Status line"
+R=$(mkc fx6); addl "$R/src/lib/x.ts" 20 c; stage "$R"
+for m in '**Status:** pass' '## Status: pass' '> Status: PASS — all green' '- **Status**: pass' 'Статус: pass' '`Status`: pass.'; do
+  te_check "$R" "$m
+details"; check "KEY B6 parses: $m" pass "$(lastrec "$R" te | jq -r .status)"
+done
+for m in 'Status: pass | issues-found | blocked' 'Status: passed' 'Statuses: pass' 'Result: pass'; do
+  te_check "$R" "$m"; check "B6 rejected: $m" rejected "$(lastrec "$R" te | jq -r .status)"
+done
+check "B6 a rejected receipt carries no snapshot (status parsed before snapshotting)" null "$(lastrec "$R" te | jq -r .tree)"
+fi
+
+if sec fix07-budget; then
+echo "--- fix B7: non-target agents are a fast no-op; large untracked files are named"
+R=$(mkc fx7); TIMEFORMAT=%R
+{ time run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc '{session_id:"sx",agent_id:"zz",agent_type:"developer",last_assistant_message:"done"}')"; } 2>"$TMP/time"
+check "B7 SubagentStop for a non-target agent < 0.5 s (took $(tail -n 1 "$TMP/time")s), silent" "1:" "$(awk -v t="$(tail -n 1 "$TMP/time")" 'BEGIN{print (t<0.5)?1:0}'):$OUT"
+dd if=/dev/zero of="$R/huge.bin" bs=1048576 count=11 2>/dev/null
+addl "$R/src/lib/x.ts" 20 c; stage "$R"; git -C "$R" reset -q -- huge.bin
+tg "$R" 'git commit -m x'; check "KEY B7 deny names the >10 MB untracked file" "2:1" "$RC:$(has 'huge.bin (11 MB)' "$ERR")"
+sts "$R" status; check "B7 status names it (JSON + stderr)" "huge.bin (11 MB):1" "$(jq -r '.large_untracked[0]' "$TMP/sout"):$(grep -c 'huge.bin' "$TMP/serr")"
+fi
+
+if sec fix08-resume; then
+echo "--- fix B8: a resumed agent (no new SubagentStart) still gets a receipt"
+R=$(mkc fx8); addl "$R/src/lib/x.ts" 20 c; stage "$R"
+AGN=$((AGN+1)); ag_start "$R" claude-subteams:test-engineer "te$AGN"; sts "$R" run unit
+ag_stop "$R" claude-subteams:test-engineer "te$AGN" "Status: issues-found
+bug"; N1=$(nrec "$R" te)
+sleep 1; sts "$R" run unit; ag_stop "$R" claude-subteams:test-engineer "te$AGN" "Status: pass"
+check "KEY B8 second Stop of the same agent_id (resume) writes a receipt" "$((N1+1)):pass" "$(nrec "$R" te):$(lastrec "$R" te | jq -r .status)"
+check "B8 the start file is kept" 1 "$([ -f "$XDG_CACHE_HOME/claude-subteams/agent-starts/te$AGN" ] && echo 1)"
+fi
+
+if sec fix09-heuristic; then
+echo "--- fix B9: without a contract only the default test command is auto; build is never auto"
+R=$(mkrepo fx9); printf '{"scripts":{"test":"true","test:e2e":"npm run build && touch E2E_RAN","test:int":"touch INT_RAN","build":"touch BUILT"}}' > "$R/package.json"
+git -C "$R" add -A; git -C "$R" commit -q -m p
+sts "$R"; check "KEY B9 recommend: run = [test], suggest = [test:e2e, test:int]" '["test"]:["test:e2e","test:int"]' "$(jq -c '.recommend.run' "$TMP/sout"):$(jq -c '[.recommend.suggest[].name] | sort' "$TMP/sout")"
+sts "$R" config; check "B9 effective config: test:e2e opt-in" opt-in "$(jq -r '.config.suites[] | select(.name=="test:e2e") | .run' "$TMP/sout")"
+sts "$R" run --all-auto; check "B9 run --all-auto runs neither test:e2e (no build) nor test:int" "0:0:0" "$([ -e "$R/E2E_RAN" ] && echo 1 || echo 0):$([ -e "$R/BUILT" ] && echo 1 || echo 0):$([ -e "$R/INT_RAN" ] && echo 1 || echo 0)"
+echo 'y' >> "$R/a.ts"; git -C "$R" add -A; tg "$R" 'git commit -m x'
+check "B9 the no-contract warning names only the default suite" "1:0" "$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'suite test[,.]'):$(printf '%s' "$OUT" | jq -r .hookSpecificOutput.additionalContext | grep -c 'test:e2e')"
+R=$(mkrepo fx9b); printf '{"scripts":{"test":"npm run build && vitest"}}' > "$R/package.json"
+sts "$R"; check "B9 a default test script that runs a build is not auto either" "opt-in:[]" "$(jq -r '.suites[0].run' "$TMP/sout"):$(jq -c '.recommend.run' "$TMP/sout")"
+fi
+
+if sec fix10-uiscript; then
+echo "--- fix B10: logic inside ui_globs needs test-engineer when there are no code_globs"
+R=$(mkc fx10 '{"suites":[{"name":"unit","cmd":"true","paths":["src/**"]}],"ui_globs":["src/ui/**"],"test_globs":["tests/**"]}')
+awk 'BEGIN{for(i=1;i<=30;i++) print "x" i}' > "$R/src/ui/C.tsx"; git -C "$R" add -A; git -C "$R" commit -q -m c
+addl "$R/src/ui/C.tsx" 20 u; stage "$R"; ui_check "$R" "Status: pass" 2 0; sts "$R" run unit
+tg "$R" 'git commit -m x'; check "KEY B10 .tsx in ui_globs: test-engineer required as well" "2:1:0" "$RC:$(has 'test-engineer:' "$ERR"):$(has 'ui-tester:' "$ERR")"
+git -C "$R" reset -q --hard; addl "$R/src/ui/a.html" 20 u; stage "$R"; ui_check "$R" "Status: pass" 2 0; sts "$R" run unit
+tg "$R" 'git commit -m x'; check "B10 twin: markup only -> ui-tester is enough" 0 "$RC"
+fi
+
+if sec fix11-items; then
+echo "--- fix B11: suite names with ':' are not truncated in the warning summary"
+R=$(mkrepo fx11); ctr "$R/CLAUDE.md" '{"suites":[{"name":"test","cmd":"true"},{"name":"test:e2e","cmd":"true","kind":"e2e"}],"ui_globs":[],"code_globs":[]}'
+echo 'y' >> "$R/a.ts"; git -C "$R" add -A; tg "$R" 'git commit -m x'
+check "KEY B11 summary lists 'suite test, suite test:e2e'" 1 "$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'suite test, suite test:e2e')"
+fi
+
+if sec fix12-flaky; then
+echo "--- fix B12: a failure on the same content before the latest pass -> flaky warning"
+R=$(mkc fx12 '{"suites":[{"name":"unit","cmd":"if [ -e '"$TMP"'/flaky-flag ]; then true; else touch '"$TMP"'/flaky-flag; exit 1; fi","paths":["src/**"]}],"ui_globs":["src/ui/**"],"code_globs":[],"test_globs":["tests/**"]}')
+rm -f "$TMP/flaky-flag"; addl "$R/src/lib/x.ts" 2 a; stage "$R"
+sts "$R" run unit; sleep 1; sts "$R" run unit
+tg "$R" 'git commit -m x'; check "KEY B12 allow + 'failed earlier on the same content (flaky?)'" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'unit failed earlier on the same content (flaky?)')"
+sts "$R" status; check "B12 status warns too" "1:true" "$(grep -c 'flaky' "$TMP/serr"):$(jq -r '.suites[] | select(.name=="unit") | .flaky' "$TMP/sout")"
+fi
+
+if sec fix13-prior; then
+echo "--- fix B13: the commit is the only state-changing command (fully checked baseline: the deny is the rule's own)"
+R=$(mkc fx13); addl "$R/src/lib/x.ts" 20 c; stage "$R"; te_check "$R"; full "$R"
+tg "$R" 'git commit -m x'; check "B13 baseline: plain commit of the checked content -> allow" 0 "$RC"
+tg "$R" 'git commit -am x'; check "B13 baseline: -am with nothing unstaged -> allow" 0 "$RC"
+for c in 'npm run lint:fix && git commit -m x' 'git stash && git commit -m x' 'touch src/lib/z.ts; git commit -m x' \
+         'seq 1 2 > src/lib/a.js && git commit -m x' 'git -c diff.external=/bin/true diff && git commit -m x' \
+         'M="$(npm run lint:fix)"; git commit -am x' 'echo "$(sed -i s/a/b/ src/lib/x.ts)" && git commit -am x' \
+         'git commit -am "$(sed -i s/a/b/ src/lib/x.ts; echo msg)"' 'git commit -m "`touch src/lib/q.ts`"' \
+         "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nmsg\nEOF\n)$(touch src/lib/w.ts)"')"; do
+  tg "$R" "$c"; check "KEY B13 deny on a checked baseline: $(printf '%s' "$c" | head -1)" 2 "$RC"
+done
+for d in "'EOF'" EOF; do
+  for c in "$(printf 'git commit -am "$(cat <<%s | sh\nsed -i s/1/X/ src/lib/x.ts\nEOF\n)"' "$d")" \
+           "$(printf 'git commit -am "$(cat <<%s >src/lib/x.ts\nx\nEOF\n)"' "$d")" \
+           "$(printf 'git commit -am "$(cat <<%s\nmsg\nEOF\nsed -i s/1/X/ src/lib/x.ts\n)"' "$d")"; do
+    tg "$R" "$c"; check "KEY B13 heredoc message extended on its operator line / after the terminator -> deny: $(printf '%s' "$c" | head -1)" 2 "$RC"
+  done
+done
+check "B13 none of those ran (hook only parses): x.ts untouched" 0 "$(git -C "$R" diff --name-only | grep -c x.ts)"
+tg "$R" "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\ndocs: $(literal) and `ticks` in a quoted heredoc\nEOF\n)"')"
+check "B13 a quoted-delimiter message heredoc with \$( / backticks in its literal body: allow" 0 "$RC"
+for c in "GIT_INDEX_FILE=/tmp/i git commit -m x" "env GIT_DIR=.git git commit -m x" "export GIT_WORK_TREE=/tmp; git commit -m x" \
+         "git --git-dir=.git commit -m x" "git --work-tree /tmp commit -m x" "git -c core.worktree=/tmp commit -m x"; do
+  tg "$R" "$c"; check "KEY B15 GIT_* override on a checked baseline -> deny: $c" "2:1" "$RC:$(has 'GIT_INDEX_FILE / GIT_DIR' "$ERR")"
+done
+tg "$R" 'git commit -m x src/lib/*.ts'; check "B13 commit pathspec with a glob -> deny (shell vs git expansion)" "2:1" "$RC:$(has 'glob or dynamic' "$ERR")"
+fi
+
+if sec fix14-difftree; then
+echo "--- fix B14: computed commit tree == the tree git really records (differential)"
+. "$DIR/hooks/lib-gitcmd.sh"; . "$DIR/hooks/lib-commitscan.sh"; . "$LIB"
+ctfix() { # <dir> — fresh fixture: base commit, then staged/unstaged/untracked/deleted state
+  local r="$1"; rm -rf "$r"; mkdir -p "$r/sub" && git -C "$r" init -q -b main
+  printf 'a\n' > "$r/a.ts"; printf 'b\n' > "$r/b.ts"; printf 'c\n' > "$r/sub/c.ts"; printf 'd\n' > "$r/doc.md"; printf 'e\n' > "$r/e.ts"
+  git -C "$r" add -A; git -C "$r" commit -q -m base; printf 'a2\n' >> "$r/a.ts"; git -C "$r" commit -q -am second
+  printf 'staged\n' >> "$r/a.ts"; git -C "$r" add a.ts; printf 'unstaged\n' >> "$r/a.ts"     # a.ts: staged + unstaged
+  printf 'unstaged\n' >> "$r/b.ts"                                                         # b.ts: unstaged only
+  printf 'new\n' > "$r/sub/new.ts"                                                         # untracked
+  printf 'n2\n' > "$r/staged-new.ts"; git -C "$r" add staged-new.ts                         # staged new file
+  rm "$r/e.ts"                                                                             # unstaged deletion
+  printf 'c2\n' >> "$r/sub/c.ts"
+}
+ctcmp() { # <label> <command> — computed (gate logic) vs real git on a copy; plus "the real index is untouched"
+  local r="$TMP/ctd" c="$TMP/ctd-real" k ck=-1 rc idx0 idx1 comp real
+  ctfix "$r"; [ -n "${CT_SETUP:-}" ] && (cd "$r" && eval "$CT_SETUP" >/dev/null 2>&1)
+  rm -rf "$c"; cp -R "$r" "$c"
+  idx0=$(cksum < "$r/.git/index")
+  ( cd "$r" && CS_REPO=$(git rev-parse --show-toplevel); cs_scan "$2"
+    for k in "${!CS_KIND[@]}"; do [ "${CS_KIND[k]}" = git ] && [ "${CS_SUB[k]}" = commit ] && ck=$k; done
+    cs_prior_ok "$ck" && cs_commit_tree "$ck"; rc=$?
+    if [ "$rc" -eq 0 ]; then echo "$CS_TREE"; else echo "refused:$rc"; fi ) > "$TMP/ct-comp" 2>/dev/null
+  comp=$(cat "$TMP/ct-comp"); idx1=$(cksum < "$r/.git/index")
+  if (cd "$c" && bash -c "$2") >/dev/null 2>&1; then real=$(git -C "$c" rev-parse 'HEAD^{tree}')
+  else real="refused"; fi
+  case "$comp" in refused:*) comp=refused ;; esac
+  check "KEY B14 $1: computed == real" "$real" "$comp"
+  check "B14 $1: real index untouched" "$idx0" "$idx1"
+}
+ctcmp "plain (index)" 'git commit -q -m x'
+ctcmp "-a" 'git commit -q -am x'
+ctcmp "<path> (staged + unstaged hunks)" 'git commit -q -m x a.ts'
+ctcmp "-o <path>" 'git commit -q -o -m x -- a.ts'
+ctcmp "-i <path>" 'git commit -q -i -m x b.ts'
+ctcmp "<dir> pathspec" 'git commit -q -m x -- sub'
+ctcmp "<path> of an unstaged deletion" 'git commit -q -m x e.ts'
+ctcmp "<path> from a subdirectory" 'cd sub && git commit -q -m x c.ts'
+ctcmp "git add <dir> && commit" 'git add sub && git commit -q -m x'
+ctcmp "git add -A && commit" 'git add -A && git commit -q -m x'
+ctcmp "git rm --cached && commit" 'git rm -q --cached doc.md && git commit -q -m x'
+ctcmp "git rm && commit" 'git rm -q doc.md && git commit -q -m x'
+ctcmp "-F - -- <paths> (heredoc)" "$(printf 'git commit -q -F - -- a.ts b.ts <<'"'"'EOF'"'"'\nmsg "q"; x\nEOF')"
+printf 'b.ts\nsub/c.ts\n' > "$TMP/pf.txt"
+ctcmp "--pathspec-from-file" "git commit -q -m x --pathspec-from-file=$TMP/pf.txt"
+ctcmp "--amend (index)" 'git commit -q --amend -m y'
+ctcmp "--amend -a" 'git commit -q --amend --no-edit -a'
+ctcmp "--amend <path>" 'git commit -q --amend -m y a.ts'
+CT_SETUP='git rm -q --cached doc.md; printf "d2\n" >> doc.md' ctcmp "<path> removed from the index, still in HEAD (--with-tree)" 'git commit -q -m x doc.md'
+ctcmp "-i <untracked path>: both refuse" 'git commit -q -i -m x sub/new.ts'
+ctcmp "<nomatch>: both refuse" 'git commit -q -m x nomatch'
+ctcmp "abbreviated --inc (= --include)" 'git commit -q --inc -m x b.ts'
+ctcmp "ambiguous --al: both refuse" 'git commit -q --al -m x'
+fi
+
+if sec fix15-target; then
+echo "--- fix B15: target repo from VAR=literal; unresolvable -> literal path; different targets; GIT_* env"
+R=$(mkc fx15); addl "$R/src/lib/x.ts" 20 c; stage "$R"; C=$(mkrepo fx15-clean)
+tg "$C" "R=$R; git -C \"\$R\" commit -m x"; check "KEY B15 git -C \"\$R\" with R=literal earlier: the contract repo is checked -> deny" "2:1" "$RC:$(has 'test-engineer:' "$ERR")"
+tg "$C" "D=$R; cd \"\${D}\" && git commit -m x"; check "B15 cd \"\${D}\": resolved -> deny" 2 "$RC"
+tg "$C" 'git -C "$NOPE_UNSET" commit -m x'; check "KEY B15 unresolvable target -> deny 'use a literal path'" "2:1" "$RC:$(has 'Use a literal path' "$ERR")"
+tg "$C" 'cd "$(git rev-parse --show-toplevel)" && git commit -m x'; check "B15 cd \$(…) -> deny 'literal path'" "2:1" "$RC:$(has 'Use a literal path' "$ERR")"
+tg "$C" "git -C $C commit -m a; git -C $R commit -m b"; check "B15 two commits into different repos -> deny 'split'" "2:1" "$RC:$(has 'different repositories' "$ERR")"
+for c in "GIT_INDEX_FILE=/tmp/i git commit -m x" "env GIT_DIR=.git git commit -m x" "export GIT_WORK_TREE=/tmp; git commit -m x" \
+         "git --git-dir=.git commit -m x" "git --work-tree /tmp commit -m x" "git -c core.worktree=/tmp commit -m x"; do
+  tg "$R" "$c"; check "B15 GIT_* override under a contract -> deny: $c" "2:1" "$RC:$(has 'GIT_INDEX_FILE / GIT_DIR' "$ERR")"
+done
+tg "$R" "git commit -m a && git commit -m b"; check "B15 two commits in one line under a contract -> deny" "2:1" "$RC:$(has 'several commits' "$ERR")"
+fi
+
+if sec fix16-amend; then
+echo "--- fix B16: --amend is checked against HEAD^ (contract source and drift base)"
+R=$(mkc fx16); printf '# no contract\n' > "$R/CLAUDE.md"; git -C "$R" add CLAUDE.md
+tg "$R" 'git commit -m drop'; check "B16 dropping the contract alone: allow (warning)" 0 "$RC"; git -C "$R" commit -q -m drop
+addl "$R/src/lib/x.ts" 20 c; stage "$R"
+tg "$R" 'git commit --amend --no-edit'; check "KEY B16 amend code into the contract-removal commit -> deny (contract change + code)" "2:1" "$RC:$(has 'ALONE' "$ERR")"
+git -C "$R" reset -q -- src/lib/x.ts
+tg "$R" 'git commit --amend -m "new message"'; check "B16 amend with nothing staged (message only): allow, unchanged" 0 "$RC"
+R=$(mkc fx16b); addl "$R/src/lib/x.ts" 5 a; stage "$R"; full "$R"; tg "$R" 'git commit -m s'; git -C "$R" commit -q -m s
+addl "$R/src/lib/x.ts" 6 b; stage "$R"; full "$R"
+tg "$R" 'git commit --amend --no-edit'; check "KEY B16 amend adding 6 lines: drift from HEAD^ = 11 -> test-engineer needed" "2:1" "$RC:$(has 'test-engineer:' "$ERR")"
+te_check "$R"; full "$R"; tg "$R" 'git commit --amend --no-edit'
+check "KEY B16 after test-engineer the same amend passes (receipt ancestry is checked against HEAD, not HEAD^)" 0 "$RC"
+fi
+
+if sec fix17-envrun; then
+echo "--- fix B17: suite runs with a changed environment are denied; overrides scrubbed"
+R=$(mkc fx17 '{"suites":[{"name":"unit","cmd":"test -z \"$NODE_OPTIONS$PYTEST_ADDOPTS$npm_config_foo$NPM_CONFIG_BAR\"","paths":["src/**"]}],"ui_globs":["src/ui/**"],"code_globs":[],"test_globs":["tests/**"]}')
+for c in 'CI=1 subteams-tests run unit' 'env FOO=1 subteams-tests run unit' 'export X=1; subteams-tests run unit' \
+         'set -a; subteams-tests run unit' 'bash -c "Y=2 subteams-tests run unit"' 'Z=1 bash /x/scripts/discover-tests.sh run unit'; do
+  tg "$R" "$c"; check "KEY B17 deny: $c" "2:1" "$RC:$(has 'changed environment' "$ERR")"
+done
+for c in "cd $R && subteams-tests run unit" 'subteams-tests run --all-auto' 'CI=1 subteams-tests status' 'echo subteams-tests'; do
+  tg "$R" "$c"; check "B17 allow: $c" 0 "$RC"
+done
+CLAUDE_SUBTEAMS_SKIP_TEST_GATE=1 tg "$R" 'CI=1 subteams-tests run unit'; check "B17 the user's SKIP_TEST_GATE in the hook env bypasses it" 0 "$RC"
+NODE_OPTIONS=--x PYTEST_ADDOPTS=-q npm_config_foo=1 NPM_CONFIG_BAR=2 sts "$R" run unit
+check "KEY B17 run_one scrubs NODE_OPTIONS / PYTEST_ADDOPTS / npm_config_* (any case)" 0 "$(jq -r .exit "$(ls -t "$XDG_CACHE_HOME"/claude-subteams/receipts/*/*-suite-*.json | head -1)")"
+fi
+
+if sec fix18-driftfail; then
+echo "--- fix B18: a failing git diff inside tc_drift is an error, never 'no drift'"
+R=$(mkc fx18); addl "$R/src/lib/x.ts" 20 c; git -C "$R" add -A
+T1=$(git -C "$R" rev-parse 'HEAD^{tree}'); T2=$(git -C "$R" write-tree)
+check "KEY B18 tc_drift with git diff --name-status failing: rc 1" 1 "$( (. "$LIB"; tc_groups_load "$CJSON"; git() { case "$*" in *--name-status*) return 128 ;; esac; command git "$@"; }; tc_drift "$R" "$T1" "$T2" code; echo $?) )"
+check "KEY B18 tc_drift with git diff --numstat failing: rc 1" 1 "$( (. "$LIB"; tc_groups_load "$CJSON"; git() { case "$*" in *--numstat*) return 128 ;; esac; command git "$@"; }; tc_drift "$R" "$T1" "$T2" code; echo $?) )"
+check "KEY B18 the gate's agent check treats a failing drift as not small (deny)" "0" "$( (. "$LIB"; tc_groups_load "$CJSON"; git() { case "$*" in *diff*) return 128 ;; esac; command git "$@"; }
+   rf=$(mktemp); tc_agent_check "$R" "$rf" "$T2" code 10 2 0 "$T1"; rm -f "$rf"; echo "$TC_AC_OK") )"
+check "B18 twin: without the failure the drift is seen" "0:20" "$( (. "$LIB"; tc_groups_load "$CJSON"; tc_drift "$R" "$T1" "$T2" code; echo "$?:$TC_DRIFT_LINES") )"
+fi
+
+if sec fix19-reviewlib; then
+echo "--- fix B19: the review gate works without scripts/lib-testclass.sh"
+mkdir -p "$TMP/nolib19/hooks"; cp "$HOOKS"/pre-commit-gate "$HOOKS"/lib-gitcmd.sh "$HOOKS"/lib-commitscan.sh "$TMP/nolib19/hooks/"
+R=$(mkrepo fx19); echo 'y' >> "$R/a.ts"; git -C "$R" add -A
+(cd "$R" && bash_json sNOMARK19 'git commit -m x' | bash "$TMP/nolib19/hooks/pre-commit-gate") >/dev/null 2>"$TMP/err"; RC=$?
+check "KEY B19 library missing: code commit without review still denied by the review gate" "2:1" "$RC:$(has 'code-reviewer' "$(cat "$TMP/err")")"
+R=$(mkrepo fx19d); echo 'more' >> "$R/doc.md"; git -C "$R" add -A
+(cd "$R" && bash_json sNOMARK19 'git commit -m x' | bash "$TMP/nolib19/hooks/pre-commit-gate") >/dev/null 2>&1
+check "B19 library missing: docs-only commit allowed (fallback docs-class)" 0 "$?"
+eval "$(sed -n '/^  tc_is_docs_class() {$/,/^  }$/p' "$HOOKS/pre-commit-gate" | sed 's/^  //; s/^tc_is_docs_class()/fb_docs()/')"
+n=0; for f in README.md a/b.txt req/requirements-dev.txt Constraints.TXT x.csv .gitignore sub/.DS_Store sub/.gitignore package-lock.json a/package-lock.json x.ts x.html x.json x.yaml doc.rst d.adoc Заметка.md; do
+  a=0; b=0; fb_docs "$f" && a=1; (. "$LIB"; tc_is_docs_class "$f") && b=1; [ "$a" = "$b" ] || n=$((n+1))
+done
+check "B19 fallback docs-class == tc_is_docs_class on the matrix" 0 "$n"
+fi
+
+if sec fix-perf; then
+echo "--- fix perf: gate on 300 files with 30 suite + 30 agent receipts of distinct trees"
+R=$(mkc fxp); for d in src/lib src/ui tests; do for i in $(seq 1 100); do echo "f $i" > "$R/$d/p$i.ts"; done; done; git -C "$R" add -A; git -C "$R" commit -q -m p
+for i in $(seq 1 30); do echo "v $i" >> "$R/src/lib/p1.ts"; sts "$R" run unit; done
+for i in $(seq 1 30); do
+  echo "w $i" >> "$R/src/lib/p2.ts"
+  (. "$LIB"; t=$(tc_snapshot_tree "$R"); n=$(date +%s); tc_receipt_write "$R" "{\"type\":\"te\",\"status\":\"pass\",\"tree\":\"$t\",\"t_start\":$((n-5)),\"t_end\":$n}" >/dev/null)
+done
+for d in src/lib src/ui tests; do for i in $(seq 1 100); do echo "g" >> "$R/$d/p$i.ts"; done; done; stage "$R"
+TIMEFORMAT=%R; { time tg "$R" 'git commit -m x'; } 2>"$TMP/time"; T=$(tail -n 1 "$TMP/time")
+check "KEY perf: gate < 10 s with 60 receipts on 300 staged files (took ${T}s), denies" "1:2" "$(awk -v t="$T" 'BEGIN{print (t<10)?1:0}'):$RC"
+fi
+
+if sec hooksjson; then
 echo "--- hooks.json"
 check "valid JSON" 1 "$(jq -e . "$HOOKS/hooks.json" >/dev/null 2>&1 && echo 1 || echo 0)"
 check "all timeouts are seconds (<= 120)" 0 "$(jq '[.. | objects | select(has("timeout")) | .timeout | select(. > 120)] | length' "$HOOKS/hooks.json")"
 check "SubagentStop registered for subagent-rails" 1 "$(jq '[.hooks.SubagentStop[]?.hooks[]? | select(.command|test("subagent-rails SubagentStop"))] | length' "$HOOKS/hooks.json")"
+check "B7 subagent-rails Start/Stop timeouts are 20 s" "20:20" "$(jq -r '[.hooks.SubagentStart[].hooks[] | select(.command|test("subagent-rails"))][0].timeout' "$HOOKS/hooks.json"):$(jq -r '[.hooks.SubagentStop[].hooks[] | select(.command|test("subagent-rails"))][0].timeout' "$HOOKS/hooks.json")"
+fi   # sec hooksjson
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL PASS"; else echo "$FAILS FAILED"; fi

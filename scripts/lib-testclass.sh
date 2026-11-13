@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034  # TC_* globals are the library interface, read by the sourcing script
 # lib-testclass.sh — shared rules for project test suites (sourced, never executed).
-# Sourced by scripts/discover-tests.sh, hooks/pre-commit-gate and (Task 5)
-# hooks/subagent-rails. Sourcing has no side effects: it only defines TC_* values
+# Sourced by scripts/discover-tests.sh, hooks/pre-commit-gate, hooks/subagent-rails,
+# hooks/session-start (and bin/subteams-browser for shot receipts: tc_receipt_write). Sourcing has no side effects: it only defines TC_* values
 # and tc_* functions, sets no shell options and runs no commands.
 #
 # What lives here (one place of truth, IMPL-PLAN 1.50.0 §5.2-§5.4):
@@ -12,11 +12,16 @@
 #   - glob matching (`**` aware) and file classification into ui/code/test/docs
 #     and per-suite groups;
 #   - git trees: index tree and working-tree snapshot via a TEMP index (the real
-#     index is never written), changed files, drift (numstat + A/D/R/binary);
+#     index is never written), changed files, drift (A/D/R/binary + line counts of
+#     the group's files; files untracked at receipt time ignored), unstaged files;
+#   - the commit tree a `git commit` statement will record (tc_ct_*: -a, <paths>,
+#     -o, -i, replayed add/rm — on a temp index; used by hooks/lib-commitscan.sh);
 #   - receipt store: ${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/receipts/
-#     <sha1 of canonical git-common-dir>/, atomic writes, purge after 14 days;
+#     <sha1 of canonical git-common-dir>/, atomic writes, purge after 14 days, and
+#     the global recent index _recent.log (which store got which receipt when);
 #   - the receipt predicates the commit gate reuses (suite receipt valid for a
-#     tree; ui/te receipt + evidence + drift within the small-change threshold).
+#     tree, flaky detection; ui/te receipt + evidence + minimal drift within the
+#     small-change threshold, branch-bound anchors), all batched per evaluation.
 # Requirements: bash (3.2-compatible syntax), git, coreutils; jq for anything that
 # parses JSON (tc_contract_marker works without it — the gate's cheap path).
 # Globs: rooted at the repo root (git `:(glob)` semantics): `*`/`?` never cross
@@ -240,13 +245,14 @@ if length != 1 then error("expected exactly one JSON value in the contract block
    small_change: ((.small_change // {}) | {max_lines: lim("max_lines"; $ml), max_files: lim("max_files"; $mf)}),
    small_change_clamped: ((.small_change // {}) | ((.max_lines // 0) > $ml or (.max_files // 0) > $mf))}'
 
-tc__contract_text() { # <root> <head|index|worktree> <name> -> TC__TEXT; rc 0 found, 1 absent, 2 unsafe/oversized
+tc__contract_text() { # <root> <head|index|worktree|rev:REV> <name> -> TC__TEXT; rc 0 found, 1 absent, 2 unsafe/oversized
   # Runs in the caller's shell (not in $(…)) so TC_ERR / TC_WARN reach the caller.
+  # rev:REV — the contract of a given commit (the gate reads HEAD^ for --amend).
   local root="$1" src="$2" name="$3" spec size
   TC__TEXT=""
   case "$src" in
-    head|index)
-      [ "$src" = head ] && spec="HEAD:$name" || spec=":0:$name"
+    head|index|rev:?*)
+      case "$src" in head) spec="HEAD:$name" ;; index) spec=":0:$name" ;; *) spec="${src#rev:}:$name" ;; esac
       [ "$(git -C "$root" cat-file -t "$spec" 2>/dev/null)" = blob ] || return 1
       size=$(git -C "$root" cat-file -s "$spec" 2>/dev/null) || return 1
       [ "$size" -le "$TC_MAX_BYTES" ] || { TC_ERR="$name ($src) is larger than 1 MB"; return 2; }
@@ -377,6 +383,10 @@ tc_groups_load() {
 # tc_classify <path> — sets TC_C_DOCS TC_C_TEST TC_C_UI TC_C_CODE (0/1).
 #   test = test_globs; ui = ui_globs − ui_exclude − test; code = code_globs − test,
 #   or (no code_globs) non-docs files outside ui_globs and test_globs.
+#   Without code_globs, a file in ui_globs with a script extension (logic inside a
+#   component: TC_UI_SCRIPT_RE) is BOTH ui and code — it needs test-engineer too;
+#   pure markup / styles stay ui only.
+TC_UI_SCRIPT_RE='\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|astro)$'
 tc_classify() {
   local f="$1" inui=0
   TC_C_DOCS=0; TC_C_TEST=0; TC_C_UI=0; TC_C_CODE=0; TC__C_FILE="$f"
@@ -387,7 +397,7 @@ tc_classify() {
     [ "$inui" -eq 1 ] && ! tc_re_match "$f" "$TC_RE_UIX" && TC_C_UI=1
     if [ "$TC_HAS_CODE_GLOBS" = 1 ]; then
       tc_re_match "$f" "$TC_RE_CODE" && TC_C_CODE=1
-    elif [ "$TC_C_DOCS" -eq 0 ] && [ "$inui" -eq 0 ]; then
+    elif [ "$TC_C_DOCS" -eq 0 ] && { [ "$inui" -eq 0 ] || [[ $f =~ $TC_UI_SCRIPT_RE ]]; }; then
       TC_C_CODE=1
     fi
   fi
@@ -469,30 +479,245 @@ tc_changed_files() { # <repo> <tree-ish a> <tree-ish b> -> paths that differ (re
   return "${PIPESTATUS[0]}"
 }
 
-# tc_drift <repo> <tree a> <tree b> <group> — accumulated drift of one group.
+# Files that were only UNTRACKED when a receipt was taken (the snapshot includes
+# every non-ignored file of the working tree; the commit tree does not) must not
+# count as changes: only paths present in the commit tree or in the base (HEAD)
+# tree matter. tc_dcommit_set <repo> <base tree> <commit tree> records the files
+# the commit itself deletes (D base->commit); a path missing from the commit tree
+# is relevant only if it is in that set. Without a set (TC__DFILTER=0) nothing is
+# filtered. Accepted residual: tests ran with the extra untracked files present.
+TC__DFILTER=0; TC__WORK=""
+# Per-evaluation work dir (tc_requirements creates and removes it): the D-set
+# (dcommit) and per-group membership caches (memb.<group>: "<0|1>\t<path>"), so
+# each path is classified in bash once per evaluation, however many candidate
+# receipts are compared; the per-candidate work is git + awk.
+tc_dcommit_set() { # <repo> <base tree> <commit tree>; rc 1 = git error (filter off)
+  local tmp
+  TC__DFILTER=0
+  [ -n "$TC__WORK" ] && [ -d "$TC__WORK" ] || return 1
+  tmp="$TC__WORK/dcommit.z"
+  git -c core.quotePath=false -C "$1" diff --name-only --no-renames --diff-filter=D -z "$2" "$3" -- > "$tmp" 2>/dev/null || return 1
+  tr '\0' '\n' < "$tmp" > "$TC__WORK/dcommit" || return 1
+  TC__DFILTER=1
+}
+
+tc__memb_file() { # <group> -> path of its membership cache (created empty if needed)
+  local f
+  if [ -n "$TC__WORK" ] && [ -d "$TC__WORK" ]; then f="$TC__WORK/memb.${1//[!A-Za-z0-9]/_}"
+  else f=$(mktemp "${TMPDIR:-/tmp}/tc-memb.XXXXXX") || return 1; fi
+  [ -f "$f" ] || : > "$f"
+  printf '%s\n' "$f"
+}
+tc__memb_ensure() { # <group> <paths file, one per line> <memb file> — classify the paths not seen yet
+  local p
+  awk -v mf="$3" 'FILENAME == mf { seen[substr($0, 3)] = 1; next }
+    !($0 in seen) { seen[$0] = 1; print }' "$3" "$2" \
+  | while IFS= read -r p; do
+      if tc_in_group "$p" "$1"; then printf '1\t%s\n' "$p"; else printf '0\t%s\n' "$p"; fi
+    done >> "$3"
+}
+
+# tc_drift <repo> <tree a> <tree b> <group> [<max files>] — accumulated drift of one group.
 # Sets TC_DRIFT_LINES (added+deleted), TC_DRIFT_FILES, TC_DRIFT_ADDED,
-# TC_DRIFT_DELETED, TC_DRIFT_RENAMED, TC_DRIFT_BINARY (0/1). rc 1 = git error.
+# TC_DRIFT_DELETED, TC_DRIFT_RENAMED, TC_DRIFT_BINARY (0/1). rc 1 = git error:
+# git output goes to temp files and its exit code is checked (a failure inside a
+# process substitution used to be lost and read as "no drift"); callers treat
+# rc 1 as "not small" (fail-closed). Paths only present in <a> that the commit
+# does not delete are ignored (tc_dcommit_set); a "rename" from such a path is an
+# addition. Line counts (the expensive part: a blob diff) are computed only for
+# the group's files. With <max files>, a drift that is already NOT small by its
+# file set (added/deleted/renamed, or more files than that) returns at once with
+# TC_DRIFT_CAPPED=1 and TC_DRIFT_LINES=0 — for ranking candidate receipts.
+# Requires tc_groups_load.
 tc_drift() {
-  local repo="$1" a="$2" b="$3" grp="$4" st p1 p2 rec ad dl
-  TC_DRIFT_LINES=0; TC_DRIFT_FILES=0; TC_DRIFT_ADDED=0; TC_DRIFT_DELETED=0; TC_DRIFT_RENAMED=0; TC_DRIFT_BINARY=0
+  local repo="$1" a="$2" b="$3" grp="$4" cap="${5:-}" tmp memb dc=/dev/null v p
+  local -a P
+  TC_DRIFT_CAPPED=0; TC_DRIFT_LINES=0; TC_DRIFT_FILES=0; TC_DRIFT_ADDED=0; TC_DRIFT_DELETED=0; TC_DRIFT_RENAMED=0; TC_DRIFT_BINARY=0
   tc_is_tree "$repo" "$a" && tc_is_tree "$repo" "$b" || return 1
-  while IFS= read -r -d '' st; do
-    case "$st" in
-      R*|C*)
-        IFS= read -r -d '' p1; IFS= read -r -d '' p2
-        if tc_in_group "$p1" "$grp" || tc_in_group "$p2" "$grp"; then TC_DRIFT_RENAMED=1; fi ;;
-      *)
-        IFS= read -r -d '' p1
-        tc_in_group "$p1" "$grp" || continue
-        case "$st" in A) TC_DRIFT_ADDED=1 ;; D) TC_DRIFT_DELETED=1 ;; esac ;;
-    esac
-  done < <(git -C "$repo" diff --name-status -M -z "$a" "$b" -- 2>/dev/null)
-  while IFS= read -r -d '' rec; do
-    ad="${rec%%$'\t'*}"; rec="${rec#*$'\t'}"; dl="${rec%%$'\t'*}"; p1="${rec#*$'\t'}"
-    tc_in_group "$p1" "$grp" || continue
-    TC_DRIFT_FILES=$((TC_DRIFT_FILES+1))
-    if [ "$ad" = - ] || [ "$dl" = - ]; then TC_DRIFT_BINARY=1; else TC_DRIFT_LINES=$((TC_DRIFT_LINES+ad+dl)); fi
-  done < <(git -C "$repo" diff --numstat --no-renames -z "$a" "$b" -- 2>/dev/null)
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-drift.XXXXXX") || return 1
+  if ! git -c core.quotePath=false -C "$repo" diff --name-status -M -z "$a" "$b" -- > "$tmp/ns" 2>/dev/null \
+     || ! tr '\0' '\n' < "$tmp/ns" > "$tmp/ns.l"; then
+    rm -rf "$tmp"; return 1
+  fi
+  memb=$(tc__memb_file "$grp") || { rm -rf "$tmp"; return 1; }
+  awk 'w == 0 { w = ($0 ~ /^[RC]/) ? 2 : 1; next } { print; w-- }' "$tmp/ns.l" > "$tmp/paths"
+  tc__memb_ensure "$grp" "$tmp/paths" "$memb"
+  [ "$TC__DFILTER" = 1 ] && dc="$TC__WORK/dcommit"
+  # first line: "<added> <deleted> <renamed> <files>"; then the group's files to line-count
+  v=$(awk -v filt="$TC__DFILTER" -v dcf="$dc" -v mf="$memb" '
+    FILENAME == dcf { d[$0] = 1; next }
+    FILENAME == mf { m[substr($0, 3)] = substr($0, 1, 1); next }
+    {
+      if (want == 0) { st = $0; want = (st ~ /^[RC]/) ? 2 : 1; got = 0; next }
+      p[++got] = $0; if (got < want) next
+      want = 0; c = substr(st, 1, 1)
+      if (c == "R" || c == "C") {
+        old = (c == "R" && filt == 1 && !(p[1] in d)) ? 0 : 1      # 0: the old path was merely untracked
+        if (!old) { if (m[p[2]] == "1") { ad = 1; out[++n] = p[2] } }
+        else if (m[p[1]] == "1" || m[p[2]] == "1") {
+          rn = 1
+          if (c == "R" && m[p[1]] == "1") out[++n] = p[1]
+          if (m[p[2]] == "1") out[++n] = p[2]
+        }
+        next
+      }
+      if (c == "D" && filt == 1 && !(p[1] in d)) next
+      if (m[p[1]] != "1") next
+      if (c == "A") ad = 1; else if (c == "D") de = 1
+      out[++n] = p[1]
+    }
+    END { printf "%d %d %d %d\n", ad, de, rn, n; for (i = 1; i <= n; i++) print out[i] }' "$dc" "$memb" "$tmp/ns.l") \
+    || { rm -rf "$tmp"; [ -n "$TC__WORK" ] || rm -f "$memb"; return 1; }
+  [ -n "$TC__WORK" ] || rm -f "$memb"
+  read -r TC_DRIFT_ADDED TC_DRIFT_DELETED TC_DRIFT_RENAMED TC_DRIFT_FILES <<< "${v%%$'\n'*}"
+  [ -n "$TC_DRIFT_FILES" ] || { rm -rf "$tmp"; return 1; }
+  if [ -n "$cap" ] && { [ "$TC_DRIFT_ADDED$TC_DRIFT_DELETED$TC_DRIFT_RENAMED" != 000 ] || [ "$TC_DRIFT_FILES" -gt "$cap" ]; }; then
+    TC_DRIFT_CAPPED=1; rm -rf "$tmp"; return 0
+  fi
+  if [ "$TC_DRIFT_FILES" -gt 0 ]; then
+    P=()
+    while IFS= read -r p; do P+=(":(literal)$p"); done <<< "${v#*$'\n'}"
+    if ! git -c core.quotePath=false -C "$repo" diff --numstat --no-renames -z "$a" "$b" -- "${P[@]}" > "$tmp/num" 2>/dev/null \
+       || ! v=$(tr '\0' '\n' < "$tmp/num" | awk -F'\t' '{ if ($1 == "-" || $2 == "-") bin = 1; else lines += $1 + $2 }
+                END { printf "%d %d\n", lines, bin }'); then
+      rm -rf "$tmp"; return 1
+    fi
+    read -r TC_DRIFT_LINES TC_DRIFT_BINARY <<< "$v"
+  fi
+  rm -rf "$tmp"
+  return 0
+}
+
+# tc__drift_batch <repo> <tree> <group> <max files> <big> — candidate trees on stdin.
+# Prints "<candidate> <score>" for candidates whose drift is settled by the file set
+# alone: -1 = tree missing / git failed, <big> = not small (added / deleted / more
+# than <max files> files of the group). Candidates that may be small are not
+# printed (the caller computes them exactly). One cat-file, one diff-tree --stdin.
+tc__drift_batch() {
+  local repo="$1" tree="$2" grp="$3" thf="$4" big="$5" tmp memb dc=/dev/null t ty
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-db.XXXXXX") || return 0
+  cat > "$tmp/c"
+  git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' < "$tmp/c" > "$tmp/types" 2>/dev/null || { rm -rf "$tmp"; return 0; }
+  while read -r t ty; do
+    if [ "$ty" = tree ]; then printf '%s %s\n' "$t" "$tree" >> "$tmp/pairs"; else printf '%s -1\n' "$t"; fi
+  done < "$tmp/types"
+  if [ -s "$tmp/pairs" ]; then
+    memb=$(tc__memb_file "$grp") || { rm -rf "$tmp"; return 0; }
+    [ "$TC__DFILTER" = 1 ] && dc="$TC__WORK/dcommit"
+    if git -c core.quotePath=false -C "$repo" diff-tree --stdin -r --no-renames --name-status -z < "$tmp/pairs" > "$tmp/z" 2>/dev/null \
+       && tr '\0' '\n' < "$tmp/z" | awk -v filt="$TC__DFILTER" -v dcf="$dc" '
+            FILENAME == dcf { d[$0] = 1; next }
+            w == 0 && /^[0-9a-f]+ [0-9a-f]+$/ { split($0, h, " "); cur = h[1]; next }
+            w == 0 { st = $0; w = 1; next }
+            { w = 0; if (st == "D" && filt == 1 && !($0 in d)) next; print cur "\t" substr(st, 1, 1) "\t" $0 }' "$dc" - > "$tmp/rp"; then
+      cut -f3- "$tmp/rp" > "$tmp/paths"
+      tc__memb_ensure "$grp" "$tmp/paths" "$memb"
+      awk -F'\t' -v mf="$memb" -v rpf="$tmp/rp" -v thf="$thf" -v big="$big" '
+        FILENAME == mf { mm[substr($0, 3)] = substr($0, 1, 1); next }
+        FILENAME == rpf { p = substr($0, length($1) + length($2) + 3); if (mm[p] != "1") next
+                          n[$1]++; if ($2 == "A" || $2 == "D") fl[$1] = 1; next }
+        { split($0, h, " "); c = h[1]; if (fl[c] || n[c] > thf) print c " " big }' "$memb" "$tmp/rp" "$tmp/pairs"
+    else
+      awk '{ print $1 " -1" }' "$tmp/pairs"
+    fi
+    [ -n "$TC__WORK" ] || rm -f "$memb"
+  fi
+  rm -rf "$tmp"
+}
+
+# tc_unstaged <repo> <commit tree> -> tracked paths whose WORKING-TREE content differs
+# from the commit tree (unstaged hunks, partial staging, unstaged deletions). A
+# receipt snapshots the working tree, so for these files re-running alone never
+# makes it match the commit. Read-only (GIT_OPTIONAL_LOCKS=0: no index refresh).
+tc_unstaged() {
+  [ "${TC_NO_UNSTAGED:-0}" = 1 ] && return 0
+  GIT_OPTIONAL_LOCKS=0 git -c core.quotePath=false -C "$1" diff --name-only --no-renames --diff-filter=MTD "$2" -- 2>/dev/null
+}
+
+TC_UNSTAGED_HINT='re-running alone will not help (a receipt snapshots the working tree): stage it, or `git stash push --keep-index --include-untracked`, re-run, then `git stash pop`'
+
+# tc_large_untracked <repo> -> "path (N MB)" for untracked, non-ignored files over
+# 10 MB (each content snapshot hashes them: slow receipts and gate). Max 5 lines.
+tc_large_untracked() {
+  local p sz
+  git -c core.quotePath=false -C "$1" ls-files -o --exclude-standard 2>/dev/null | sed 's#^#./#' \
+    | (cd "$1" 2>/dev/null && tr '\n' '\0' | xargs -0 sh -c 'find "$@" -maxdepth 0 -type f -size +10240k -print' sh 2>/dev/null) \
+    | head -n 5 | while IFS= read -r p; do
+        sz=$(wc -c < "$1/$p" 2>/dev/null | tr -d ' ')
+        printf '%s (%s MB)\n' "${p#./}" "$(( ${sz:-0} / 1048576 ))"
+      done
+}
+
+# ------------------------------------------------------------ commit tree (B14)
+# The tree a `git commit` statement WILL record, computed on a temp index exactly
+# as git builds it (builtin/commit.c prepare_index) — the real index, the working
+# tree and HEAD are never written:
+#   tc_ct_begin <repo>                  temp index = copy of the real index
+#   tc_ct_add <cwd> <git add args…>     replay a preceding `git add`/`git stage`
+#   tc_ct_rm  <cwd> <git rm args…>      replay a preceding `git rm` (dry-run check
+#                                       with the user's args, then --cached on the temp)
+#   tc_ct_commit <repo> <cwd> <plain|all|only|include> <pathspec…>  -> TC_CT_TREE
+#       plain   = the index;  all (-a) = index + `add -u :/`;
+#       include = (-i) index + `add -u -- <paths>` (paths must be known to git);
+#       only    = (<paths> / -o) HEAD's tree + the working-tree state of every path
+#                 matching <paths> in index ∪ HEAD (`ls-files --with-tree=HEAD`).
+#   tc_ct_end
+# rc: 0 ok; 3 git would refuse the command (unmatched pathspec, rm safety check) —
+# TC_ERR says why; 1 internal error. Pathspecs are relative to <cwd>, as for git.
+TC_CT_DIR=""
+tc_ct_begin() {
+  local real
+  TC_CT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/tc-ct.XXXXXX") || return 1
+  real=$(tc__index_path "$1") || { tc_ct_end; return 1; }
+  if [ -f "$real" ]; then cp "$real" "$TC_CT_DIR/index" || { tc_ct_end; return 1; }
+  elif tc_has_head "$1"; then GIT_INDEX_FILE="$TC_CT_DIR/index" git -C "$1" read-tree HEAD 2>/dev/null || { tc_ct_end; return 1; }
+  fi
+  return 0
+}
+tc_ct_end() { [ -n "$TC_CT_DIR" ] && rm -rf "$TC_CT_DIR"; TC_CT_DIR=""; return 0; }
+tc_ct_add() {
+  local cwd="$1"; shift
+  GIT_INDEX_FILE="$TC_CT_DIR/index" git -C "$cwd" add "$@" </dev/null >/dev/null 2>&1 && return 0
+  TC_ERR="git add $* would fail"; return 3
+}
+tc_ct_rm() {
+  local cwd="$1" a args=(); shift
+  for a in "$@"; do case "$a" in -n|--dry-run|--cached) ;; *) args+=("$a") ;; esac; done
+  # the dry run performs git's own safety checks for the user's exact form
+  GIT_INDEX_FILE="$TC_CT_DIR/index" git -C "$cwd" rm -n "$@" </dev/null >/dev/null 2>&1 \
+    || { TC_ERR="git rm $* would fail"; return 3; }
+  GIT_INDEX_FILE="$TC_CT_DIR/index" git -C "$cwd" rm --cached -q ${args[@]+"${args[@]}"} </dev/null >/dev/null 2>&1 \
+    || { TC_ERR="git rm $* would fail"; return 3; }
+}
+tc_ct_commit() {
+  local repo="$1" cwd="$2" mode="$3" idx="$TC_CT_DIR/index" list wt=()
+  shift 3
+  TC_CT_TREE=""
+  case "$mode" in
+    plain) ;;
+    all) GIT_INDEX_FILE="$idx" git -C "$repo" add -u -- ':/' </dev/null >/dev/null 2>&1 || { TC_ERR="git commit -a: cannot stage tracked changes"; return 3; } ;;
+    include)
+      [ $# -gt 0 ] || { TC_ERR="git commit -i without paths"; return 3; }
+      GIT_INDEX_FILE="$idx" git -C "$cwd" ls-files --error-unmatch -- "$@" >/dev/null 2>&1 \
+        || { TC_ERR="a pathspec of the commit matches no file known to git"; return 3; }
+      GIT_INDEX_FILE="$idx" git -C "$cwd" add -u -- "$@" </dev/null >/dev/null 2>&1 || { TC_ERR="git commit -i: cannot stage the paths"; return 3; } ;;
+    only)
+      if [ $# -eq 0 ]; then   # --only without paths: HEAD's tree (message-only amend)
+        TC_CT_TREE=$(git -C "$repo" rev-parse -q --verify 'HEAD^{tree}' 2>/dev/null) || TC_CT_TREE=$(tc_empty_tree "$repo")
+        return 0
+      fi
+      tc_has_head "$repo" && wt=(--with-tree=HEAD)
+      list="$TC_CT_DIR/list"
+      GIT_INDEX_FILE="$idx" git -C "$cwd" ls-files -z --full-name --error-unmatch ${wt[@]+"${wt[@]}"} -- "$@" > "$list" 2>/dev/null \
+        || { TC_ERR="a pathspec of the commit matches no file known to git"; return 3; }
+      idx="$TC_CT_DIR/index.only"
+      if tc_has_head "$repo"; then GIT_INDEX_FILE="$idx" git -C "$repo" read-tree HEAD 2>/dev/null || return 1
+      else GIT_INDEX_FILE="$idx" git -C "$repo" read-tree --empty 2>/dev/null || return 1; fi
+      GIT_INDEX_FILE="$idx" git -C "$repo" update-index --add --remove -z --stdin < "$list" >/dev/null 2>&1 \
+        || { TC_ERR="git commit <paths>: cannot stage the paths"; return 3; } ;;
+    *) TC_ERR="unknown commit mode $mode"; return 1 ;;
+  esac
+  TC_CT_TREE=$(GIT_INDEX_FILE="$idx" git -C "$repo" write-tree 2>/dev/null) || { TC_ERR="cannot write the commit tree (unresolved merge?)"; return 1; }
   return 0
 }
 
@@ -524,14 +749,56 @@ tc_receipt_purge() { # <receipt dir> — drop receipts (and stray temp files) ol
   return 0
 }
 
-# tc_receipt_write <repo> <json object with .type> — atomic (temp file + mv in the
-# same dir), then purge. Sets TC_RECEIPT_PATH and prints it; on failure rc 1 +
-# TC_ERR (call it directly, not inside $(…), to keep TC_ERR).
+# Global recent index (B3): one line per receipt written in ANY store —
+# "<ts>\t<store id>\t<repo root>\t<type>" — so subagent-rails can find evidence
+# an agent left in other repositories (session in repo A, work in repo B).
+# Append-only (one short line < PIPE_BUF per write: atomic with O_APPEND, no lock);
+# lines older than 14 days are dropped by a rare rewrite (only when the FIRST line
+# has expired). A line lost to a rewrite race only means an agent receipt is not
+# copied to that store — the safe side (the gate then asks for the agent again).
+tc_recent_log() { printf '%s/claude-subteams/receipts/_recent.log\n' "${XDG_CACHE_HOME:-$HOME/.cache}"; }
+tc__recent_append() { # <ts> <store id> <root> <type>
+  local log first cut tmp
+  case "$3" in *$'\t'*|*$'\n'*|'') return 0 ;; esac
+  log=$(tc_recent_log)
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$log" 2>/dev/null || return 0
+  first=$(head -n 1 "$log" 2>/dev/null); first="${first%%$'\t'*}"
+  cut=$(( $1 - TC_RECEIPT_TTL_DAYS * 86400 ))
+  case "$first" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$first" -lt "$cut" ] || return 0
+  tmp=$(mktemp "${log%/*}/.tmp.recent.XXXXXX") || return 0
+  awk -F'\t' -v c="$cut" '$1 + 0 >= c' "$log" > "$tmp" 2>/dev/null && mv -f -- "$tmp" "$log"
+  rm -f -- "$tmp" 2>/dev/null
+  return 0
+}
+
+# tc_recent_stores <from ts> <to ts> -> "<store id>\t<root>" of stores that got a
+# suite or shot receipt in [from, to], newest first, one line per store (root =
+# the newest such root). Unvalidated: callers check root / store id before use.
+tc_recent_stores() {
+  local log; log=$(tc_recent_log)
+  [ -f "$log" ] || return 0
+  awk -F'\t' -v s="$1" -v e="$2" 'NF >= 4 && $1 + 0 >= s && $1 + 0 <= e && ($4 == "suite" || $4 == "shot") && $2 ~ /^[0-9a-f]+$/ { print $1 "\t" $2 "\t" $3 }' "$log" 2>/dev/null \
+    | sort -t "$(printf '\t')" -k1,1nr | awk -F'\t' '!seen[$2]++ { print $2 "\t" $3 }'
+}
+
+# tc_receipt_write <repo> <json object with .type> — THE way to write any receipt
+# (suite, shot, ui, te, anchor): atomic (temp file + mv in the same dir), purge
+# after 14 days, and one line in the global recent index (tc__recent_append).
+# <repo> = any directory inside the repository/worktree the receipt is about.
+# Sets TC_RECEIPT_PATH and PRINTS it on stdout (redirect it if unwanted); on
+# failure rc 1 + TC_ERR (call it directly, not inside $(…), to keep TC_ERR).
+# jq is used to validate .type when present; without jq a literal "type":"word"
+# is accepted (bin/subteams-browser writes shot receipts with this function).
 tc_receipt_write() {
-  local repo="$1" json="$2" dir type ts name tmp
+  local repo="$1" json="$2" dir type ts name tmp root
   TC_RECEIPT_PATH=""
   dir=$(tc_receipt_dir "$repo") || { TC_ERR="not a git repository: $repo"; return 1; }
-  type=$(printf '%s' "$json" | jq -r 'if type == "object" and (.type | type) == "string" and (.type | test("^[a-z][a-z0-9_-]*$")) then .type else empty end' 2>/dev/null)
+  if command -v jq >/dev/null 2>&1; then
+    type=$(printf '%s' "$json" | jq -r 'if type == "object" and (.type | type) == "string" and (.type | test("^[a-z][a-z0-9_-]*$")) then .type else empty end' 2>/dev/null)
+  else
+    case "$json" in '{'*'}') type=$(printf '%s' "$json" | sed -n 's/^{"type":"\([a-z][a-z0-9_-]*\)".*$/\1/p' | head -n 1) ;; *) type="" ;; esac
+  fi
   [ -n "$type" ] || { TC_ERR="receipt must be a JSON object with a simple .type"; return 1; }
   (umask 077; mkdir -p -- "$dir") 2>/dev/null || { TC_ERR="cannot create $dir"; return 1; }
   ts=$(date +%s)
@@ -540,6 +807,7 @@ tc_receipt_write() {
   if printf '%s\n' "$json" > "$tmp" && mv -f -- "$tmp" "$dir/$name"; then
     tc_receipt_purge "$dir"
     TC_RECEIPT_PATH="$dir/$name"
+    root=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) && tc__recent_append "$ts" "${dir##*/}" "$root" "$type"
     printf '%s\n' "$dir/$name"
     return 0
   fi
@@ -577,96 +845,163 @@ tc_receipts_load() {
 # --------------------------------------------------------- receipt predicates
 
 # tc_suite_check <repo> <receipts jsonl file> <tree> <suite index> <contract_sha> <cmd_sha>
-# The NEWEST receipt of this suite that ran the same command (cmd_sha) under the
-# same contract (contract_sha), was not dirty and whose tree has the same content
-# as <tree> for the suite's files decides: exit 0 -> valid. Sets TC_SC_OK (0/1),
-# TC_SC_REASON, TC_SC_FILE. Requires tc_groups_load.
+# Among the 30 newest receipts of this suite, the newest one that ran the same
+# command (cmd_sha) under the same contract (contract_sha), was not dirty and whose
+# tree has the same content as <tree> for the suite's files decides: exit 0 ->
+# valid. Content = paths present in <tree> or in the base tree only (tc_dcommit_set:
+# files that were merely untracked at receipt time do not count). An OLDER failing
+# receipt on that same content makes TC_SC_FLAKY=1 (the gate and `status` warn).
+# A content mismatch on a file with unstaged changes (TC_UNSTAGED) says so: re-
+# running alone cannot fix it. Sets TC_SC_OK (0/1), TC_SC_REASON, TC_SC_FILE,
+# TC_SC_FLAKY. Requires tc_groups_load.
 tc_suite_check() {
   local repo="$1" rfile="$2" tree="$3" i="$4" csha="$5" msha="$6"
-  local name="${TC_S_NAME[$4]}" te ex dirty rc rm rt f n=0 why="" diff p hit
-  TC_SC_OK=0; TC_SC_REASON="no receipt for suite $name"; TC_SC_FILE=""
+  local name="${TC_S_NAME[$4]}" te ex dirty rc rm rt f n=0 why="" p found=0 res memb tmp rows map="" dc=/dev/null t ty
+  TC_SC_OK=0; TC_SC_REASON="no receipt for suite $name"; TC_SC_FLAKY=0; TC_SC_FILE=""
+  rows=$(jq -r --arg n "$name" 'select(.type == "suite" and .suite == $n)
+      | [(.t_end // 0 | tostring), (.exit // "" | tostring), (if .dirty == true then "1" else "0" end),
+         (.contract_sha // ""), (.cmd_sha // ""), (.tree // ""), ._file] | join("\u001f")' "$rfile" 2>/dev/null \
+      | sort -t "$(printf '\037')" -k1,1nr | head -n 30)
+  [ -n "$rows" ] || return 0
+  # Content verdicts for all candidate trees at once (one cat-file, one diff-tree
+  # --stdin, awk): map lines "<tree> same|missing|err|hit<TAB><path>".
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-sc.XXXXXX") || return 0
+  memb=$(tc__memb_file "suite:$i") || { rm -rf "$tmp"; return 0; }
+  printf '%s\n' "$rows" | awk -F'\037' -v c="$csha" -v m="$msha" '$4 == c && $5 == m && $3 == "0" && $6 ~ /^[0-9a-f]+$/ && !s[$6]++ { print $6 }' > "$tmp/trees"
+  if [ -s "$tmp/trees" ]; then
+    git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' < "$tmp/trees" > "$tmp/types" 2>/dev/null || : > "$tmp/types"
+    while read -r t ty; do
+      if [ "$ty" = tree ]; then printf '%s %s\n' "$t" "$tree"; else map="$map$t missing"$'\n'; fi
+    done < "$tmp/types" > "$tmp/pairs"
+    if [ -s "$tmp/pairs" ]; then
+      [ "$TC__DFILTER" = 1 ] && dc="$TC__WORK/dcommit"
+      if git -c core.quotePath=false -C "$repo" diff-tree --stdin -r --no-renames --name-status -z < "$tmp/pairs" > "$tmp/z" 2>/dev/null \
+         && tr '\0' '\n' < "$tmp/z" | awk -v filt="$TC__DFILTER" -v dcf="$dc" '
+              FILENAME == dcf { d[$0] = 1; next }
+              w == 0 && /^[0-9a-f]+ [0-9a-f]+$/ { split($0, h, " "); cur = h[1]; next }
+              w == 0 { st = $0; w = 1; next }
+              { w = 0; if (st == "D" && filt == 1 && !($0 in d)) next; print cur "\t" $0 }' "$dc" - > "$tmp/rp"; then
+        cut -f2- "$tmp/rp" > "$tmp/paths"
+        tc__memb_ensure "suite:$i" "$tmp/paths" "$memb"
+        map="$map$(awk -F'\t' -v mf="$memb" -v rpf="$tmp/rp" '
+              FILENAME == mf { mm[substr($0, 3)] = substr($0, 1, 1); next }
+              FILENAME == rpf { p = substr($0, length($1) + 2); if (!($1 in hit) && mm[p] == "1") hit[$1] = p; next }
+              { split($0, h, " "); c = h[1]; print c " " ((c in hit) ? "hit\t" hit[c] : "same") }' "$memb" "$tmp/rp" "$tmp/pairs")"$'\n'
+      else
+        while read -r t ty; do map="$map$t err"$'\n'; done < "$tmp/pairs"
+      fi
+    fi
+  fi
+  rm -rf "$tmp"; [ -n "$TC__WORK" ] || rm -f "$memb"
   while IFS=$'\037' read -r te ex dirty rc rm rt f; do
     [ -n "$f" ] || continue
-    n=$((n+1)); [ "$n" -le 30 ] || break
     if [ "$rc" != "$csha" ]; then why="${why:-receipt is for another version of the test contract}"; continue; fi
     if [ "$rm" != "$msha" ]; then why="${why:-receipt ran a different command}"; continue; fi
     if [ "$dirty" = 1 ]; then why="${why:-files changed while the suite ran (dirty)}"; continue; fi
-    tc_is_tree "$repo" "$rt" || { why="${why:-receipt tree missing}"; continue; }
-    diff=$(tc_changed_files "$repo" "$rt" "$tree") || { why="${why:-git diff failed}"; continue; }
-    hit=0
-    while IFS= read -r p; do [ -n "$p" ] && tc_in_suite "$p" "$i" && { hit=1; break; }; done <<< "$diff"
-    if [ "$hit" -eq 1 ]; then why="${why:-content changed since the last run ($p)}"; continue; fi
-    TC_SC_FILE="$f"
-    if [ "$ex" = 0 ]; then TC_SC_OK=1; TC_SC_REASON="passed on this content"
-    else TC_SC_REASON="last run on this content failed (exit $ex)"; fi
-    return 0
-  done < <(jq -r --arg n "$name" 'select(.type == "suite" and .suite == $n)
-      | [(.t_end // 0 | tostring), (.exit // "" | tostring), (if .dirty == true then "1" else "0" end),
-         (.contract_sha // ""), (.cmd_sha // ""), (.tree // ""), ._file] | join("\u001f")' "$rfile" 2>/dev/null \
-      | sort -t "$(printf '\037')" -k1,1nr)
+    res=$(printf '%s' "$map" | awk -v t="$rt" '$1 == t { print substr($0, length(t) + 2); exit }')
+    [ -n "$res" ] || res=missing
+    case "$res" in
+      missing) why="${why:-receipt tree missing}"; continue ;;
+      err) why="${why:-git diff failed}"; continue ;;
+      hit*)
+        p="${res#*$'\t'}"
+        if [ -z "$why" ]; then
+          case "${TC_UNSTAGED:-}" in
+            *$'\n'"$p"$'\n'*) why="$p has unstaged changes — the suite ran on the working-tree version, the commit takes another; $TC_UNSTAGED_HINT" ;;
+            *) why="content changed since the last run ($p)" ;;
+          esac
+        fi
+        continue ;;
+    esac
+    if [ "$found" -eq 0 ]; then
+      found=1; TC_SC_FILE="$f"
+      if [ "$ex" = 0 ]; then TC_SC_OK=1; TC_SC_REASON="passed on this content"; continue; fi
+      TC_SC_REASON="last run on this content failed (exit $ex)"; break
+    fi
+    [ "$ex" = 0 ] || { TC_SC_FLAKY=1; break; }   # an older failure on the same content
+  done <<< "$rows"
+  [ "$found" -eq 1 ] && return 0
   [ -n "$why" ] && TC_SC_REASON="$why"
   return 0
 }
 
-# tc_agent_check <repo> <receipts jsonl> <tree> <ui|code> <th_lines> <th_files> <e2e_req 0|1> <head tree>
-# Requires tc_groups_load. Evidence is judged here, at check time, from the
-# receipts written during the agent's [t_start, t_end] (a status alone is never
-# believed):
+# tc_agent_check <repo> <receipts jsonl> <tree> <ui|code> <th_lines> <th_files> <e2e_req 0|1> <base tree>
+# Uses TC__HEADC (the real HEAD: receipt / anchor ancestry), TC__BASEC (the base
+# commit: HEAD, or HEAD^ for --amend — recorded in new anchors) and tc_dcommit_set. Requires tc_groups_load. Evidence is judged here, at check
+# time, from the receipts written during the agent's [t_start, t_end] (a status
+# alone is never believed):
 #   ui pass      >= 2 shots AND, if <e2e_req> (a `run: auto` e2e suite whose paths
 #                cover a UI file of this commit — computed by tc_requirements),
 #                >= 1 e2e suite receipt with exit 0;
 #   ui degraded  ONLY with a required e2e suite (<e2e_req> = 1) that has an e2e
 #                receipt with exit 0 in the interval, AND the agent stated why the
 #                live review was not performed (.reason_stated, recorded by
-#                hooks/subagent-rails). No required e2e -> degraded never counts
-#                (nothing was checked; that is `blocked` in substance);
+#                hooks/subagent-rails). No required e2e -> degraded never counts;
 #   te pass      >= 1 suite receipt with exit 0;
-#   issues-found a negative verdict: valid as it is, and it shadows older passes.
-# Not valid (skipped, never shadow a valid receipt): pass/degraded without that
-# evidence (e.g. a monkey-mode pass), blocked / unknown statuses, receipts without
-# a sane interval.
-# Drift base (R9, accumulated) = the NEWEST of {the most recent valid agent
-# receipt, the group's anchor}. An anchor (type `anchor`, group, tree = HEAD's tree
-# at that time) is written by the commit gate when a group first passes under the
-# small-change threshold WITHOUT any agent receipt; later small commits do not move
-# it, so a series of small commits still runs into the threshold. Neither receipt
-# nor anchor -> the base is <head tree> and, if the change is small, TC_AC_ANCHOR
-# is set to that tree (the gate writes it on allow; `status` only reports it).
-# Residual: anchors are purged after 14 days like every receipt — a series spread
-# over more than 14 days restarts from HEAD.
-# Then: drift from the base to <tree> within the threshold, no added/deleted/
-# renamed/binary files. Sets TC_AC_OK, TC_AC_REASON, TC_AC_FILE, TC_AC_STATUS,
-# TC_AC_BASE (receipt|anchor|head), TC_AC_ANCHOR (tree to anchor, or "") + TC_DRIFT_*.
+#   issues-found a negative verdict (see shadowing below);
+#   rejected     the agent ran but its final answer had no parsable first-line
+#                Status (hooks/subagent-rails) — never counts, named in the reason.
+# Candidates = up to 30 newest valid or issues-found receipts whose .head (the
+# HEAD of the worktree the agent stopped in) is an ancestor of HEAD —
+# receipts come from every worktree and branch, those about other branches are
+# ignored — plus the newest drift ANCHOR whose commit is an ancestor of HEAD.
+# The base is the valid candidate with the MINIMAL drift to <tree> (ties: the newer
+# wins; receipts before the anchor). An issues-found receipt shadows it only if its
+# own drift is smaller, or equal and it is newer — a verdict about the same or
+# closer content. Neither a valid receipt nor an anchor -> the base is <base tree>
+# and, if the change is small, TC_AC_ANCHOR is set (the gate writes it on allow,
+# with TC__BASEC; `status` only reports it). Anchor: written when a group first
+# passes as a small change without any agent receipt; later small commits do not
+# move it, so a series of small commits accumulates drift (R9). Residual: anchors
+# expire after 14 days like every receipt.
+# Then: drift from the base within the threshold, no added/deleted/renamed/binary
+# files. A drift computation that fails counts as NOT small (fail-closed).
+# Sets TC_AC_OK, TC_AC_REASON, TC_AC_FILE, TC_AC_STATUS, TC_AC_BASE
+# (receipt|anchor|head), TC_AC_ANCHOR (tree to anchor, or "") + TC_DRIFT_*.
 # Reasons never name the threshold numbers.
 tc_agent_check() {
   local repo="$1" rfile="$2" tree="$3" grp="$4" thl="$5" thf="$6" e2e_req="${7:-0}" htree="${8:-}" type who i auto=0
-  local st rt f e2e suites shots rs ts te n=0 skipped="" chosen=0 okst=0 base cte=0 v at ats af
+  local st rt f e2e suites shots rs ts te why n=0 skipped="" v at ats af ac k sc cache=$'\n' big=1000000
+  local ck=() ctr=() cf=() cst=() cte=() csc=() hd anc=$'\n' a
+  local bv=-1 bi=-1
   if [ "$grp" = ui ]; then type=ui; who="ui-tester"; else type=te; who="test-engineer"; fi
   for i in ${TC_S_NAME[@]+"${!TC_S_NAME[@]}"}; do [ "${TC_S_RUN[i]:-}" = auto ] && auto=1; done
   TC_AC_OK=0; TC_AC_REASON=""; TC_AC_FILE=""; TC_AC_STATUS=""; TC_AC_BASE=""; TC_AC_ANCHOR=""
-  while IFS=$'\037' read -r st rt f e2e suites shots rs ts te; do
+  while IFS=$'\037' read -r st rt f e2e suites shots rs ts te why hd; do
     [ -n "$f" ] || continue
-    n=$((n+1)); [ "$n" -le 30 ] || break
+    # A receipt is bound to the history it was taken on (.head = the HEAD commit of
+    # its worktree at stop): one from a branch that is not an ancestor of the base
+    # commit is about other work and is ignored (receipts without .head count).
+    if [ -n "$hd" ] && [ -n "${TC__HEADC:-${TC__BASEC:-}}" ]; then
+      case "$anc" in
+        *$'\n'"$hd "[01]$'\n'*) a="${anc#*$'\n'"$hd "}"; a="${a:0:1}" ;;
+        *) if git -C "$repo" merge-base --is-ancestor "$hd" "${TC__HEADC:-$TC__BASEC}" 2>/dev/null; then a=1; else a=0; fi
+           anc="$anc$hd $a"$'\n' ;;
+      esac
+      [ "$a" = 1 ] || continue
+    fi
     if [ "$ts" -le 0 ] || [ "$te" -lt "$ts" ]; then skipped="${skipped:-a $who receipt without a valid time interval}"; continue; fi
     case "$type:$st" in
       ui:pass)
-        if [ "$shots" -ge 2 ] && { [ "$e2e_req" -eq 0 ] || [ "$e2e" -ge 1 ]; }; then okst=1
+        if [ "$shots" -ge 2 ] && { [ "$e2e_req" -eq 0 ] || [ "$e2e" -ge 1 ]; }; then k=v
         else skipped="${skipped:-a $who pass without evidence (needs >= 2 screenshots$([ "$e2e_req" -eq 1 ] && echo ' and a run of the e2e suite covering these UI files with exit 0') during its run) does not count}"; continue; fi ;;
       ui:degraded)
-        if [ "$e2e_req" -eq 1 ] && [ "$e2e" -ge 1 ] && [ "$rs" = 1 ]; then okst=1
+        if [ "$e2e_req" -eq 1 ] && [ "$e2e" -ge 1 ] && [ "$rs" = 1 ]; then k=v
         elif [ "$e2e_req" -eq 0 ]; then skipped="${skipped:-a $who degraded result does not count when no required e2e suite covers these UI files (nothing was checked — screenshots are the only evidence, so it needs a pass)}"; continue
         else skipped="${skipped:-a $who degraded result without a run of the covering e2e suite with exit 0 or without a stated reason does not count}"; continue; fi ;;
       te:pass)
-        if [ "$suites" -ge 1 ]; then okst=1
+        if [ "$suites" -ge 1 ]; then k=v
         else skipped="${skipped:-a $who pass without a suite run with exit 0 during its run does not count}"; continue; fi ;;
-      ui:issues-found|te:issues-found) okst=0 ;;
+      ui:issues-found|te:issues-found) k=i ;;
+      *:rejected) skipped="${skipped:-$who ran but its final answer had no first-line 'Status: pass|degraded|issues-found|blocked'${why:+ ($why)} — re-run $who and have it end with that line}"; continue ;;
       *) skipped="${skipped:-a $who run without a verdict (status '$st') does not count}"; continue ;;
     esac
-    chosen=1; cte="$te"; break
+    n=${#ck[@]}; ck[n]=$k; ctr[n]="$rt"; cf[n]="$f"; cst[n]="$st"; cte[n]="$te"; csc[n]=-1
+    [ "$n" -ge 29 ] && break
   done < <(jq -rs --arg t "$type" '
       [.[] | select(.type == "suite" and .exit == 0)] as $ok
       | [.[] | select(.type == "shot")] as $shots
-      | [.[] | select(.type == $t)] | sort_by(.t_end // 0) | reverse | .[:30][]
+      | [.[] | select(.type == $t)] | sort_by(.t_end // 0) | reverse | .[:100][]
       | ((.t_start // 0) | if type == "number" then floor else 0 end) as $s
       | ((.t_end // 0) | if type == "number" then floor else 0 end) as $e
       | def inside: ((.t_start // 0) >= $s and (.t_end // 0) <= $e);
@@ -674,24 +1009,67 @@ tc_agent_check() {
          ([$ok[] | select(.kind == "e2e" and inside)] | length | tostring),
          ([$ok[] | select(inside)] | length | tostring),
          ([$shots[] | select((.ts // 0) >= $s and (.ts // 0) <= $e)] | length | tostring),
-         (if .reason_stated == true then "1" else "0" end), ($s | tostring), ($e | tostring)]
+         (if .reason_stated == true then "1" else "0" end), ($s | tostring), ($e | tostring),
+         (.reason // "" | tostring | gsub("[[:cntrl:]]"; " ") | .[:200]),
+         (.head // "" | tostring | if test("^[0-9a-f]{7,64}$") then . else "" end)]
         | join("\u001f")' "$rfile" 2>/dev/null)
-  v=$(jq -rs --arg g "$grp" '[.[] | select(.type == "anchor" and .group == $g and (.tree | type) == "string")]
-        | sort_by(.ts // 0) | last // empty | [.tree, ((.ts // 0) | floor | tostring), ._file] | join("\u001f")' "$rfile" 2>/dev/null)
+  # the newest anchor of this group whose commit is an ancestor of the base commit
   at=""; ats=0; af=""
-  [ -n "$v" ] && IFS=$'\037' read -r at ats af <<< "$v"
-  if [ "$chosen" -eq 1 ] && { [ -z "$at" ] || [ "$cte" -ge "$ats" ]; }; then
-    TC_AC_STATUS="$st"; TC_AC_FILE="$f"; base="$rt"; TC_AC_BASE=receipt
-    [ "$okst" -eq 1 ] || TC_AC_REASON="the latest $who verdict on this work is issues-found — fix and re-run $who"
-  elif [ -n "$at" ]; then
-    base="$at"; TC_AC_BASE=anchor; TC_AC_FILE="$af"; okst=1
-  else
-    base="${htree:-$(tc_empty_tree "$repo")}"; TC_AC_BASE="head"; okst=1
+  while IFS=$'\037' read -r v ats af ac; do
+    [ -n "$v" ] && [ -n "$ac" ] && [ -n "${TC__HEADC:-${TC__BASEC:-}}" ] || continue
+    git -C "$repo" merge-base --is-ancestor "$ac" "${TC__HEADC:-$TC__BASEC}" 2>/dev/null || continue
+    at="$v"; break
+  done < <(jq -rs --arg g "$grp" '[.[] | select(.type == "anchor" and .group == $g and (.tree | type) == "string")]
+        | sort_by(.ts // 0) | reverse | .[:30][] | [.tree, ((.ts // 0) | floor | tostring), ._file, (.commit // "" | tostring)] | join("\u001f")' "$rfile" 2>/dev/null)
+  [ -n "$at" ] || ats=0
+  if [ -n "$at" ]; then n=${#ck[@]}; ck[n]=a; ctr[n]="$at"; cf[n]="$af"; cst[n]=""; cte[n]="$ats"; csc[n]=-1; fi
+  # no valid receipt and no anchor -> the base tree itself is the only base
+  v=0; for k in ${ck[@]+"${ck[@]}"}; do [ "$k" = i ] || v=1; done
+  if [ "$v" -eq 0 ]; then n=${#ck[@]}; ck[n]=h; ctr[n]="${htree:-$(tc_empty_tree "$repo")}"; cf[n]=""; cst[n]=""; cte[n]=0; csc[n]=-1; fi
+  # drift score per candidate (cached by tree): lines, +big when not small; -1 = unusable.
+  # One batched pass (tc__drift_batch) settles every candidate that is not small by
+  # its file set; only the few small-looking ones get an exact line count.
+  if [ "${#ck[@]}" -gt 0 ]; then
+    cache=$'\n'"$(printf '%s\n' "${ctr[@]}" | awk '!s[$0]++' | tc__drift_batch "$repo" "$tree" "$grp" "$thf" "$big")"$'\n'
   fi
-  tc_drift "$repo" "$base" "$tree" "$grp" || { TC_AC_REASON="${TC_AC_REASON:-cannot compare with the last $who check / anchor (its tree is missing) — run $who}"; TC_AC_OK=0; return 0; }
-  [ "$okst" -eq 1 ] || return 0
-  if [ "$TC_DRIFT_ADDED$TC_DRIFT_DELETED$TC_DRIFT_RENAMED$TC_DRIFT_BINARY" != 0000 ] \
-     || [ "$TC_DRIFT_LINES" -gt "$thl" ] || [ "$TC_DRIFT_FILES" -gt "$thf" ]; then
+  for k in ${ck[@]+"${!ck[@]}"}; do
+    [ "${ck[k]}" != i ] && [ "$bv" -ge 0 ] && [ "${csc[bv]}" -eq 0 ] && continue   # an exact match cannot be beaten
+    case "$cache" in
+      *$'\n'"${ctr[k]} "[-0-9]*) sc="${cache#*$'\n'"${ctr[k]} "}"; sc="${sc%%$'\n'*}" ;;
+      *)
+        if tc_drift "$repo" "${ctr[k]}" "$tree" "$grp" "$thf"; then
+          sc="$TC_DRIFT_LINES"
+          if [ "$TC_DRIFT_ADDED$TC_DRIFT_DELETED$TC_DRIFT_RENAMED$TC_DRIFT_BINARY" != 0000 ] \
+             || [ "$TC_DRIFT_LINES" -gt "$thl" ] || [ "$TC_DRIFT_FILES" -gt "$thf" ]; then sc=$((sc + big)); fi
+        else sc=-1; fi
+        cache="$cache${ctr[k]} $sc"$'\n' ;;
+    esac
+    csc[k]=$sc
+    [ "$sc" -ge 0 ] || continue
+    if [ "${ck[k]}" = i ]; then
+      { [ "$bi" -lt 0 ] || [ "$sc" -lt "${csc[bi]}" ]; } && bi=$k
+    else
+      { [ "$bv" -lt 0 ] || [ "$sc" -lt "${csc[bv]}" ]; } && bv=$k
+    fi
+  done
+  if [ "$bi" -ge 0 ] && { [ "$bv" -lt 0 ] || [ "${csc[bi]}" -lt "${csc[bv]}" ] \
+       || { [ "${csc[bi]}" -eq "${csc[bv]}" ] && [ "${cte[bi]}" -ge "${cte[bv]}" ]; }; }; then
+    TC_AC_STATUS=issues-found; TC_AC_FILE="${cf[bi]}"; TC_AC_BASE=receipt
+    tc_drift "$repo" "${ctr[bi]}" "$tree" "$grp"
+    TC_AC_REASON="the latest $who verdict on this work is issues-found — fix and re-run $who"
+    return 0
+  fi
+  if [ "$bv" -lt 0 ]; then
+    TC_AC_REASON="cannot compare with the last $who check / anchor (its tree is missing or git failed) — run $who${skipped:+ ($skipped)}"
+    return 0
+  fi
+  case "${ck[bv]}" in
+    v) TC_AC_BASE=receipt; TC_AC_STATUS="${cst[bv]}"; TC_AC_FILE="${cf[bv]}" ;;
+    a) TC_AC_BASE=anchor; TC_AC_FILE="${cf[bv]}" ;;
+    h) TC_AC_BASE=head ;;
+  esac
+  tc_drift "$repo" "${ctr[bv]}" "$tree" "$grp" || { TC_AC_REASON="cannot compare with the last $who check / anchor (git failed) — run $who"; return 0; }
+  if [ "${csc[bv]}" -ge "$big" ]; then
     if [ "$TC_AC_BASE" = receipt ]; then
       TC_AC_REASON="changed since the $who check beyond the small-change threshold (counted from that check, across commits; added/deleted/renamed/binary files always count) — re-run $who"
     else
@@ -706,7 +1084,7 @@ tc_agent_check() {
   case "$TC_AC_BASE" in
     receipt) TC_AC_REASON="checked (drift within the small-change threshold)" ;;
     anchor) TC_AC_REASON="small change since the anchor (accumulated across commits, within the threshold)" ;;
-    head) TC_AC_REASON="small change, no $who check needed (an anchor is created on commit)"; TC_AC_ANCHOR="$base" ;;
+    head) TC_AC_REASON="small change, no $who check needed (an anchor is created on commit)"; TC_AC_ANCHOR="${ctr[bv]}" ;;
   esac
   return 0
 }
@@ -743,18 +1121,21 @@ tc_bool() { [ "$1" -eq 1 ] && echo true || echo false; }
 # tc_requirements <repo> <tree> <base tree-ish> <config json> <contract_sha>
 # THE decision — one place for the commit gate (hooks/pre-commit-gate enforces it
 # with a contract, warns without) and `subteams-tests status` (reports it).
-# Files = diff <base>..<tree>. Required:
+# <base> = HEAD, HEAD^ for --amend, or the empty tree. Files = diff <base>..<tree>.
+# Required:
 #   - every `run: auto` suite with a touched file (its paths; no paths = any
 #     non-docs file): a valid suite receipt for exactly this content (tc_suite_check);
 #     opt-in / live suites are never required;
 #   - ui-tester when the ui group is touched, test-engineer when the code group is
 #     (tc_agent_check: evidence + accumulated drift).
 # Sets TC_REQ_OK (1 = nothing missing), TC_REQ_MISSING (one item per line; no
-# threshold numbers), TC_REQ_JSON ({tree, base, files, suites, agents, ok,
-# missing}). rc 1 = could not evaluate (TC_ERR) — callers with a contract deny.
+# threshold numbers), TC_REQ_WARN (one warning per line: clamped threshold, flaky
+# suites), TC_REQ_ANCHORS ("<group> <tree> <commit>" per line), TC_REQ_JSON ({tree,
+# base, files, suites, agents, ok, missing, warnings}). rc 1 = could not evaluate
+# (TC_ERR) — callers with a contract deny.
 tc_requirements() {
   local repo="$1" tree="$2" base="$3" cfg="$4" csha="$5"
-  local flist rfile i name req f v cwd cmd msha rows="" uit=0 cot=0 ag_ui ag_te files_json e2e_req=0 htree warns=""
+  local flist rfile i name req f v cwd cmd msha rows="" uit=0 cot=0 ag_ui ag_te files_json e2e_req=0 htree
   TC_REQ_OK=0; TC_REQ_MISSING=""; TC_REQ_JSON=""; TC_REQ_ANCHORS=""; TC_REQ_WARN=""
   tc_is_tree "$repo" "$tree" || { TC_ERR="not a tree: $tree"; return 1; }
   flist=$(tc_changed_files "$repo" "$base" "$tree") || { TC_ERR="git diff $base..$tree failed"; return 1; }
@@ -763,8 +1144,16 @@ tc_requirements() {
   tc_receipts_load "$repo" > "$rfile"
   tc_threshold "$cfg"
   htree=$(git -C "$repo" rev-parse "$base^{tree}" 2>/dev/null) || htree=$(tc_empty_tree "$repo")
+  TC__BASEC=$(git -C "$repo" rev-parse -q --verify "$base^{commit}" 2>/dev/null) || TC__BASEC=""
+  # receipts and anchors are bound to the REAL history: on --amend the base is
+  # HEAD^, but a check taken now has .head = HEAD — ancestry is tested against HEAD
+  TC__HEADC=$(git -C "$repo" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) || TC__HEADC=""
+  [ -n "$TC__WORK" ] && rm -rf "$TC__WORK"
+  TC__WORK=$(mktemp -d "${TMPDIR:-/tmp}/tc-work.XXXXXX") || { rm -f "$rfile"; TC_ERR="cannot create a temp dir"; return 1; }
+  tc_dcommit_set "$repo" "$htree" "$tree" || TC__DFILTER=0      # no filter = the stricter old comparison
+  TC_UNSTAGED=$'\n'"$(tc_unstaged "$repo" "$tree")"$'\n'
   if [ "$(printf '%s' "$cfg" | jq -r '.small_change_clamped // false' 2>/dev/null)" = true ]; then
-    TC_REQ_WARN="small_change in the test contract is above the built-in ceiling — clamped to $TC_MAX_LINES lines / $TC_MAX_FILES files"
+    tc__req_warn "small_change in the test contract is above the built-in ceiling — clamped to $TC_MAX_LINES lines / $TC_MAX_FILES files"
   fi
   TC_REQ_OK=1
   while IFS= read -r f; do
@@ -796,32 +1185,50 @@ tc_requirements() {
     IFS=$'\037' read -r cwd cmd <<< "$v"
     msha=$(tc_cmd_sha "$cwd" "$cmd")
     tc_suite_check "$repo" "$rfile" "$tree" "$i" "$csha" "$msha"
+    [ "$TC_SC_FLAKY" -eq 1 ] && tc__req_warn "suite $name failed earlier on the same content (flaky?) — the newest run passed"
     rows="$rows$(jq -nc --arg n "$name" --argjson ok "$(tc_bool "$TC_SC_OK")" --arg why "$TC_SC_REASON" --arg f "$TC_SC_FILE" \
-      '{name: $n, run: "auto", required: true, touched: true, ok: $ok, reason: $why, receipt: (if $f == "" then null else $f end)}')"$'\n'
+      --argjson fl "$(tc_bool "$TC_SC_FLAKY")" \
+      '{name: $n, run: "auto", required: true, touched: true, ok: $ok, reason: $why, receipt: (if $f == "" then null else $f end)}
+       + (if $fl then {flaky: true} else {} end)')"$'\n'
     if [ "$TC_SC_OK" -ne 1 ]; then
       TC_REQ_OK=0; TC_REQ_MISSING="$TC_REQ_MISSING${TC_REQ_MISSING:+$'\n'}suite $name: $TC_SC_REASON — run: subteams-tests run $name"
     fi
   done
   tc__req_agent "$repo" "$rfile" "$tree" ui "$uit" "$e2e_req" "$htree"; ag_ui="$TC__AG_JSON"
-  [ "$TC_AC_OK" -eq 1 ] || { TC_REQ_OK=0; TC_REQ_MISSING="$TC_REQ_MISSING${TC_REQ_MISSING:+$'\n'}ui-tester: $TC_AC_REASON"; }
-  [ -n "${TC_AC_ANCHOR:-}" ] && TC_REQ_ANCHORS="${TC_REQ_ANCHORS}ui $TC_AC_ANCHOR"$'\n'
+  [ "$TC_AC_OK" -eq 1 ] || { TC_REQ_OK=0; TC_REQ_MISSING="$TC_REQ_MISSING${TC_REQ_MISSING:+$'\n'}ui-tester: $TC_AC_REASON$(tc__unstaged_note ui ui-tester)"; }
+  [ -n "${TC_AC_ANCHOR:-}" ] && TC_REQ_ANCHORS="${TC_REQ_ANCHORS}ui $TC_AC_ANCHOR ${TC__BASEC:--}"$'\n'
   tc__req_agent "$repo" "$rfile" "$tree" code "$cot" 0 "$htree"; ag_te="$TC__AG_JSON"
-  [ "$TC_AC_OK" -eq 1 ] || { TC_REQ_OK=0; TC_REQ_MISSING="$TC_REQ_MISSING${TC_REQ_MISSING:+$'\n'}test-engineer: $TC_AC_REASON"; }
-  [ -n "${TC_AC_ANCHOR:-}" ] && TC_REQ_ANCHORS="${TC_REQ_ANCHORS}code $TC_AC_ANCHOR"$'\n'
-  rm -f "$rfile"
+  [ "$TC_AC_OK" -eq 1 ] || { TC_REQ_OK=0; TC_REQ_MISSING="$TC_REQ_MISSING${TC_REQ_MISSING:+$'\n'}test-engineer: $TC_AC_REASON$(tc__unstaged_note code test-engineer)"; }
+  [ -n "${TC_AC_ANCHOR:-}" ] && TC_REQ_ANCHORS="${TC_REQ_ANCHORS}code $TC_AC_ANCHOR ${TC__BASEC:--}"$'\n'
+  rm -f "$rfile"; rm -rf "$TC__WORK"; TC__WORK=""; TC__DFILTER=0
   files_json=$(printf '%s\n' "$flist" | jq -R . | jq -sc 'map(select(length > 0))')
   TC_REQ_JSON=$(printf '%s' "$rows" | jq -sc --arg tree "$tree" --arg base "$base" --argjson files "$files_json" \
     --argjson ui "$ag_ui" --argjson te "$ag_te" --argjson ok "$(tc_bool "$TC_REQ_OK")" --arg missing "$TC_REQ_MISSING" \
     --arg warn "$TC_REQ_WARN" \
     '{tree: $tree, base: $base, files: $files, suites: ., agents: {"ui-tester": $ui, "test-engineer": $te}, ok: $ok,
-      missing: ($missing | split("\n") | map(select(length > 0))), warnings: (if $warn == "" then [] else [$warn] end)}') || { TC_ERR="cannot build the requirements JSON"; return 1; }
+      missing: ($missing | split("\n") | map(select(length > 0))), warnings: ($warn | split("\n") | map(select(length > 0)))}') || { TC_ERR="cannot build the requirements JSON"; return 1; }
+  return 0
+}
+
+tc__req_warn() { TC_REQ_WARN="$TC_REQ_WARN${TC_REQ_WARN:+$'\n'}$1"; }
+
+# tc__unstaged_note <group> <agent> — after a failed agent check against a receipt:
+# names the group's files with unstaged changes (the agent saw the working-tree
+# version; a re-run alone sees it again). Prints "" when none / other bases.
+tc__unstaged_note() {
+  local p out=""
+  [ "$TC_AC_BASE" = receipt ] && [ "$TC_AC_STATUS" != issues-found ] || return 0
+  while IFS= read -r p; do
+    [ -n "$p" ] && tc_in_group "$p" "$1" && out="$out${out:+, }$p"
+  done <<< "${TC_UNSTAGED:-}"
+  [ -n "$out" ] && printf '; note: %s has unstaged changes — the %s check saw the working-tree version; %s' "$out" "$2" "$TC_UNSTAGED_HINT"
   return 0
 }
 
 # tc__req_agent <repo> <rfile> <tree> <ui|code> <touched 0/1> -> TC__AG_JSON,
 # TC_AC_OK / TC_AC_REASON (runs in the caller's shell: call it directly, not in $(…)).
-tc__req_agent() { # … <e2e_req> <head tree>
-  TC_AC_ANCHOR=""
+tc__req_agent() { # … <e2e_req> <base tree>
+  TC_AC_ANCHOR=""; TC_AC_BASE=""; TC_AC_STATUS=""
   if [ "$5" -eq 0 ]; then TC_AC_OK=1; TC_AC_REASON=""; TC__AG_JSON='{"touched":false,"ok":null}'; return 0; fi
   tc_agent_check "$1" "$2" "$3" "$4" "$TC_TH_LINES" "$TC_TH_FILES" "$6" "$7"
   TC__AG_JSON=$(jq -nc --argjson ok "$(tc_bool "$TC_AC_OK")" --arg why "$TC_AC_REASON" --arg st "$TC_AC_STATUS" \
@@ -833,9 +1240,12 @@ tc__req_agent() { # … <e2e_req> <head tree>
      + (if $e2e then {e2e_required: true} else {} end)')
 }
 
-# tc_anchor_write <repo> <ui|code> <tree> — the drift anchor (see tc_agent_check).
-# Written ONLY by the commit gate when it allows a commit (TC_REQ_ANCHORS).
+# tc_anchor_write <repo> <ui|code> <tree> <base commit|-> — the drift anchor (see
+# tc_agent_check). Written ONLY by the commit gate when it allows a commit
+# (TC_REQ_ANCHORS). The commit binds it to a branch: it is used only while that
+# commit is an ancestor of the base commit.
 tc_anchor_write() {
-  local now; now=$(date +%s)
-  tc_receipt_write "$1" "{\"type\":\"anchor\",\"group\":\"$2\",\"tree\":\"$3\",\"ts\":$now,\"t_end\":$now}" >/dev/null
+  local now c=""; now=$(date +%s)
+  case "${4:-}" in ''|-) ;; *) printf '%s' "$4" | grep -qE '^[0-9a-f]{7,64}$' && c="$4" ;; esac
+  tc_receipt_write "$1" "{\"type\":\"anchor\",\"group\":\"$2\",\"tree\":\"$3\",\"commit\":\"$c\",\"ts\":$now,\"t_end\":$now}" >/dev/null
 }

@@ -95,8 +95,12 @@ echo "--- discovery: Playwright config in a subdirectory"
 P=$(mkd pw); printf '{"scripts":{"test":"vitest run"}}' > "$P/package.json"; mkdir -p "$P/e2e"
 printf "export default { use: { baseURL: 'http://localhost:4000' }, webServer: { command: 'node s.js', url: 'http://localhost:4000' } }\n" > "$P/e2e/playwright.config.ts"
 st "$P"
-check "pw: config suite added" '{"name":"playwright:e2e","cmd":"npx playwright test","cwd":"e2e","kind":"e2e","run":"auto"}' \
+check "pw: config suite added (B9: not the default test command -> opt-in, suggested)" '{"name":"playwright:e2e","cmd":"npx playwright test","cwd":"e2e","kind":"e2e","run":"opt-in"}' \
   "$(q '.suites[] | select(.name=="playwright:e2e") | {name,cmd,cwd,kind,run}')"
+check "B9: recommend.run = only the default test command; e2e under recommend.suggest" '{"run":["test"],"suggest":["playwright:e2e"]}' \
+  "$(q '{run: .recommend.run, suggest: [.recommend.suggest[].name]}')"
+st "$P" --init-contract
+check "B9: --init-contract keeps the e2e suite auto (the user reviews the draft)" '"auto"' "$(q '.suites[] | select(.name=="playwright:e2e") | .run')"
 P2=$(mkd pw2); cp -R "$P/e2e" "$P2/"; printf '{"scripts":{"test":"vitest run","test:e2e":"playwright test -c e2e/playwright.config.ts"}}' > "$P2/package.json"
 st "$P2"; check "pw: deduped with the script that runs Playwright" '["test","test:e2e"]' "$(q '[.suites[].name]')"
 mkdir -p "$P/a/b/c/d"; printf 'x' > "$P/a/b/c/d/cypress.config.js"; mkdir -p "$P/a/b/c"; printf 'x' > "$P/a/b/c/cypress.config.js"
@@ -176,11 +180,13 @@ contract "$P/CLAUDE.md" '{"suites":[{"name":"unit","cmd":"x","paths":["src/**"]}
 st "$P" --files - < <(printf 'templates/plan.md\napp/main.py\npublic/emails/welcome.html\ntests/a.test.ts\nsrc/ui/Button.tsx\nsrc/ui/Button.test.tsx\n./src/lib/x.ts\n')
 check "rc 0" 0 "$RC"
 check "ui = ui_globs - ui_exclude - test" '["src/ui/Button.tsx"]' "$(q '.groups.ui')"
-check "code (no code_globs) = non-docs outside ui/test" '["app/main.py","src/lib/x.ts"]' "$(q '.groups.code')"
+check "code (no code_globs) = non-docs outside ui/test + B10 scripts inside ui_globs" '["app/main.py","src/lib/x.ts","src/ui/Button.tsx"]' "$(q '.groups.code')"
 check "test files" '["src/ui/Button.test.tsx","tests/a.test.ts"]' "$(q '.groups.test')"
 check "docs" '["templates/plan.md"]' "$(q '.groups.docs')"
 check "suite with paths" '["src/lib/x.ts","src/ui/Button.test.tsx","src/ui/Button.tsx"]' "$(q '.groups.suites.unit')"
 check "suite without paths = every non-docs file (tests included)" 6 "$(q '.groups.suites.e2e | length')"
+st "$P" --files - < <(printf 'src/ui/page.html\nsrc/ui/a.css\nsrc/ui/C.vue\nsrc/ui/s.mjs\n')
+check "B10: markup/styles in ui only; .vue/.mjs in ui AND code" '{"code":["src/ui/C.vue","src/ui/s.mjs"],"ui":["src/ui/C.vue","src/ui/a.css","src/ui/page.html","src/ui/s.mjs"]}' "$(q '{code:.groups.code, ui:.groups.ui}')"
 contract "$P/CLAUDE.md" '{"suites":[],"ui_globs":["src/ui/**"],"code_globs":["src/**"],"test_globs":["**/*.test.*"]}'
 st "$P" --files - < <(printf 'src/ui/Button.tsx\napp/main.py\nsrc/a.test.ts\n')
 check "explicit code_globs: ui file is also code, outside file is not, test is not" '{"code":["src/ui/Button.tsx"],"ui":["src/ui/Button.tsx"]}' "$(q '{code:.groups.code, ui:.groups.ui}')"
@@ -432,7 +438,7 @@ echo "--- performance"
 P=$(mkd perf); contract "$P/CLAUDE.md" '{"suites":[{"name":"unit","cmd":"x","paths":["src/**"]},{"name":"e2e","cmd":"y"}],"ui_globs":["src/ui/**","public/**"],"ui_exclude":["public/emails/**"],"test_globs":["**/*.test.*","tests/**"]}'
 awk 'BEGIN{for(i=0;i<300;i++){d=(i%3==0)?"src/ui":(i%3==1)?"src/lib":"tests"; print d "/f" i ".ts"}}' > "$TMP/300.txt"
 TIMEFORMAT=%R; T=$( { time (cd "$P" && "$ST" --files - < "$TMP/300.txt" > "$TMP/out" 2>/dev/null); } 2>&1 ); OUT=$(cat "$TMP/out")
-check "300 files classified < 2 s (took ${T}s)" "1:300" "$(awk -v t="$T" 'BEGIN{print (t<2)?1:0}'):$(q '[.groups.ui,.groups.code,.groups.test] | map(length) | add')"
+check "300 files classified < 2 s (took ${T}s; src/ui/*.ts count as ui AND code: 400)" "1:400" "$(awk -v t="$T" 'BEGIN{print (t<2)?1:0}'):$(q '[.groups.ui,.groups.code,.groups.test] | map(length) | add')"
 R=$(mkgit perfgit); cp "$P/CLAUDE.md" "$R/"; while IFS= read -r f; do mkdir -p "$R/$(dirname "$f")"; echo "$f" > "$R/$f"; done < "$TMP/300.txt"; commit_all "$R"
 while IFS= read -r f; do echo x >> "$R/$f"; done < "$TMP/300.txt"; git -C "$R" add -A
 T=$( { time (cd "$R" && "$ST" status > /dev/null 2>&1); } 2>&1 )
