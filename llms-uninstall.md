@@ -86,3 +86,8 @@ Then re-run the checks.
 3. **Re-enable superpowers** (optional). If superpowers was disabled during install and you want it back, add `"superpowers@claude-plugins-official": true` to the `enabledPlugins` block in `~/.claude/settings.json`.
 
 **Not removed:** any project-level files you created using plugin templates (`CONVENTIONS.md`, `ARCHITECTURE.md`, `BACKLOG.md`, `CHANGELOG.md`, ADR files). Those belong to your project and are yours to keep or delete.
+
+**Caches left behind (safe to delete; ask before deleting):**
+- `${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/` — the agent-browser install (~40 MB), test receipts, screenshots, the discovery cache, review marks.
+- `~/.agent-browser/browsers` — Chrome for Testing (~150 MB), only if `subteams-browser setup` downloaded it. agent-browser's own location: delete it only if no other agent-browser use on this machine needs it.
+- A project `CLAUDE.md` / `AGENTS.md` may still hold a `<!-- subteams:test-suites … -->` contract block; without the plugin it does nothing.

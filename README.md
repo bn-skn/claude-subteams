@@ -123,6 +123,8 @@ Or with the shell wrapper:
 bash scripts/uninstall.sh
 ```
 
+Uninstalling leaves the cache `${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/` (agent-browser ~40 MB, test receipts, screenshots) and, if `subteams-browser setup` ran, Chrome for Testing in `~/.agent-browser/browsers` (~150 MB). Delete them by hand if you no longer need them.
+
 ### Upgrading from a pre-marketplace install (v1.7 and earlier)
 
 If you installed via the old `install.sh` script, remove the stale local marketplace before reinstalling:
@@ -155,12 +157,12 @@ This is an excerpt; the full current snippet is the file `templates/claudemd-sni
 
 ## Project suites & UI verification
 
-Before a commit the plugin runs the project's own test suites and, for changes above the small-change threshold, two checks: **test-engineer** for logic and **ui-tester** for UI — the project's e2e suites plus a live look at the changed screens at 320 and 1280 px, with screenshots and a list of non-blocking improvements. The process is `using-subteams` §6.7; the design and its limits are [ADR-011](docs/adr/011-project-suites-and-ui-verification.md).
+Before a commit the model, following `using-subteams` §6.7, runs the project's own test suites and, for changes above the small-change threshold, two checks: **test-engineer** for logic and **ui-tester** for UI — the project's e2e suites plus a live look at the changed screens at 320 and 1280 px, with screenshots and a list of non-blocking improvements. The process is `using-subteams` §6.7; the design and its limits are [ADR-011](docs/adr/011-project-suites-and-ui-verification.md).
 
 **Installs itself**
 
 - `subteams-tests` and `subteams-browser` — on the Bash PATH from the plugin's `bin/`, for the main window and subagents alike.
-- agent-browser 0.43.0 — on first use of `subteams-browser`, from the plugin's lock file (`npm ci --ignore-scripts`, sha512 checked) into `~/.cache/claude-subteams/agent-browser/0.43.0/`. Needs Node/npm. Never upgraded except by a plugin release.
+- agent-browser 0.43.0 — on first use of `subteams-browser`, from the plugin's lock file (`npm ci --ignore-scripts`, sha512 checked) into `~/.cache/claude-subteams/agent-browser/0.43.0/` (~40 MB). Needs Node/npm. Never upgraded except by a plugin release; older cached versions are pruned. The first call runs a network `npm ci` even when agent-browser 0.43.0 is already on PATH (PATH is the fallback); a failed install is retried after 10 min or by `subteams-browser setup`.
 
 **Per project**
 
@@ -180,9 +182,9 @@ subteams-tests --init-contract       # print a contract draft
 subteams-browser --session <name> screenshot /abs/path.png   # agent-browser with a mandatory own session
 ```
 
-Exit codes of `subteams-tests`: 0 ok · 1 error / something missing (`status`) · 2 broken JSON in the contract or `package.json` · 3 no `jq` · 64 bad usage; `run` exits with the suite's own code. `subteams-browser` passes an allowlist of agent-browser commands and options, with `--session <name>` before the command; everything else exits 2 — e.g. `state save` / `state load`, `install`, `upgrade`, `close --all`, and options that reach the real profile, files or browser binary (`--profile`, `--args`, `--state`, `--executable-path`). 127: agent-browser or Chrome unavailable. The first call may install agent-browser (up to ~90 s).
+Exit codes of `subteams-tests`: 0 ok · 1 error / something missing (`status`) · 2 broken JSON in the contract or `package.json` · 3 no `jq` · 64 bad usage; `run` exits with the suite's own code. `subteams-browser` passes an allowlist of agent-browser commands and of options in any position, with `--session <name>` before the command; `--` ends option checks, so text that starts with a dash goes after it (`fill '#f' -- --text`). Everything else exits 2 — e.g. `state save` / `state load`, `install`, `upgrade`, `close --all`, `session id`, `open --headers`, and options that reach the real profile, files or browser binary (`--profile`, `--args`, `--state`, `--executable-path`). It runs agent-browser with a neutral empty config (your `~/.agent-browser/config.json` and a project's `agent-browser.json` are not loaded) and without `AGENT_BROWSER_*` variables except `AGENT_BROWSER_EXECUTABLE_PATH`. 127: agent-browser or Chrome unavailable. The first call may install agent-browser (`npm ci` up to 90 s, plus a wait if another install is running).
 
-**Committing under a contract** — the gate computes the tree the commit will record, so `-a`, `<paths>`, `-o`, `-i`, `--pathspec-from-file` and a preceding literal `git add` / `git rm` work; pass the message as `git commit -F - <<'EOF' … EOF`. The commit must be the only state-changing command of its line, in a repository named by a literal path; `subteams-tests status` reads the index, so with `-a`, `<paths>` or `--amend` it can differ from what the gate checks. Every deny says what to change.
+**Committing under a contract** — the gate checks a commit line only in the allowed shape `[cd /abs &&] [git add <literal paths> &&] git commit [-a] [-m '…' | -F - <<'EOF'] [-- <paths>]`, followed only by read-only actions, commands joined by `;`, `&&` or a newline; for it the tree the gate checks is the tree git will record. Any other shape (a pipe into the commit, `||`, `&`, subshells, `$(…)` outside single quotes, `bash -c`, config or index overrides, …) is denied with a hint; without a contract the gate only warns. `subteams-tests status` reads the index, so with `-a`, `<paths>` or `--amend` it can differ from what the gate checks. In a shared working tree, a tracked file with unstaged edits outside the commit denies it unless another live instance has claimed it (`multi-instance`).
 
 **Switches** — `CLAUDE_SUBTEAMS_SKIP_TEST_GATE`, `CLAUDE_SUBTEAMS_NO_AUTO_INSTALL`, `CLAUDE_SUBTEAMS_AGENT_BROWSER`: see [Environment variables](#environment-variables).
 
@@ -192,7 +194,7 @@ Exit codes of `subteams-tests`: 0 ok · 1 error / something missing (`status`) �
 
 1. **Create the project through the plugin** (`project-scaffold`, then the pipeline). For a web app it installs Playwright Test as part of the project, with `webServer` and a literal `baseURL` in `playwright.config`, and a first e2e test.
 2. **Add the contract** once the app and its tests exist: `subteams-tests --init-contract`, review the draft (narrow `ui_globs`, mark anything needing keys or network `opt-in`/`live`), paste it into `CLAUDE.md`, and commit it **alone**. `project-scaffold` does this as its Step 5; in an autonomous run it commits the draft and says so.
-3. **Work as usual and say "commit".** The plugin runs the suites, dispatches ui-tester / test-engineer when the change needs them, and the commit goes through only when `subteams-tests status` shows nothing missing. The final answer lists suite results, skipped suites, screenshot paths and ui-tester's improvements.
+3. **Work as usual and say "commit".** The model, following `using-subteams` §6.7, runs the suites and dispatches ui-tester / test-engineer when the change needs them; under the contract the gate lets the commit through only when nothing is missing (`subteams-tests status` shows it beforehand). The final answer lists suite results, skipped suites, screenshot paths and ui-tester's improvements.
 
 For an existing project: the plugin offers the contract once, when it finds an e2e suite or UI files.
 
@@ -294,7 +296,7 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | Event | Hook | Purpose |
 |---|---|---|
 | `SessionStart` | `session-start` | Checks for stale BACKLOG items and active plans from previous sessions. No prompt injection — activation via CLAUDE.md. |
-| `PreToolUse` (Bash) | `pre-commit-gate` | Before a `git commit`: runs tsc / mypy / go build and requires a finished code-reviewer run in the session when the commit includes code. Counts what the command itself will commit (`git add … && git commit`, `-a`, pathspec), parsed by `hooks/lib-gitcmd.sh`; the block reason goes to stderr so the model sees it. Size signal past 400 lines. Test gate: computes the tree the commit will record (`hooks/lib-commitscan.sh`, a statement-level view of the line, plus `scripts/lib-testclass.sh`) and compares it with recorded suite runs and ui-tester / test-engineer checks — blocks under a test contract, warns without one, silent under the `none` marker (see [Project suites & UI verification](#project-suites--ui-verification)). |
+| `PreToolUse` (Bash) | `pre-commit-gate` | Before a `git commit`: runs tsc / mypy / go build and requires a finished code-reviewer run in the session when the commit includes code. Counts what the command itself will commit (`git add … && git commit`, `-a`, pathspec), parsed by `hooks/lib-gitcmd.sh`; the block reason goes to stderr so the model sees it. Size signal past 400 lines. Test gate: under a test contract accepts only the allowed commit-line shape, computes the tree the commit will record (`hooks/lib-commitscan.sh`, a statement-level view of the line, plus `scripts/lib-testclass.sh`) and compares it with recorded suite runs and ui-tester / test-engineer checks — blocks under a test contract, warns without one, silent under the `none` marker (see [Project suites & UI verification](#project-suites--ui-verification)). |
 | `PreToolUse` (Bash) | `pre-push-check` | Advisory (`additionalContext`) on a push to main/master or a force push; never blocks. |
 | `PreToolUse` (Edit/Write/MultiEdit/NotebookEdit/Bash) | `autonomy-gate` | Enforces scoped autonomy grants — blocks out-of-scope or cap-exceeding writes and edits to the grant's own run record before they land. Inert unless `CLAUDE_SUBTEAMS_AUTONOMY` is set. Delegates scope/cap checks to `scripts/autonomy-check.sh`. Contains agent drift off scope; not a sandbox against a shell-equipped agent — see [ADR-007](docs/adr/007-autonomy-enforcement-architecture.md). |
 | `SubagentStart` / `SubagentStop` | `subagent-rails` | Start: injects a static rails pointer + honesty reminder into every spawned subagent (plugin text only, never repo content). Stop: writes the review marker `pre-commit-gate` checks, when a code-reviewer subagent finishes; for ui-tester / test-engineer, a receipt with the agent's status and the content it checked — in every repository where the agent left suite or screenshot receipts (another repository than the session's only if the agent's transcript names its absolute root); a final answer without a parsable first-line `Status:` leaves a `rejected` receipt the gate names. 20 s timeout. |

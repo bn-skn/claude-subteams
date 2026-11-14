@@ -27,6 +27,15 @@ Pre-existing / deferred items surfaced by the 9-agent + Codex audit and the 1.28
 - [ ] **Remaining audit items not fixed in 1.49.0:** `session-start` runs the consumer repo's `scripts/check-plan.sh` and injects its output unfiltered; skills call `check-plan.sh` / `check-arch-docs.sh` / `autonomy-check.sh` by relative path (rc=127 in a consumer repo); autonomy record is rewritable by one `sed -i … IMPL-PLAN-*.md` glob; diff goes to Gemini without a secrets filter; MUST/NEVER/ALWAYS emphasis (187/260/111) left in files other than using-subteams; README/INSTALL drift.
 - [ ] **Review gate residuals after 1.49.0:** `git add -A && git reset -- a.ts && git commit` blocks falsely (reset/restore --staged not subtracted — safe direction); `cd` inside a subshell leaks into the target dir; `echo "$(git commit -m x)"` is not seen; an aborted reviewer still writes the marker on the current CLI (no `last_assistant_message`) — could check the final assistant message in `agent_transcript_path`; abbreviated long options (`--mess`); `SubagentStop` in the teammate harness not probed live; bash 3.2 not run; `git commit -m docs -- doc.md` blocks when a peer staged a `.ts` (index always included — safe direction); `flock FILE -c "git commit …"` not parsed; only the first commit's `-C`/`cd` target is checked when several repos are committed in one line.
 
+## 1.50.0 follow-ups (test gate, 14.11.2026)
+In this order — the first two are structure debt from review round 3; (4) and (5) were deferred by the owner on 14.11.
+- [ ] **Extract the test gate from `hooks/pre-commit-gate`** — the `_tg_*` helpers and `_test_gate` into `hooks/lib-testgate.sh`; `pre-commit-gate` keeps the review gate, the compile check and the call. Do this first.
+- [ ] **Split `scripts/lib-testclass.sh` along its usage seams** — contract / globs / classification · git trees + `tc_ct_*` · receipt store · predicates / requirements. Keep `lib-testclass.sh` as the single sourced facade (consumers do not change their `source` line).
+- [ ] **Receipt schema** — one field table per receipt type, a `"v":1` field, per-type constructors instead of hand-built JSON in each writer.
+- [ ] **One-shot per-commit user override** (owner deferred 14.11) — a user-only way to let exactly one commit through, narrower than `CLAUDE_SUBTEAMS_SKIP_TEST_GATE=1`.
+- [ ] **Warn once per session in repos without a contract** (owner deferred 14.11) — the no-contract warning currently fires on every commit.
+- [ ] **macOS / bash 3.2 verification** — the gate, `lib-commitscan.sh`, `lib-testclass.sh` and `subteams-browser` are written bash-3.2-compatible but were not run on macOS before release.
+
 ## Ideas
 
 - ~~**pre-commit-gate: false-positive matcher**~~ CLOSED in 1.34.3 (anchored statement match + env-prefix tolerance). Was: — a non-echo-leading command containing literal `git commit` inside a string (`make build && echo "then git commit"`) passes the top filter; with staged unreviewed code it would block a harmless command. Pre-existing class (review F4, 1.33); fix = match `git commit` only as the statement's command position, not substring.

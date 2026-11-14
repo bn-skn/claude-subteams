@@ -128,7 +128,7 @@ An optional block in the project's root `CLAUDE.md` that names the project's tes
 
 **Classification:** test = `test_globs`; UI = `ui_globs` − `ui_exclude` − test; code = `code_globs` − test (or the default above). Without `code_globs`, a UI file with a script extension (`.ts .tsx .js .jsx .mjs .cjs .vue .svelte .astro`) is **both** UI and code — it needs test-engineer too; markup and styles stay UI only.
 
-**Environment:** settings a suite needs go into its `cmd`. `subteams-tests run` with a changed environment on the same line (`VAR=…` / `env` prefix, `export` / `source` before it) is denied by the commit gate, and `run` drops `npm_config_*`, `NODE_OPTIONS` and `PYTEST_ADDOPTS` from the inherited environment.
+**Environment:** settings a suite needs go into its `cmd`. `subteams-tests run` with a changed environment on the same line (`VAR=…` / `env` prefix, `export` / `set` / `source` before it) is denied by the commit gate, and `run` drops `npm_config_*`, `NODE_OPTIONS`, `PYTEST_ADDOPTS`, `ENV`, `SHELLOPTS` and `BASHOPTS` from the inherited environment. A suite that changes tracked files while it runs gets a `dirty` receipt — keep its artifacts in `.gitignore`.
 
 ### 9.4 Example (shown inside a fence, so it never activates)
 
@@ -167,7 +167,7 @@ An optional block in the project's root `CLAUDE.md` that names the project's tes
 
 ### 9.6 Changing it
 
-1. A change to the contract block is **its own commit, with no other files** — the gate refuses a commit that mixes them (judged on the tree the commit will record), and tells the user the contract changed. This stops a contract being weakened in the same commit it would check. Not enforced while a merge, cherry-pick, revert or rebase is in progress — the test gate only warns then.
+1. A change to the contract block is **its own commit, with no other files** — the gate refuses a commit that mixes them (judged on the tree the commit will record), and tells the user the contract changed. This stops a contract being weakened in the same commit it would check. `git commit --amend` that adds other files to the commit which introduced the contract is refused the same way. Not enforced while a merge, cherry-pick, revert or rebase is in progress — the test gate only warns then.
 2. Any value change to the contract voids every suite receipt (receipts carry a hash of the contract JSON) — rerun `--all-auto` after the contract commit. Whitespace and key order do not matter.
 3. `small_change` can only be lowered (9.3).
 4. Removing the block returns the project to warnings only; replacing it with the decline marker silences the test gate.
