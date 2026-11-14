@@ -86,7 +86,7 @@ else
 fi
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/subteams-tests.XXXXXX") || die 1 "cannot create a temp dir"
-trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "$WORK"; tc_tmp_cleanup' EXIT; trap 'exit 143' TERM; trap 'exit 130' INT
 
 # ------------------------------------------------------------------ discovery
 
@@ -122,7 +122,7 @@ if type != "object" then error("not a JSON object") else . end
 | .key as $k | .value as $v
 | if ($k | test("^[A-Za-z0-9_][A-Za-z0-9_:.@/+-]*$") | not) then empty else
   ($v | test("RUN_[A-Za-z0-9_]*=")) as $runenv
-  | ($v | test("build")) as $build
+  | ($v | test("\\bbuild\\b"; "i")) as $build
   | ($k | test("live|canary"; "i")) as $live
   | (($k | test("watch|(^|:)ui($|:)|debug|headed|update"; "i"))
      or ($v | test("--watch|--ui( |$)|--headed|--debug|--update|(^| )-u( |$)"))) as $inter
@@ -276,10 +276,39 @@ heuristic_config() { # -> CONFIG from HEUR_SUITES + default globs
       ui_globs: $ui, ui_exclude: [], test_globs: $te, code_globs: null, small_change: null}')
 }
 
+# Discovery cache (pure performance): the heuristic result depends only on the
+# discovery inputs, so it is cached per HEAD tree + contract sha + this script's
+# own version — and only while every discovery input is clean against HEAD (a
+# modified or untracked package.json / config / lockfile bypasses the cache).
+# Residual: a gitignored discovery input that changes is not noticed until HEAD moves.
+DISC_INPUTS=(':(glob)**/package.json' ':(glob)**/pnpm-workspace.yaml' ':(glob)**/playwright.config.*' ':(glob)**/cypress.config.*'
+  ':(glob)**/pnpm-lock.yaml' ':(glob)**/yarn.lock' ':(glob)**/bun.lock*' ':(glob)**/package-lock.json' ':(glob)**/npm-shrinkwrap.json'
+  pyproject.toml pytest.ini setup.py setup.cfg conftest.py tests uv.lock poetry.lock go.mod Cargo.toml Makefile makefile GNUmakefile)
+disc_cache_file() { # -> path of the cache entry for this state, rc 1 = do not cache
+  local ht sv dir id
+  [ "$IS_GIT" -eq 1 ] || return 1
+  ht=$(git -C "$ROOT" rev-parse -q --verify 'HEAD^{tree}' 2>/dev/null) || return 1
+  [ -z "$(git -C "$ROOT" status --porcelain=v1 -- "${DISC_INPUTS[@]}" 2>/dev/null | head -n 1)" ] || return 1
+  sv=$(cat "$SCRIPT_DIR/discover-tests.sh" "$SCRIPT_DIR/lib-testclass.sh" 2>/dev/null | tc_sha1) || return 1
+  id=$(tc_repo_id "$ROOT") || return 1
+  dir="$(tc_cache_root)/claude-subteams/discovery/$id"
+  printf '%s/%s.json\n' "$dir" "$(printf '%s %s %s' "$ht" "${CSHA:-none}" "$sv" | tc_sha1)"
+}
+
 run_discovery() { # sets CONFIG from heuristics or dies
-  discover_heuristic; local rc=$?
+  local cf="" v rc
+  if cf=$(disc_cache_file) && [ -f "$cf" ] && v=$(jq -c 'select(type == "object" and (.heur | type) == "array")' "$cf" 2>/dev/null) && [ -n "$v" ]; then
+    HEUR_SUITES=$(printf '%s' "$v" | jq -c '.heur'); PW_CONFIGS=$(printf '%s' "$v" | jq -r '.pw // ""')
+    heuristic_config; return 0
+  fi
+  discover_heuristic; rc=$?
   [ "$rc" -eq 2 ] && die 2 "cannot list suites: broken JSON (see above)"
   [ "$rc" -eq 0 ] || die 1 "discovery failed"
+  if [ -n "$cf" ] && (umask 077; mkdir -p "${cf%/*}") 2>/dev/null; then
+    jq -nc --argjson h "$HEUR_SUITES" --arg pw "${PW_CONFIGS:-}" '{heur: $h, pw: $pw}' > "$cf.tmp.$$" 2>/dev/null && mv -f "$cf.tmp.$$" "$cf"
+    rm -f "$cf.tmp.$$" 2>/dev/null
+    find "${cf%/*}" -maxdepth 1 -type f -name '*.json' -mtime +"$TC_RECEIPT_TTL_DAYS" -exec rm -f {} + 2>/dev/null
+  fi
   heuristic_config
 }
 
@@ -417,22 +446,41 @@ run_one() { # <suite index> -> the suite's exit code
       case "$v" in [Nn][Pp][Mm]_[Cc][Oo][Nn][Ff][Ii][Gg]_*) unset "$v" ;; esac
     done < <(compgen -e)
     unset NODE_OPTIONS PYTEST_ADDOPTS
-    exec bash -c "$cmd" ) </dev/null
+    # ENV (sh startup file), SHELLOPTS / BASHOPTS (exported shell options) would change
+    # how the suite's shell behaves; they are readonly inside bash, so they are dropped
+    # from the environment of the child. BASH_ENV is kept on purpose (residual, ADR):
+    # the Claude Code shell snapshot sets it and suites may rely on it.
+    exec env -u ENV -u SHELLOPTS -u BASHOPTS bash -c "$cmd" ) </dev/null
   rc=$?
   t1=$(date +%s)
   tree1=$(tc_snapshot_tree "$ROOT") || tree1=""
-  dirty=false; [ "$tree0" = "$tree1" ] || dirty=true
+  # dirty = a TRACKED file (in HEAD or the index) changed while the suite ran;
+  # untracked files the suite wrote (not in the commit, not in the base) are ignored,
+  # exactly as the receipt comparison ignores them
+  dirty=false; dpaths="[]"; changed=""; untr=0
+  if [ "$tree0" != "$tree1" ]; then
+    if [ -z "$tree1" ]; then dirty=true
+    else
+      changed=$(tc_changed_files "$ROOT" "$tree0" "$tree1")
+      tracked=$(printf '%s\n' "$changed" | sed '/^$/d; s/^/:(literal)/' | tr '\n' '\0' \
+        | { if tc_has_head "$ROOT"; then xargs -0 git -C "$ROOT" ls-files --with-tree=HEAD --; else xargs -0 git -C "$ROOT" ls-files --; fi; } 2>/dev/null | LC_ALL=C sort -u)
+      if [ -n "$tracked" ]; then dirty=true; dpaths=$(printf '%s\n' "$tracked" | jq -R . | jq -sc 'map(select(length > 0))')
+      else untr=1; fi
+    fi
+  fi
   receipt=$(jq -nc --arg suite "$name" --arg kind "$kind" --arg cwd "$cwd" --arg cmd_sha "$msha" --arg contract_sha "$CSHA" \
-    --argjson exit "$rc" --argjson dirty "$dirty" --arg tree "$tree0" --arg tree_after "$tree1" \
+    --argjson exit "$rc" --argjson dirty "$dirty" --argjson dpaths "$dpaths" --arg tree "$tree0" --arg tree_after "$tree1" \
     --argjson t_start "$t0" --argjson t_end "$t1" --arg source "$CSRC" --arg root "$ROOT" \
     '{type: "suite", suite: $suite, kind: $kind, cwd: $cwd, cmd_sha: $cmd_sha, contract_sha: $contract_sha,
-      exit: $exit, dirty: $dirty, tree: $tree, tree_after: $tree_after, t_start: $t_start, t_end: $t_end, source: $source,
+      exit: $exit, dirty: $dirty, dirty_paths: $dpaths, tree: $tree, tree_after: $tree_after, t_start: $t_start, t_end: $t_end, source: $source,
       root: $root}')
   rpath=""
   if tc_receipt_write "$ROOT" "$receipt" >/dev/null; then rpath="$TC_RECEIPT_PATH"; else say "$name: WARNING receipt not written: $TC_ERR"; fi
   if [ "$dirty" = true ]; then
-    say "$name: files changed while the suite ran — receipt marked dirty (does not count). Changed: $( [ -n "$tree1" ] && tc_changed_files "$ROOT" "$tree0" "$tree1" | head -5 | tr '\n' ' ')"
+    say "$name: tracked files changed while the suite ran — receipt marked dirty (does not count). Changed: $(printf '%s' "$dpaths" | jq -r '.[:5] | join(" ")' 2>/dev/null)"
     say "  (test artifacts? add them to .gitignore)"
+  elif [ "$untr" -eq 1 ]; then
+    say "$name: the suite created/changed untracked files only ($(printf '%s\n' "$changed" | head -3 | tr '\n' ' ')) — not part of any commit, the receipt counts; consider .gitignore"
   fi
   say "$name: exit $rc${rpath:+ — receipt ${rpath##*/}}"
   return "$rc"
@@ -472,7 +520,9 @@ mode_status() {
     target=worktree; TC_NO_UNSTAGED=1
     say "nothing staged — evaluating the WORKING TREE (what 'git add -A' would commit) instead of the index"
   fi
+  TC_SELF_ID="${CLAUDE_SUBTEAMS_INSTANCE_ID:-}"   # the gate uses ${session_id:0:8}; status has no session
   tc_requirements "$ROOT" "$tree" "$base" "$CONFIG" "$CSHA" || die 1 "cannot evaluate: $TC_ERR"
+  [ "${TC_RECEIPTS_CAPPED:-0}" -gt 0 ] && say "note: only the newest $TC_RECEIPT_CAP receipts per type were considered ($TC_RECEIPTS_CAPPED older ignored)"
   big=$(tc_large_untracked "$ROOT")
   printf '%s' "$TC_REQ_JSON" | jq --arg root "$ROOT" --arg contract "$CSTATE" --arg target "$target" --arg big "$big" \
     '{root: $root, contract: $contract, enforced: ($contract == "v1"), target: $target} + .

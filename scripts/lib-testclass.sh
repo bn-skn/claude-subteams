@@ -16,7 +16,7 @@
 #     the group's files; files untracked at receipt time ignored), unstaged files;
 #   - the commit tree a `git commit` statement will record (tc_ct_*: -a, <paths>,
 #     -o, -i, replayed add/rm — on a temp index; used by hooks/lib-commitscan.sh);
-#   - receipt store: ${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/receipts/
+#   - receipt store: <tc_cache_root>/claude-subteams/receipts/
 #     <sha1 of canonical git-common-dir>/, atomic writes, purge after 14 days, and
 #     the global recent index _recent.log (which store got which receipt when);
 #   - the receipt predicates the commit gate reuses (suite receipt valid for a
@@ -438,14 +438,14 @@ tc__index_path() { # <repo> -> absolute path of this worktree's index
 
 # tc_index_tree <repo> — tree of the real index (what `git commit` would record),
 # computed on a COPY so the real index (and its lock) is never touched.
-tc_index_tree() {
-  local repo="$1" tmp real rc
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-idx.XXXXXX") || return 1
-  real=$(tc__index_path "$repo") || { rm -rf "$tmp"; return 1; }
-  if [ -f "$real" ]; then cp "$real" "$tmp/index" || { rm -rf "$tmp"; return 1; }; fi
-  GIT_INDEX_FILE="$tmp/index" git -C "$repo" write-tree 2>/dev/null; rc=$?
-  rm -rf "$tmp"; return "$rc"
-}
+tc_index_tree() (               # subshell body: its own trap removes the temp dir on a kill
+  repo="$1"; tmp=""
+  trap '[ -n "$tmp" ] && rm -rf "$tmp"' EXIT; trap 'exit 143' TERM; trap 'exit 130' INT
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-idx.XXXXXX") || exit 1
+  real=$(tc__index_path "$repo") || exit 1
+  if [ -f "$real" ]; then cp "$real" "$tmp/index" || exit 1; fi
+  GIT_INDEX_FILE="$tmp/index" git -C "$repo" write-tree 2>/dev/null
+)
 
 # tc_snapshot_tree <repo> — git tree of the WORKING TREE (new, deleted, renamed
 # files; .gitignore respected) via a temp index: start from a copy of the real
@@ -454,24 +454,32 @@ tc_index_tree() {
 # files and skip-worktree (sparse) entries, exactly as the commit tree will, and
 # reuses the stat cache (no rehash of every file).
 # Writes blob/tree objects into the repo's object store; never writes the index.
-tc_snapshot_tree() {
-  local repo="$1" tmp real rc
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-snap.XXXXXX") || return 1
-  real=$(tc__index_path "$repo") || { rm -rf "$tmp"; return 1; }
+tc_snapshot_tree() (            # subshell body: its own trap removes the temp dir on a kill
+  repo="$1"; tmp=""
+  trap '[ -n "$tmp" ] && rm -rf "$tmp"' EXIT; trap 'exit 143' TERM; trap 'exit 130' INT
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-snap.XXXXXX") || exit 1
+  real=$(tc__index_path "$repo") || exit 1
   if [ -f "$real" ]; then
-    cp "$real" "$tmp/index" || { rm -rf "$tmp"; return 1; }
+    cp "$real" "$tmp/index" || exit 1
     # assume-unchanged entries would hide on-disk edits from `add -A`: clear the
     # bit in the COPY (skip-worktree stays: sparse files absent on disk are not deletions).
     GIT_INDEX_FILE="$tmp/index" git -C "$repo" ls-files -v -z 2>/dev/null \
       | while IFS= read -r -d '' e; do case "$e" in [a-z]' '*) printf '%s\0' "${e#? }" ;; esac; done \
       | GIT_INDEX_FILE="$tmp/index" git -C "$repo" update-index -z --no-assume-unchanged --stdin >/dev/null 2>&1
   elif tc_has_head "$repo"; then
-    GIT_INDEX_FILE="$tmp/index" git -C "$repo" read-tree HEAD 2>/dev/null || { rm -rf "$tmp"; return 1; }
+    GIT_INDEX_FILE="$tmp/index" git -C "$repo" read-tree HEAD 2>/dev/null || exit 1
   fi
   GIT_INDEX_FILE="$tmp/index" git -C "$repo" add -A >/dev/null 2>&1 \
     && GIT_INDEX_FILE="$tmp/index" git -C "$repo" write-tree 2>/dev/null
-  rc=$?
-  rm -rf "$tmp"; return "$rc"
+)
+
+# tc_tmp_cleanup — removes the temp dirs an evaluation in THIS shell may hold (the
+# commit-tree temp index, the requirements work dir). Callers (the commit gate)
+# trap it on EXIT / INT / TERM so a hook killed by its timeout leaves nothing.
+tc_tmp_cleanup() {
+  [ -n "${TC_CT_DIR:-}" ] && rm -rf "$TC_CT_DIR"; TC_CT_DIR=""
+  [ -n "${TC__WORK:-}" ] && rm -rf "$TC__WORK"; TC__WORK=""
+  return 0
 }
 
 tc_changed_files() { # <repo> <tree-ish a> <tree-ish b> -> paths that differ (renames as delete+add)
@@ -505,7 +513,11 @@ tc__memb_file() { # <group> -> path of its membership cache (created empty if ne
   local f
   if [ -n "$TC__WORK" ] && [ -d "$TC__WORK" ]; then f="$TC__WORK/memb.${1//[!A-Za-z0-9]/_}"
   else f=$(mktemp "${TMPDIR:-/tmp}/tc-memb.XXXXXX") || return 1; fi
-  [ -f "$f" ] || : > "$f"
+  if [ ! -f "$f" ]; then
+    # paths claimed by another live instance (tc_requirements: TC__WORK/foreign) are
+    # outside every group: they are not part of this commit and do not count
+    if [ -n "$TC__WORK" ] && [ -s "$TC__WORK/foreign" ]; then awk '{ print "0\t" $0 }' "$TC__WORK/foreign" > "$f"; else : > "$f"; fi
+  fi
   printf '%s\n' "$f"
 }
 tc__memb_ensure() { # <group> <paths file, one per line> <memb file> — classify the paths not seen yet
@@ -634,7 +646,14 @@ tc_unstaged() {
   GIT_OPTIONAL_LOCKS=0 git -c core.quotePath=false -C "$1" diff --name-only --no-renames --diff-filter=MTD "$2" -- 2>/dev/null
 }
 
-TC_UNSTAGED_HINT='re-running alone will not help (a receipt snapshots the working tree): stage it, or `git stash push --keep-index --include-untracked`, re-run, then `git stash pop`'
+# tc__unstaged_hint — what to do about a file whose working-tree content is not
+# what the commit takes (a receipt snapshots the working tree, so re-running alone
+# never matches the commit).
+tc__unstaged_hint() {
+  printf 'add it to this commit, or revert/finish that edit, then re-run'
+  [ "${CLAUDE_SUBTEAMS_MULTI_INSTANCE:-0}" = 1 ] && printf ' (if another instance owns it, have it claim the file: coord.sh claim --id <its id> <path>)'
+  return 0
+}
 
 # tc_large_untracked <repo> -> "path (N MB)" for untracked, non-ignored files over
 # 10 MB (each content snapshot hashes them: slow receipts and gate). Max 5 lines.
@@ -737,11 +756,18 @@ tc_repo_id() { # <repo> -> sha1 of the canonical git-common-dir (worktrees of on
   printf '%s' "$gcd" | tc_sha1
 }
 
+# tc_cache_root — ${XDG_CACHE_HOME} only when it is an ABSOLUTE path (the XDG spec:
+# a relative value is invalid and ignored), else $HOME/.cache. Every receipt-store
+# path (lib, hooks, session-start) goes through it.
+tc_cache_root() {
+  case "${XDG_CACHE_HOME:-}" in /*) printf '%s\n' "$XDG_CACHE_HOME" ;; *) printf '%s/.cache\n' "$HOME" ;; esac
+}
+
 tc_receipt_dir() { # <repo> -> receipt directory (not created)
   local id
   id=$(tc_repo_id "$1") || return 1
   [ -n "$id" ] || return 1
-  printf '%s/claude-subteams/receipts/%s\n' "${XDG_CACHE_HOME:-$HOME/.cache}" "$id"
+  printf '%s/claude-subteams/receipts/%s\n' "$(tc_cache_root)" "$id"
 }
 
 tc_receipt_purge() { # <receipt dir> — drop receipts (and stray temp files) older than 14 days
@@ -756,7 +782,7 @@ tc_receipt_purge() { # <receipt dir> — drop receipts (and stray temp files) ol
 # lines older than 14 days are dropped by a rare rewrite (only when the FIRST line
 # has expired). A line lost to a rewrite race only means an agent receipt is not
 # copied to that store — the safe side (the gate then asks for the agent again).
-tc_recent_log() { printf '%s/claude-subteams/receipts/_recent.log\n' "${XDG_CACHE_HOME:-$HOME/.cache}"; }
+tc_recent_log() { printf '%s/claude-subteams/receipts/_recent.log\n' "$(tc_cache_root)"; }
 tc__recent_append() { # <ts> <store id> <root> <type>
   local log first cut tmp
   case "$3" in *$'\t'*|*$'\n'*|'') return 0 ;; esac
@@ -764,10 +790,10 @@ tc__recent_append() { # <ts> <store id> <root> <type>
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$log" 2>/dev/null || return 0
   first=$(head -n 1 "$log" 2>/dev/null); first="${first%%$'\t'*}"
   cut=$(( $1 - TC_RECEIPT_TTL_DAYS * 86400 ))
-  case "$first" in ''|*[!0-9]*) return 0 ;; esac
-  [ "$first" -lt "$cut" ] || return 0
+  # a malformed first line also triggers the rewrite (it would otherwise block pruning forever)
+  case "$first" in ''|*[!0-9]*) ;; *) [ "$first" -lt "$cut" ] || return 0 ;; esac
   tmp=$(mktemp "${log%/*}/.tmp.recent.XXXXXX") || return 0
-  awk -F'\t' -v c="$cut" '$1 + 0 >= c' "$log" > "$tmp" 2>/dev/null && mv -f -- "$tmp" "$log"
+  awk -F'\t' -v c="$cut" 'NF >= 4 && $1 ~ /^[0-9]+$/ && $1 + 0 >= c' "$log" > "$tmp" 2>/dev/null && mv -f -- "$tmp" "$log"
   rm -f -- "$tmp" 2>/dev/null
   return 0
 }
@@ -814,11 +840,24 @@ tc_receipt_write() {
   rm -f -- "$tmp"; TC_ERR="cannot write receipt in $dir"; return 1
 }
 
-tc_receipt_list() { # <repo> -> receipt file paths, one per line (unsorted)
-  local dir f
+# tc_receipt_list <repo> -> receipt file paths, one per line: the NEWEST
+# TC_RECEIPT_CAP (200) per type (from the file name "<ts>-<type>-…"; old shot
+# names "shot-<ts>-…"), so a huge store can never push a hook past its timeout.
+# How many were left out: the last line "#capped <n>" (tc_receipts_load turns it
+# into TC_RECEIPTS_CAPPED).
+TC_RECEIPT_CAP=200
+tc_receipt_list() {
+  local dir
   dir=$(tc_receipt_dir "$1") || return 1
   [ -d "$dir" ] || return 0
-  for f in "$dir"/*.json; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done
+  (cd "$dir" 2>/dev/null && ls -1 2>/dev/null) | LC_ALL=C sort -r | awk -v d="$dir" -v cap="$TC_RECEIPT_CAP" '
+    /\.json$/ && !/^\./ {
+      n = split($0, f, "-"); t = (f[1] ~ /^[0-9]+$/) ? f[2] : f[1]
+      if (++c[t] <= cap) print d "/" $0; else dropped++
+    }
+    END { if (dropped) print "#capped " dropped }' | while IFS= read -r f; do
+      case "$f" in '#capped '*) printf '%s\n' "$f" ;; *) [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f" ;; esac
+    done
   return 0
 }
 
@@ -829,9 +868,13 @@ tc_receipt_read() { # <file> -> its JSON (compact) or rc 1
 # tc_receipts_load <repo> -> JSON lines (one receipt per line, plus ._file).
 # Receipt kind = .type; a shot receipt written without .type but with
 # "kind":"shot" is normalized to type "shot".
+TC_RECEIPTS_CAPPED=0
 tc_receipts_load() {
   local files=() f out
-  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done < <(tc_receipt_list "$1")
+  TC_RECEIPTS_CAPPED=0
+  while IFS= read -r f; do
+    case "$f" in '') ;; '#capped '*) TC_RECEIPTS_CAPPED="${f#\#capped }" ;; *) files+=("$f") ;; esac
+  done < <(tc_receipt_list "$1")
   [ "${#files[@]}" -gt 0 ] || return 0
   local prog='select(type == "object") | (if (.type == null and .kind == "shot") then .type = "shot" else . end) | . + {_file: input_filename}'
   if out=$(jq -c "$prog" "${files[@]}" 2>/dev/null); then
@@ -860,7 +903,8 @@ tc_suite_check() {
   TC_SC_OK=0; TC_SC_REASON="no receipt for suite $name"; TC_SC_FLAKY=0; TC_SC_FILE=""
   rows=$(jq -r --arg n "$name" 'select(.type == "suite" and .suite == $n)
       | [(.t_end // 0 | tostring), (.exit // "" | tostring), (if .dirty == true then "1" else "0" end),
-         (.contract_sha // ""), (.cmd_sha // ""), (.tree // ""), ._file] | join("\u001f")' "$rfile" 2>/dev/null \
+         (.contract_sha // ""), (.cmd_sha // ""), (.tree // ""), ._file,
+         ((.dirty_paths // []) | if type == "array" then .[:5] | map(tostring | gsub("[[:cntrl:]]"; " ")) | join(", ") else "" end)] | join("\u001f")' "$rfile" 2>/dev/null \
       | sort -t "$(printf '\037')" -k1,1nr | head -n 30)
   [ -n "$rows" ] || return 0
   # Content verdicts for all candidate trees at once (one cat-file, one diff-tree
@@ -893,11 +937,11 @@ tc_suite_check() {
     fi
   fi
   rm -rf "$tmp"; [ -n "$TC__WORK" ] || rm -f "$memb"
-  while IFS=$'\037' read -r te ex dirty rc rm rt f; do
+  while IFS=$'\037' read -r te ex dirty rc rm rt f dp; do
     [ -n "$f" ] || continue
     if [ "$rc" != "$csha" ]; then why="${why:-receipt is for another version of the test contract}"; continue; fi
     if [ "$rm" != "$msha" ]; then why="${why:-receipt ran a different command}"; continue; fi
-    if [ "$dirty" = 1 ]; then why="${why:-files changed while the suite ran (dirty)}"; continue; fi
+    if [ "$dirty" = 1 ]; then why="${why:-files changed while the suite ran (dirty${dp:+: $dp}) — test artifacts? add them to .gitignore, then re-run}"; continue; fi
     res=$(printf '%s' "$map" | awk -v t="$rt" '$1 == t { print substr($0, length(t) + 2); exit }')
     [ -n "$res" ] || res=missing
     case "$res" in
@@ -907,7 +951,7 @@ tc_suite_check() {
         p="${res#*$'\t'}"
         if [ -z "$why" ]; then
           case "${TC_UNSTAGED:-}" in
-            *$'\n'"$p"$'\n'*) why="$p has unstaged changes — the suite ran on the working-tree version, the commit takes another; $TC_UNSTAGED_HINT" ;;
+            *$'\n'"$p"$'\n'*) why="$p has unstaged changes — the suite ran on the working-tree version, the commit takes another; $(tc__unstaged_hint)" ;;
             *) why="content changed since the last run ($p)" ;;
           esac
         fi
@@ -962,7 +1006,7 @@ tc_suite_check() {
 tc_agent_check() {
   local repo="$1" rfile="$2" tree="$3" grp="$4" thl="$5" thf="$6" e2e_req="${7:-0}" htree="${8:-}" type who i auto=0
   local st rt f e2e suites shots rs ts te why n=0 skipped="" v at ats af ac k sc cache=$'\n' big=1000000
-  local ck=() ctr=() cf=() cst=() cte=() csc=() hd anc=$'\n' a
+  local ck=() ctr=() cf=() cst=() cte=() csc=() cna=() hd anc=$'\n' a
   local bv=-1 bi=-1
   if [ "$grp" = ui ]; then type=ui; who="ui-tester"; else type=te; who="test-engineer"; fi
   for i in ${TC_S_NAME[@]+"${!TC_S_NAME[@]}"}; do [ "${TC_S_RUN[i]:-}" = auto ] && auto=1; done
@@ -970,15 +1014,17 @@ tc_agent_check() {
   while IFS=$'\037' read -r st rt f e2e suites shots rs ts te why hd; do
     [ -n "$f" ] || continue
     # A receipt is bound to the history it was taken on (.head = the HEAD commit of
-    # its worktree at stop): one from a branch that is not an ancestor of the base
-    # commit is about other work and is ignored (receipts without .head count).
+    # its worktree at stop): one from a commit that is not an ancestor of HEAD is
+    # about other work and counts only if it saw EXACTLY this group content (drift
+    # 0: a message-only amend or a pull --rebase must not void a valid check).
+    # Receipts without .head count normally.
+    a=1
     if [ -n "$hd" ] && [ -n "${TC__HEADC:-${TC__BASEC:-}}" ]; then
       case "$anc" in
         *$'\n'"$hd "[01]$'\n'*) a="${anc#*$'\n'"$hd "}"; a="${a:0:1}" ;;
         *) if git -C "$repo" merge-base --is-ancestor "$hd" "${TC__HEADC:-$TC__BASEC}" 2>/dev/null; then a=1; else a=0; fi
            anc="$anc$hd $a"$'\n' ;;
       esac
-      [ "$a" = 1 ] || continue
     fi
     if [ "$ts" -le 0 ] || [ "$te" -lt "$ts" ]; then skipped="${skipped:-a $who receipt without a valid time interval}"; continue; fi
     case "$type:$st" in
@@ -996,7 +1042,7 @@ tc_agent_check() {
       *:rejected) skipped="${skipped:-$who ran but its final answer had no first-line 'Status: pass|degraded|issues-found|blocked'${why:+ ($why)} — re-run $who and have it end with that line}"; continue ;;
       *) skipped="${skipped:-a $who run without a verdict (status '$st') does not count}"; continue ;;
     esac
-    n=${#ck[@]}; ck[n]=$k; ctr[n]="$rt"; cf[n]="$f"; cst[n]="$st"; cte[n]="$te"; csc[n]=-1
+    n=${#ck[@]}; ck[n]=$k; ctr[n]="$rt"; cf[n]="$f"; cst[n]="$st"; cte[n]="$te"; csc[n]=-1; cna[n]=$((1 - a))
     [ "$n" -ge 29 ] && break
   done < <(jq -rs --arg t "$type" '
       [.[] | select(.type == "suite" and .exit == 0)] as $ok
@@ -1022,10 +1068,10 @@ tc_agent_check() {
   done < <(jq -rs --arg g "$grp" '[.[] | select(.type == "anchor" and .group == $g and (.tree | type) == "string")]
         | sort_by(.ts // 0) | reverse | .[:30][] | [.tree, ((.ts // 0) | floor | tostring), ._file, (.commit // "" | tostring)] | join("\u001f")' "$rfile" 2>/dev/null)
   [ -n "$at" ] || ats=0
-  if [ -n "$at" ]; then n=${#ck[@]}; ck[n]=a; ctr[n]="$at"; cf[n]="$af"; cst[n]=""; cte[n]="$ats"; csc[n]=-1; fi
-  # no valid receipt and no anchor -> the base tree itself is the only base
-  v=0; for k in ${ck[@]+"${ck[@]}"}; do [ "$k" = i ] || v=1; done
-  if [ "$v" -eq 0 ]; then n=${#ck[@]}; ck[n]=h; ctr[n]="${htree:-$(tc_empty_tree "$repo")}"; cf[n]=""; cst[n]=""; cte[n]=0; csc[n]=-1; fi
+  if [ -n "$at" ]; then n=${#ck[@]}; ck[n]=a; ctr[n]="$at"; cf[n]="$af"; cst[n]=""; cte[n]="$ats"; csc[n]=-1; cna[n]=0; fi
+  # no valid receipt on this history and no anchor -> the base tree is the base
+  v=0; for k in ${ck[@]+"${!ck[@]}"}; do [ "${ck[k]}" = i ] || [ "${cna[k]}" = 1 ] || v=1; done
+  if [ "$v" -eq 0 ]; then n=${#ck[@]}; ck[n]=h; ctr[n]="${htree:-$(tc_empty_tree "$repo")}"; cf[n]=""; cst[n]=""; cte[n]=0; csc[n]=-1; cna[n]=0; fi
   # drift score per candidate (cached by tree): lines, +big when not small; -1 = unusable.
   # One batched pass (tc__drift_batch) settles every candidate that is not small by
   # its file set; only the few small-looking ones get an exact line count.
@@ -1044,6 +1090,7 @@ tc_agent_check() {
         else sc=-1; fi
         cache="$cache${ctr[k]} $sc"$'\n' ;;
     esac
+    [ "${cna[k]}" = 1 ] && [ "$sc" != 0 ] && sc=-1           # off-history: only an exact match counts
     csc[k]=$sc
     [ "$sc" -ge 0 ] || continue
     if [ "${ck[k]}" = i ]; then
@@ -1152,6 +1199,21 @@ tc_requirements() {
   TC__WORK=$(mktemp -d "${TMPDIR:-/tmp}/tc-work.XXXXXX") || { rm -f "$rfile"; TC_ERR="cannot create a temp dir"; return 1; }
   tc_dcommit_set "$repo" "$htree" "$tree" || TC__DFILTER=0      # no filter = the stricter old comparison
   TC_UNSTAGED=$'\n'"$(tc_unstaged "$repo" "$tree")"$'\n'
+  # (i) unstaged files NOT in this commit that another live instance has claimed:
+  # outside every group for this evaluation (tc__memb_file seeds them), with a warning
+  if [ "$TC_UNSTAGED" != $'\n\n' ]; then
+    printf '%s\n' "$flist" > "$TC__WORK/changed"
+    printf '%s' "$TC_UNSTAGED" | awk -v cf="$TC__WORK/changed" 'FILENAME == cf { c[$0] = 1; next } $0 != "" && !($0 in c)' \
+      "$TC__WORK/changed" - > "$TC__WORK/cand" 2>/dev/null
+    if [ -s "$TC__WORK/cand" ]; then
+      tc_coord_foreign "$repo" "${TC_SELF_ID:-}" "$TC__WORK/cand" > "$TC__WORK/foreign.tsv"
+      cut -f1 "$TC__WORK/foreign.tsv" > "$TC__WORK/foreign"
+      while IFS=$'\t' read -r f v; do
+        [ -n "$f" ] && tc__req_warn "suite ran with $f modified by instance $v; not part of this commit"
+      done < "$TC__WORK/foreign.tsv"
+      [ -n "$TC_COORD_NOTE" ] && tc__req_warn "$TC_COORD_NOTE"
+    fi
+  fi
   if [ "$(printf '%s' "$cfg" | jq -r '.small_change_clamped // false' 2>/dev/null)" = true ]; then
     tc__req_warn "small_change in the test contract is above the built-in ceiling — clamped to $TC_MAX_LINES lines / $TC_MAX_FILES files"
   fi
@@ -1210,6 +1272,59 @@ tc_requirements() {
   return 0
 }
 
+# ------------------------------------------------- multi-instance claims (i)
+# A shared working tree (scripts/coord.sh, CLAUDE_SUBTEAMS_MULTI_INSTANCE): another
+# live instance may have an unfinished edit in a tracked file that is NOT part of
+# this commit. The suite then ran with that edit present; the commit does not take
+# it. Owner decision 14.11.2026: such a file, CLAIMED by ANOTHER LIVE instance, is a
+# warning ("suite ran with <file> modified by instance <id>"), not a deny. Anything
+# else — unclaimed, claimed by this instance, by a dead / unregistered instance, or
+# coord state that cannot be read — stays a deny (fail-closed).
+# Read-only mirror of coord.sh: store $CLAUDE_SUBTEAMS_COORD_HOME (default
+# ~/.claude/subteams)/<repokey>/{claims,instances}.json, repokey = first 16 hex of
+# md5 (cksum fallback) of the canonical git-common-dir; liveness = worktree exists
+# AND (pid alive, or — only for an untrusted pid — heartbeat younger than
+# CLAUDE_SUBTEAMS_HEARTBEAT_TTL, default 1800 s). Never writes, never reaps.
+tc__coord_dir() { # <repo> -> coord dir of this repository (may not exist)
+  local common key
+  common=$(cd "$1" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null) || return 1
+  common=$(cd "$1" 2>/dev/null && cd "$common" 2>/dev/null && pwd -P) || return 1
+  key=$(printf '%s' "$common" | { md5sum 2>/dev/null || cksum; } | tr -cd '0-9a-f' | cut -c1-16)
+  [ -n "$key" ] || return 1
+  printf '%s/%s\n' "${CLAUDE_SUBTEAMS_COORD_HOME:-$HOME/.claude/subteams}" "$key"
+}
+
+# tc_coord_foreign <repo> <self id> <candidate paths file> -> "<path>\t<owner id>"
+# for candidates claimed by another LIVE instance. Unreadable state -> nothing (and
+# TC_COORD_NOTE says so): the caller then denies as usual.
+tc_coord_foreign() {
+  local dir top id pid tr wt hb now ttl live=$'\n' claims
+  TC_COORD_NOTE=""
+  dir=$(tc__coord_dir "$1") || return 0
+  [ -e "$dir/claims.json" ] || return 0
+  top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || return 0
+  ttl="${CLAUDE_SUBTEAMS_HEARTBEAT_TTL:-1800}"; case "$ttl" in ''|*[!0-9]*) ttl=1800 ;; esac
+  now=$(date +%s)
+  if ! claims=$(jq -r 'if type == "object" then to_entries[] | select((.value.by | type) == "string") | "\(.key)\t\(.value.by)" else error("bad") end' "$dir/claims.json" 2>/dev/null) \
+     || ! jq -e 'type == "object"' "$dir/instances.json" >/dev/null 2>&1; then
+    TC_COORD_NOTE="coordination state ($dir) cannot be read — claims are not taken into account"; return 0
+  fi
+  while IFS=$'\t' read -r id pid tr wt hb; do
+    [ -n "$id" ] || continue
+    [ -z "$wt" ] || [ -d "$wt" ] || continue
+    case "$pid" in ''|*[!0-9]*) pid=0 ;; esac
+    if [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; then live="$live$id"$'\n'; continue; fi
+    [ "$tr" = true ] && continue
+    case "$hb" in ''|*[!0-9]*) hb=0 ;; esac
+    [ $((now - hb)) -lt "$ttl" ] && live="$live$id"$'\n'
+  done < <(jq -r 'to_entries[] | [.key, (.value.pid // 0 | tostring), (.value.pid_trusted // false | tostring), (.value.worktree // "" | tostring), (.value.heartbeat // 0 | tostring)] | @tsv' "$dir/instances.json" 2>/dev/null)
+  printf '%s\n' "$claims" | awk -F'\t' -v top="$top/" -v self="${2:-}" -v live="$live" -v cf="$3" '
+    BEGIN { n = split(live, L, "\n"); for (i = 1; i <= n; i++) if (L[i] != "") ok[L[i]] = 1 }
+    FILENAME == cf { if ($0 in own) print $0 "\t" own[$0]; next }
+    { k = $1; sub(/^\.\//, "", k); if (index(k, top) == 1) k = substr(k, length(top) + 1)
+      if ($2 != self && ($2 in ok)) own[k] = $2 }' - "$3"
+}
+
 tc__req_warn() { TC_REQ_WARN="$TC_REQ_WARN${TC_REQ_WARN:+$'\n'}$1"; }
 
 # tc__unstaged_note <group> <agent> — after a failed agent check against a receipt:
@@ -1221,7 +1336,7 @@ tc__unstaged_note() {
   while IFS= read -r p; do
     [ -n "$p" ] && tc_in_group "$p" "$1" && out="$out${out:+, }$p"
   done <<< "${TC_UNSTAGED:-}"
-  [ -n "$out" ] && printf '; note: %s has unstaged changes — the %s check saw the working-tree version; %s' "$out" "$2" "$TC_UNSTAGED_HINT"
+  [ -n "$out" ] && printf '; note: %s has unstaged changes — the %s check saw the working-tree version; %s' "$out" "$2" "$(tc__unstaged_hint)"
   return 0
 }
 

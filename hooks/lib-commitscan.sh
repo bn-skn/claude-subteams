@@ -31,10 +31,6 @@
 #               / /dev/* kept as is, "?" = unresolvable
 #   CS_X[i]     1 = behind xargs (arguments come from stdin)
 #   CS_RUN[i]   st: 1 = the word `run` is among its arguments
-#   CS_SUBST[i] the first token that runs a command substitution ($(…) / backticks
-#               INSIDE double quotes — the tokenizer keeps those as text), "" none.
-#               Exempt: a commit-message heredoc `$(cat <<'EOF' … EOF)` (quoted
-#               delimiter: literal body; unquoted: no further $( or backtick)
 #   CS_GOPT[i]  git: 1 = global -c / --config-env / --exec-path options (a "read-
 #               only" git command with them can run anything: diff.external …)
 #   CS_RELIABLE 0 = the tokenizer was unsure (open quote, awk died, depth cap) —
@@ -56,11 +52,22 @@ CS_GITVARS='GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_COMMON
 
 cs__reset() {
   CS_KIND=(); CS_TXT=(); CS_SUB=(); CS_ARGS=(); CS_DIR=(); CS_DRAW=(); CS_ENV=(); CS_GENV=()
-  CS_PEXP=(); CS_REDIR=(); CS_X=(); CS_RUN=(); CS_SUBST=(); CS_GOPT=()
-  CS_VN=(); CS_VV=(); CS_RELIABLE=1; CS_CUR="$PWD"; CS_CURRAW=""; CS_LGENV=0; CS_LEXP=0
+  CS_PEXP=(); CS_REDIR=(); CS_X=(); CS_RUN=(); CS_GOPT=(); CS_SEP=(); CS_DEPTH=(); CS_CFG=(); CS_LITPS=()
+  CS_VN=(); CS_VV=(); CS_RELIABLE=1; CS_CUR="$PWD"; CS_CURRAW=""; CS_LGENV=0; CS_LEXP=0; CS_LCFG=0
+  CS_SHAPE=""
 }
 
 cs__isgitvar() { case " $CS_GITVARS " in *" $1 "*) return 0 ;; esac; return 1; }
+# variables that inject configuration or other binaries into git: GIT_CONFIG_COUNT /
+# _KEY_n / _VALUE_n / _PARAMETERS / _GLOBAL / _SYSTEM, GIT_EXEC_PATH, PATH
+cs__iscfgvar() { case "$1" in GIT_CONFIG*|GIT_EXEC_PATH|PATH) return 0 ;; esac; return 1; }
+# `git -c` keys a commit line may carry under a contract (cosmetic / identity only)
+cs__cfg_ok() {
+  case "$(printf '%s' "${1%%=*}" | tr '[:upper:]' '[:lower:]')" in
+    user.name|user.email|commit.gpgsign|core.quotepath|color.*) return 0 ;;
+  esac
+  return 1
+}
 
 cs__setvar() { # <name> <value|""> <literal 0/1> — record (or forget) a literal value
   local k
@@ -126,7 +133,12 @@ cs__redir() {
   CS_RT=""; CS_RSKIP=0
   r="${t#"${t%%[!0-9&]*}"}"            # drop a leading fd number / &
   case "$r" in
-    '>'*) r="${r#>}"; r="${r#>}"; r="${r#|}" ;;
+    '>'*)
+      r="${r#>}"; r="${r#>}"; r="${r#|}"
+      case "$r" in                   # >&N / >&- duplicate a descriptor; >&file (or ">& file") is a file
+        '&') case "$2" in ''|*[!0-9-]*) CS_RT="$2"; CS_RSKIP=1; [ -n "$CS_RT" ] || CS_RT="?"; return 0 ;; *) return 0 ;; esac ;;
+        '&'*) case "${r#&}" in *[!0-9-]*) r="${r#&}" ;; *) return 0 ;; esac ;;
+      esac ;;
     *)
       [ "$3" = 1 ] || return 0
       case "$t" in *'>'*) r="${t##*>}" ;; *) return 0 ;; esac ;;
@@ -142,68 +154,172 @@ cs__resolve_target() { # <raw target> -> CS_RT2 (absolute | &N | /dev/* | ?)
   if cs_expand "$1" && cs__abs "$CS_CUR" "$CS_E"; then CS_RT2="$CS_P"; else CS_RT2="?"; fi
 }
 
-# cs__subst_ok <token> -> 0 unless it runs a command substitution: `$(` or a
-# backtick in a token means a quoted "$(…)" / "`…`" the tokenizer kept as text
-# (an unquoted one already split the statement). Exempt: a message heredoc.
-# cs__heredoc_wellformed <raw command> -> 0 if EVERY "$(cat <<" in the raw text is
-# the plain message form: delimiter, end of line, body, a line equal to the
-# delimiter, then only whitespace and ")". Tokens lose newlines, so a token alone
-# cannot show `<<'EOF' | sh`, `<<'EOF' >file` or a command after the terminator.
-cs__heredoc_wellformed() {
-  printf '%s' "$1" | LC_ALL=C awk 'BEGIN { RS = "\001" } { s = s $0 } END {
-    rest = s
-    while ((i = index(rest, "$(cat <<")) > 0) {
-      rest = substr(rest, i + 8); dash = 0
-      if (substr(rest, 1, 1) == "-") { dash = 1; rest = substr(rest, 2) }
-      sub(/^[ \t]*/, "", rest)
-      q = substr(rest, 1, 1)
-      if (q == "\047" || q == "\"") {
-        rest = substr(rest, 2); e = index(rest, q); if (!e) exit 1
-        w = substr(rest, 1, e - 1); rest = substr(rest, e + 1)
-      } else {
-        if (!match(rest, /^[A-Za-z0-9_.-]+/)) exit 1
-        w = substr(rest, 1, RLENGTH); rest = substr(rest, RLENGTH + 1)
+# ---------------------------------------------------------------- shape view
+# cs__msg_prepass: replaces every WELL-FORMED commit-message heredoc
+#   $(cat <<'EOF' … EOF)   (also `$(cat<<`, `<<-`, "EOF", or an unquoted delimiter
+#   whose body has no `$` and no backtick)
+# — delimiter, end of line, body, a line equal to the delimiter, then only blanks
+# and `)` — by the word SUBTEAMS_MSG, so quotes / apostrophes / backticks / `$(`
+# text inside the message can neither split nor fool the tokenizers. Anything else
+# stays as it is and is judged by cs__tokenize (a stray `$(` = substitution).
+cs__msg_prepass() {
+  LC_ALL=C awk 'BEGIN { RS = "\001" } { s = s $0 } END {
+    out = ""
+    while ((i = index(s, "$(cat")) > 0) {
+      out = out substr(s, 1, i - 1); rest = substr(s, i + 5); ok = 0
+      if (match(rest, /^[ \t]*<</)) {
+        r = substr(rest, RLENGTH + 1); dash = 0
+        if (substr(r, 1, 1) == "-") { dash = 1; r = substr(r, 2) }
+        sub(/^[ \t]*/, "", r); q = substr(r, 1, 1); w = ""; quoted = 0
+        if (q == "\047" || q == "\"") {
+          r = substr(r, 2); e = index(r, q)
+          if (e) { w = substr(r, 1, e - 1); r = substr(r, e + 1); quoted = 1 }
+        } else if (match(r, /^[A-Za-z0-9_.-]+/)) { w = substr(r, 1, RLENGTH); r = substr(r, RLENGTH + 1) }
+        if (w != "" && match(r, /^[ \t]*\n/)) {
+          r = substr(r, RLENGTH + 1); found = 0; body = ""
+          while (length(r) > 0) {
+            e = index(r, "\n")
+            if (e) { line = substr(r, 1, e - 1); r = substr(r, e + 1) } else { line = r; r = "" }
+            l2 = line; if (dash) sub(/^\t+/, "", l2)
+            if (l2 == w) { found = 1; break }
+            body = body line "\n"
+          }
+          if (found && match(r, /^[ \t\n]*\)/) && (quoted || (index(body, "$") == 0 && index(body, "`") == 0))) {
+            ok = 1; s = substr(r, RLENGTH + 1); out = out "SUBTEAMS_MSG"
+          }
+        }
       }
-      if (w == "" || !match(rest, /^[ \t]*\n/)) exit 1
-      rest = substr(rest, RLENGTH + 1); found = 0
-      while (length(rest) > 0) {
-        e = index(rest, "\n")
-        if (e) { line = substr(rest, 1, e - 1); rest = substr(rest, e + 1) } else { line = rest; rest = "" }
-        if (dash) sub(/^\t+/, "", line)
-        if (line == w) { found = 1; break }
-      }
-      if (!found || !match(rest, /^[ \t\n]*\)/)) exit 1
-      rest = substr(rest, RLENGTH + 1)
+      if (!ok) { out = out "$(cat"; s = rest }
     }
-    exit 0 }'
+    printf "%s", out s }'
 }
 
-cs__subst_ok() {
-  local t="$1" r w tail
-  local q='^\$\(cat[[:space:]]+<<-?[[:space:]]*['"'"'"]([A-Za-z0-9_.-]+)['"'"'"][[:space:]](.*)$'
-  local u='^\$\(cat[[:space:]]+<<-?[[:space:]]*[A-Za-z0-9_.-]+[[:space:]]'
-  case "$t" in *'$('*|*'`'*) ;; *) return 0 ;; esac
-  case "$t" in                                  # the read-only toplevel lookup used as a cd / -C target
-    "$CS_TOPSUB1"*|"$CS_TOPSUB2"*)
-      r="${t#"$CS_TOPSUB1"}"; r="${r#"$CS_TOPSUB2"}"
-      case "$r" in *'$('*|*'`'*) return 1 ;; esac
-      return 0 ;;
-  esac
-  [ "${CS_HDOK:-0}" = 1 ] || return 1          # a malformed / extended heredoc somewhere: no exemption
-  if [[ $t =~ $q ]]; then
-    # quoted delimiter: the body is literal up to the line "<W>"; what follows the
-    # FIRST " <W> )" must not substitute again (no closing here: the message was
-    # split by the tokenizer and the later tokens are checked on their own)
-    w="${BASH_REMATCH[1]}"; r="${BASH_REMATCH[2]}"
-    case "$r" in *" $w )"*) tail="${r#* "$w" )}" ;; *) return 0 ;; esac
-    case "$tail" in *'$('*|*'`'*) return 1 ;; esac
-    return 0
-  fi
-  if [[ $t =~ $u ]]; then           # unquoted delimiter: the body is expanded
-    r="${t#??}"; case "$r" in *'$('*|*'`'*) return 1 ;; esac
-    return 0
-  fi
-  return 1
+# cs__tokenize — a COPY of lib-gitcmd.sh _gc_tokenize (that one is the review
+# gate's, unchanged since 1.49) extended for the contract SHAPE check: each
+# statement line is "<sep>\035<tokens \037-joined>" where <sep> is what ended it
+# (n newline, ; , A &&, O ||, | pipe, & background, ( ) ` subshell/substitution,
+# E end of input); constructs the shape forbids are reported as "\034<reason>"
+# lines (quote-aware: nothing inside '…' or $'…' or a QUOTED heredoc body counts):
+# $( / backticks outside single quotes (except the exact toplevel lookup
+# `$(git rev-parse --show-toplevel)` / its backtick form), <( >( process
+# substitution, ( ) subshells, ||, & background, <> , <<< here-strings, and an
+# UNQUOTED heredoc body containing $ or a backtick. Last line: "\036OK"|"\036BAD".
+cs__tokenize() {
+  LC_ALL=C awk -v E1='$(git rev-parse --show-toplevel)' -v E2='`git rev-parse --show-toplevel`' '
+    function flush() { if (has) { out = out (nt++ ? US : "") tok } tok = ""; has = 0 }
+    function emit(sep) {
+      flush()
+      if (nt) { if (held != "") print hsep GS held; held = out; hsep = sep }
+      else if (held != "" && (hsep == "n" || hsep == ";")) hsep = sep
+      out = ""; nt = 0
+    }
+    function flag(r) { if (!(r in seen)) { seen[r] = 1; print FL r } }
+    BEGIN { RS = "\001"; US = "\037"; GS = "\035"; FL = "\034"; s = ""; q = ""; tok = ""; has = 0; out = ""; nt = 0; nh = 0; ar = 0; bad = 0; held = ""; hsep = "" }
+    { s = s $0 }
+    END {
+      n = length(s)
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (q == "\047") { if (c == "\047") q = ""; else tok = tok (c == "\n" ? " " : c); continue }
+        if (q == "A") {
+          if (c == "\\") { tok = tok substr(s, i + 1, 1); i++ }
+          else if (c == "\047") q = ""
+          else tok = tok (c == "\n" ? " " : c)
+          continue
+        }
+        if (q == "\"") {
+          if (c == "\\") {
+            nx = substr(s, i + 1, 1)
+            if (nx == "\"" || nx == "\\" || nx == "$" || nx == "`") { tok = tok nx; i++ } else tok = tok c
+            continue
+          }
+          if (c == "$" && substr(s, i + 1, 1) == "(") {
+            if (substr(s, i, length(E1)) == E1) { tok = tok E1; i += length(E1) - 1; continue }
+            flag("command substitution $( ) inside double quotes")
+          }
+          if (c == "`") {
+            if (substr(s, i, length(E2)) == E2) { tok = tok E2; i += length(E2) - 1; continue }
+            flag("command substitution with backticks")
+          }
+          if (c == "\"") q = ""; else tok = tok (c == "\n" ? " " : c)
+          continue
+        }
+        if (c == "\\") {
+          nx = substr(s, i + 1, 1); i++
+          if (nx != "\n") { tok = tok nx; has = 1 }
+          continue
+        }
+        if (c == "$" && substr(s, i + 1, 1) == "\047") { q = "A"; has = 1; i++; continue }
+        if (c == "$" && substr(s, i + 1, 1) == "(") {
+          if (substr(s, i, length(E1)) == E1) { tok = tok E1; has = 1; i += length(E1) - 1; continue }
+          flag("command substitution $( )")
+        }
+        if (c == "`" && substr(s, i, length(E2)) == E2) { tok = tok E2; has = 1; i += length(E2) - 1; continue }
+        if (c == "\047" || c == "\"") { q = c; has = 1; continue }
+        if (c == " " || c == "\t") { flush(); continue }
+        if (c == "#" && !has) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
+        if (c == "<" && substr(s, i + 1, 1) == ">") flag("<> read-write redirection")
+        if (ar == 0 && c == "<" && substr(s, i + 1, 2) == "<<") flag("here-string <<<")
+        if (ar == 0 && c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<") {
+          j = i + 2; dash = 0
+          if (substr(s, j, 1) == "-") { dash = 1; j++ }
+          while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+          w = ""; qc = substr(s, j, 1); hq = 0
+          if (qc == "\047" || qc == "\"") {
+            hq = 1; j++
+            while (j <= n && substr(s, j, 1) != qc) { w = w substr(s, j, 1); j++ }
+            j++
+          } else {
+            while (j <= n && substr(s, j, 1) !~ /[ \t\n;|&()<>]/) { w = w substr(s, j, 1); j++ }
+          }
+          if (w ~ /[\\\047"]/) hq = 1
+          gsub(/\\/, "", w)
+          if (w != "") { hw[nh] = w; hd[nh] = dash; hqq[nh] = hq; nh++ }
+          tok = tok "<<" w; has = 1; i = j - 1
+          continue
+        }
+        if (c == "(") {
+          if (ar > 0 || substr(s, i - 1, 1) == "(") ar += (ar > 0 ? 1 : 2)
+          pv = substr(s, i - 1, 1)
+          if (pv == "<" || pv == ">") flag("process substitution <( ) / >( )")
+          else if (pv != "$") flag("subshell or grouping ( )")
+        }
+        else if (c == ")" && ar > 0) ar--
+        if (c == "`") flag("command substitution with backticks")
+        if (c == "\n" || c == ";" || c == "|" || c == "(" || c == ")" || c == "`") {
+          sep = (c == "\n" ? "n" : c)
+          if (c == "|" && substr(s, i + 1, 1) == "|") { sep = "O"; i++; flag("|| (or-list)") }
+          else if (c == "|" && substr(s, i + 1, 1) == "&") i++
+          emit(sep)
+          if (c == "\n" && nh > 0) {
+            for (h = 0; h < nh; h++) {
+              found = 0
+              while (i < n) {
+                e = index(substr(s, i + 1), "\n")
+                if (e == 0) { line = substr(s, i + 1); i = n } else { line = substr(s, i + 1, e - 1); i = i + e }
+                if (hd[h]) sub(/^\t+/, "", line)
+                if (line == hw[h]) { found = 1; break }
+                if (!hqq[h] && (index(line, "$") || index(line, "`"))) flag("unquoted heredoc body with $ or a backtick")
+              }
+              if (!found) bad = 1
+            }
+            nh = 0
+          }
+          continue
+        }
+        if (c == "&") {
+          pv = substr(s, i - 1, 1); nx = substr(s, i + 1, 1)
+          if (pv == ">" || pv == "<" || nx == ">") { tok = tok c; has = 1; continue }
+          if (nx == "&") { i++; emit("A"); continue }
+          flag("& (background job)"); emit("&")
+          continue
+        }
+        tok = tok c; has = 1
+      }
+      emit("E")
+      if (held != "") print hsep GS held
+      print (q == "" && !bad ? "\036OK" : "\036BAD")
+    }'
 }
 
 cs__record() { # <kind> <tokens from index i…> uses locals of cs__stmt via dynamic scope
@@ -213,37 +329,42 @@ cs__record() { # <kind> <tokens from index i…> uses locals of cs__stmt via dyn
   if [ "$CS_R_DIRSET" = 1 ]; then CS_DIR[k]="$CS_R_DIR"; CS_DRAW[k]="$CS_R_DRAW"; else CS_DIR[k]="$CS_CUR"; CS_DRAW[k]="$CS_CURRAW"; fi
   CS_ENV[k]="$CS_R_ENV"; CS_GENV[k]="$CS_R_GENV"; CS_PEXP[k]="$CS_LEXP"
   CS_REDIR[k]="$CS_R_REDIR"; CS_X[k]="$CS_R_X"; CS_RUN[k]="${CS_R_RUN:-0}"
-  CS_SUBST[k]="$CS_R_SUBST"; CS_GOPT[k]="${CS_R_GOPT:-0}"
+  CS_GOPT[k]="${CS_R_GOPT:-0}"; CS_SEP[k]="${CS_STMT_SEP:-n}"; CS_DEPTH[k]="${CS_STMT_DEPTH:-0}"
+  CS_CFG[k]="$CS_R_CFG"; CS_LITPS[k]="${CS_R_LITPS:-0}"
 }
 
 # cs_scan "<command line>" [depth] [inherited env 0/1] [inherited git env 0/1]
+# Also fills CS_SEP[i] (what ended the statement, see cs__tokenize), CS_DEPTH[i]
+# (0 = top level, >0 = inside bash -c / eval), CS_CFG[i] (the first config / PATH
+# injection on it: a `git -c` key outside the allowlist, --config-env, GIT_CONFIG_*,
+# GIT_EXEC_PATH or PATH set for it or earlier in the line), CS_LITPS[i] (git
+# --literal-pathspecs) and CS_SHAPE (newline-separated forbidden constructs).
 cs_scan() {
-  local depth="${2:-0}" pe="${3:-0}" pg="${4:-0}" line sentinel=0
-  if [ "$depth" -eq 0 ]; then
-    cs__reset; CS_HDOK=1
-    case "$1" in *'$(cat <<'*) cs__heredoc_wellformed "$1" || CS_HDOK=0 ;; esac
-  fi
+  local depth="${2:-0}" pe="${3:-0}" pg="${4:-0}" line sentinel=0 txt
   local -a T
+  if [ "$depth" -eq 0 ]; then cs__reset; txt=$(printf '%s' "$1" | cs__msg_prepass); else txt="$1"; fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     case "$line" in
       $'\036OK') sentinel=1; continue ;;
       $'\036BAD') continue ;;
+      $'\034'*) CS_SHAPE="$CS_SHAPE${CS_SHAPE:+$'\n'}${line#?}"; continue ;;
     esac
-    IFS=$'\037' read -r -a T <<< "$line"
+    CS_STMT_SEP="${line%%$'\035'*}"; CS_STMT_DEPTH="$depth"
+    IFS=$'\037' read -r -a T <<< "${line#*$'\035'}"
     cs__stmt "$depth" "$pe" "$pg"
-  done < <(printf '%s' "$1" | _gc_tokenize)
+  done < <(printf '%s' "$txt" | cs__tokenize)
   [ "$sentinel" -eq 1 ] || CS_RELIABLE=0
 }
 
 cs__stmt() { # uses T from cs_scan
   local depth="$1" n=${#T[@]} i=0 w base wrap="" need_pos=0 j k v nm assigns=0 dir d raw
   local CS_R_ENV="$2" CS_R_GENV="$3" CS_R_X=0 CS_R_REDIR="" CS_R_SUB="" CS_R_ARGS="" CS_R_RUN=0 CS_STMT_TXT
-  local CS_R_SUBST="" CS_R_GOPT=0
+  local CS_R_GOPT=0 CS_R_CFG="" CS_R_LITPS=0
   local CS_R_DIR="" CS_R_DRAW="" CS_R_DIRSET=0
   [ "$CS_LGENV" = 1 ] && CS_R_GENV=1
+  [ "$CS_LCFG" != 0 ] && CS_R_CFG="$CS_LCFG"
   CS_STMT_TXT=$(printf '%s ' "${T[@]}" | tr -d '\000-\037'); CS_STMT_TXT="${CS_STMT_TXT% }"
-  for w in "${T[@]}"; do cs__subst_ok "$w" || { CS_R_SUBST="$w"; break; }; done
   while :; do
     while [ "$i" -lt "$n" ]; do
       w="${T[$i]}"
@@ -270,6 +391,7 @@ cs__stmt() { # uses T from cs_scan
       if _gc_is_assign "$w"; then
         nm="${w%%=*}"; assigns=$((assigns + 1))
         cs__isgitvar "$nm" && CS_R_GENV=1
+        cs__iscfgvar "$nm" && CS_R_CFG="${CS_R_CFG:-$nm=}"
         CS_R_ENV=1; i=$((i + 1)); continue
       fi
       break
@@ -281,6 +403,7 @@ cs__stmt() { # uses T from cs_scan
           _gc_is_assign "$k" || continue
           nm="${k%%=*}"; v="${k#*=}"
           cs__isgitvar "$nm" && CS_LGENV=1
+          cs__iscfgvar "$nm" && [ "$CS_LCFG" = 0 ] && CS_LCFG="$nm="
           case "$v" in *'$'*|*'`'*) cs__setvar "$nm" "" 0 ;; *) cs__setvar "$nm" "$v" 1 ;; esac
         done
         CS_R_ENV=0; cs__record assign
@@ -320,7 +443,7 @@ cs__stmt() { # uses T from cs_scan
   done
   case "$base" in
     cd|pushd)
-      j=$((i + 1)); while [ "$j" -lt "$n" ] && [ "${T[$j]}" = "--" ]; do j=$((j + 1)); done
+      j=$((i + 1)); while [ "$j" -lt "$n" ] && case "${T[$j]}" in --|-P|-L|-e|-@|-PL|-LP|-Pe|-eP) true ;; *) false ;; esac; do j=$((j + 1)); done
       raw="${T[$j]:-~}"
       if [ "$raw" = - ]; then CS_CUR=""; CS_CURRAW="cd -"
       elif cs_expand "$raw" && cs__abs "$CS_CUR" "$CS_E"; then
@@ -356,9 +479,11 @@ cs__stmt() { # uses T from cs_scan
         _gc_is_assign "$k" || continue
         nm="${k%%=*}"; v="${k#*=}"
         cs__isgitvar "$nm" && CS_LGENV=1
+        cs__iscfgvar "$nm" && [ "$CS_LCFG" = 0 ] && CS_LCFG="$nm="
         case "$v" in *'$'*|*'`'*) cs__setvar "$nm" "" 0 ;; *) cs__setvar "$nm" "$v" 1 ;; esac
       done
       [ "$CS_LGENV" = 1 ] && CS_R_GENV=1
+      [ "$CS_LCFG" != 0 ] && CS_R_CFG="$CS_LCFG"
       case "$base" in source|.) cs__record other ;; *) cs__record export ;; esac ;;
     unset) cs__record assign ;;
     true|false|:|test|'['|'[['|']]'|fi|done|esac|'}'|then|else) cs__record noop ;;
@@ -371,20 +496,22 @@ cs__stmt() { # uses T from cs_scan
       j=$((i + 1)); dir="$CS_CUR"; raw="$CS_CURRAW"
       while [ "$j" -lt "$n" ]; do
         case "${T[$j]}" in
-          -C)
-            v="${T[$((j + 1))]:-}"
+          -C|-C?*)
+            if [ "${T[$j]}" = -C ]; then v="${T[$((j + 1))]:-}"; j=$((j + 2)); else v="${T[$j]#-C}"; j=$((j + 1)); fi
             if [ -n "$dir" ] && cs_expand "$v" && cs__abs "$dir" "$CS_E"; then dir="$CS_P"
-            else dir=""; raw="${raw:-$v}"; fi
-            j=$((j + 2)) ;;
-          -c)
-            v="${T[$((j + 1))]:-}"
+            else dir=""; raw="${raw:-$v}"; fi ;;
+          -c|-c?*)
+            if [ "${T[$j]}" = -c ]; then v="${T[$((j + 1))]:-}"; j=$((j + 2)); else v="${T[$j]#-c}"; j=$((j + 1)); fi
             case "$(printf '%s' "${v%%=*}" | tr '[:upper:]' '[:lower:]')" in core.worktree|core.bare|include.path|includeif.*) CS_R_GENV=1 ;; esac
-            CS_R_GOPT=1; j=$((j + 2)) ;;
-          --git-dir|--work-tree|--config-env) CS_R_GENV=1; CS_R_GOPT=1; j=$((j + 2)) ;;
-          --git-dir=*|--work-tree=*|--config-env=*|--bare) CS_R_GENV=1; CS_R_GOPT=1; j=$((j + 1)) ;;
-          --exec-path=*) CS_R_GOPT=1; j=$((j + 1)) ;;
+            cs__cfg_ok "$v" || { CS_R_GOPT=1; CS_R_CFG="${CS_R_CFG:-git -c ${v%%=*}}"; } ;;
+          --literal-pathspecs) CS_R_LITPS=1; j=$((j + 1)) ;;
+          --config-env|--config-env=*) CS_R_GENV=1; CS_R_GOPT=1; CS_R_CFG="${CS_R_CFG:---config-env}"
+            case "${T[$j]}" in *=*) j=$((j + 1)) ;; *) j=$((j + 2)) ;; esac ;;
+          --git-dir|--work-tree) CS_R_GENV=1; CS_R_GOPT=1; j=$((j + 2)) ;;
+          --git-dir=*|--work-tree=*|--bare) CS_R_GENV=1; CS_R_GOPT=1; j=$((j + 1)) ;;
+          --exec-path=*) CS_R_GOPT=1; CS_R_CFG="${CS_R_CFG:---exec-path}"; j=$((j + 1)) ;;
           --namespace|--super-prefix) j=$((j + 2)) ;;
-          --exec-path) CS_R_GOPT=1; j=$((j + 2)) ;;
+          --exec-path) CS_R_GOPT=1; CS_R_CFG="${CS_R_CFG:---exec-path}"; j=$((j + 2)) ;;
           -*) j=$((j + 1)) ;;
           *) break ;;
         esac
@@ -482,8 +609,20 @@ cs_parse_commit() {
 }
 
 cs_readonly_git() { # <sub> <args \037> -> 0 if it changes nothing
+  local -a A; local a
+  IFS=$'\037' read -r -a A <<< "$2"
   case "$1" in
     status|diff|log|show|rev-parse|ls-files|ls-tree|cat-file|describe|blame|grep|shortlog|version|help|check-ignore|rev-list|show-ref|for-each-ref|var|name-rev|count-objects|merge-base|whatchanged|diff-index|diff-files|diff-tree) ;;
+    stash) case "${A[0]:-}" in list|show) ;; *) return 1 ;; esac ;;
+    branch|remote)                     # listing forms only: no argument that names / changes something
+      for a in ${A[@]+"${A[@]}"}; do
+        case "$1:$a" in
+          branch:--show-current|branch:-a|branch:-r|branch:-v|branch:-vv|branch:--list|branch:--all|branch:--remotes|branch:--verbose|branch:--no-color|branch:--color) ;;
+          remote:-v|remote:--verbose) ;;
+          *) return 1 ;;
+        esac
+      done ;;
+    config) case "${A[0]:-}" in --get|--get-all|--get-regexp|--list|-l) ;; *) return 1 ;; esac ;;
     *) return 1 ;;
   esac
   case $'\037'"$2"$'\037' in
@@ -519,22 +658,50 @@ cs_top_of() { # <dir> -> toplevel or rc 1
   [ -n "$1" ] && [ -d "$1" ] && git -C "$1" rev-parse --show-toplevel 2>/dev/null
 }
 
-# cs_prior_ok <commit statement index> — the "only state-changing command" rule.
-# Sets CS_BAD (deny text) and CS_REPLAY (indices of add/stage/rm to replay).
+# The SHAPE a commit line must have under a contract (anything else is denied with
+# CS_SHAPE_HELP — the gate then never has to guess what the line commits):
+CS_SHAPE_HELP="write the commit as a plain command: [cd /abs &&] [git add <literal paths> &&] git commit [-a] [-m '…' | -F - <<'EOF'] [-- <paths>] [&& read-only follow-ups]"
+CS_CONSUMERS=" tail head cat grep wc sort uniq less more column "
+
+# cs_shape_ok <commit statement index> — the line-level shape (contract only):
+# sequential ; && newline before the commit, no forbidden construct (cs__tokenize),
+# nothing nested in bash -c / eval, no xargs commit, a pipe after the commit only
+# into read-only consumers, no config / PATH injection up to the commit. Sets CS_BAD.
+cs_shape_ok() {
+  local ck="$1" j b
+  CS_BAD=""
+  if [ -n "$CS_SHAPE" ]; then CS_BAD="the line uses ${CS_SHAPE%%$'\n'*}"; return 1; fi
+  for j in ${CS_KIND[@]+"${!CS_KIND[@]}"}; do
+    [ "${CS_DEPTH[j]:-0}" = 0 ] || { CS_BAD="the commit line nests commands in bash -c / sh -c / eval ('${CS_TXT[j]}')"; return 1; }
+    if [ "$j" -lt "$ck" ]; then
+      case "${CS_SEP[j]}" in ';'|A|n) ;; *) CS_BAD="'${CS_TXT[j]}' is joined to the next command by '${CS_SEP[j]}' before the commit"; return 1 ;; esac
+    fi
+    if [ "$j" -le "$ck" ] && [ -n "${CS_CFG[j]}" ]; then
+      CS_BAD="'${CS_TXT[j]}' injects git configuration or binaries (${CS_CFG[j]}); allowed -c keys: user.name, user.email, commit.gpgsign, core.quotepath, color.*"; return 1
+    fi
+    if [ "$j" -gt "$ck" ] && [ "${CS_SEP[$((j - 1))]}" = '|' ]; then
+      b="${CS_TXT[j]%% *}"; b="${b##*/}"
+      case "$CS_CONSUMERS" in *" $b "*) ;; *) CS_BAD="the commit's output is piped into '$b' (only read-only consumers:${CS_CONSUMERS%?})"; return 1 ;; esac
+    fi
+  done
+  [ "${CS_X[ck]}" = 1 ] && { CS_BAD="the commit takes arguments from stdin (xargs)"; return 1; }
+  return 0
+}
+
+# cs_prior_ok <commit statement index> — the shape (cs_shape_ok) plus the "only
+# state-changing command" rule for what runs before the commit. Sets CS_BAD (deny
+# text) and CS_REPLAY (indices of add/stage/rm to replay).
 cs_prior_ok() {
   local ck="$1" j a rmnc=0 t
   local -a A
   CS_BAD=""; CS_REPLAY=()
-  for ((j = 0; j <= ck; j++)); do
-    if [ -n "${CS_SUBST[j]}" ]; then
-      CS_BAD="'${CS_TXT[j]}' runs a command substitution (${CS_SUBST[j]:0:60}) — it executes before the commit; run it separately first. For the message use git commit -F - <<'EOF' … EOF"
-      return 1
-    fi
-    [ "$j" -lt "$ck" ] || break
+  cs_shape_ok "$ck" || return 1
+  for ((j = 0; j < ck; j++)); do
     if cs_redir_bad "$j"; then CS_BAD="'${CS_TXT[j]}' writes to '$CS_RB' (inside the repository) before the commit — run it separately first, then commit"; return 1; fi
     case "${CS_KIND[j]}" in
       assign|export|cd|noop|echo) continue ;;
-      st) CS_BAD="run '${CS_TXT[j]}' separately first (it runs project code), then commit"; return 1 ;;
+      st) [ "${CS_RUN[j]}" = 1 ] || continue
+          CS_BAD="run '${CS_TXT[j]}' separately first (it runs project code), then commit"; return 1 ;;
       other) CS_BAD="run '${CS_TXT[j]}' separately first, then commit — with a test contract the commit must be the only state-changing command of the line"; return 1 ;;
     esac
     # git ("read-only" with -c / --config-env / --exec-path can run anything)
@@ -575,12 +742,19 @@ cs__tree_reading() {
   CS_CT=""; CS_CTERR=""
   cs_parse_commit "${CS_ARGS[ck]}" $lim
   [ -z "$CSP_BAD" ] || { CS_CTERR="$CSP_BAD"; return 3; }
+  P=()
   for j in ${CSP_PATHS[@]+"${CSP_PATHS[@]}"}; do
-    case "$j" in *'*'*|*'?'*|*'['*|*'$'*|*'`'*)
-      CS_CTERR="commit pathspec '$j' has glob or dynamic characters (the shell and git would expand it differently) — name the files, or stage them and commit without paths"; return 2 ;;
+    case "$j" in *'$'*|*'`'*)
+      CS_CTERR="commit pathspec '$j' has dynamic characters — name the files literally"; return 2 ;;
     esac
+    if [ "${CS_LITPS[ck]:-0}" = 1 ]; then P+=(":(literal)$j"); continue; fi   # git --literal-pathspecs
+    case "$j" in
+      ':(literal)'*) ;;
+      *'*'*|*'?'*|*'['*)
+        CS_CTERR="commit pathspec '$j' has glob characters (the shell and git would expand it differently) — name the files, use ':(literal)<path>', or stage them and commit without paths"; return 2 ;;
+    esac
+    P+=("$j")
   done
-  P=(${CSP_PATHS[@]+"${CSP_PATHS[@]}"})
   if [ -n "$CSP_PFF" ]; then
     case "$CSP_PFF" in -) CS_CTERR="--pathspec-from-file=- (stdin) cannot be checked before the commit runs"; return 2 ;; esac
     case "$CSP_PFF" in /*) f="$CSP_PFF" ;; *) f="${CS_DIR[ck]%/}/$CSP_PFF" ;; esac

@@ -55,7 +55,9 @@ _test_agent_kind() { # agent_type -> ui | te | "" (canonical match only)
   esac
 }
 
-START_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/agent-starts"
+# = tc_cache_root (lib-testclass): XDG_CACHE_HOME only when absolute
+case "${XDG_CACHE_HOME:-}" in /*) CACHE_ROOT="$XDG_CACHE_HOME" ;; *) CACHE_ROOT="$HOME/.cache" ;; esac
+START_DIR="$CACHE_ROOT/claude-subteams/agent-starts"
 
 # _status_of <text> -> the status word if the first non-empty line is the Status
 # line. Tolerant (B6): leading markdown (**, __, `, #, >, "- ", "* ", spaces) is
@@ -129,7 +131,7 @@ _transcript_last_text() { # <path> -> text of the last assistant message that ha
 # gate and `status` can say "ui-tester ran but its final answer had no Status line".
 _test_receipt() {
   local kind="$1" aid tfile t_start t_end cwd repo rid root rr tree msg st tp rs ev rec deadline n at sid r rej=""
-  local stores="" line nst=0 hd tpc=""
+  local stores="" line nst=0 hd tpc="" explicit
   aid=$(printf '%s' "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)
   printf '%s' "$aid" | grep -qE '^[A-Za-z0-9._-]+$' || return 0
   case "$aid" in .|..) return 0 ;; esac
@@ -143,9 +145,13 @@ _test_receipt() {
   # Status: last_assistant_message; else the transcript (SubagentHandback, polled
   # until ~2 s are used, never past ~4 s of hook time; then the last assistant text).
   msg=$(printf '%s' "$INPUT" | jq -r 'if (.last_assistant_message | type) == "string" then .last_assistant_message else empty end' 2>/dev/null)
+  explicit=$(printf '%s' "$INPUT" | jq -r 'if (.last_assistant_message | type) == "string" then "1" else "0" end' 2>/dev/null)
   st=$(_status_of "$msg")
   tp=$(printf '%s' "$INPUT" | jq -r '.agent_transcript_path // empty' 2>/dev/null)
-  if [ -z "$st" ]; then
+  # The transcript is read only when the CLI sent NO final answer (SubagentHandback
+  # mode). An explicit answer without a parsable Status is `rejected` — falling back
+  # to an older Status in the transcript would credit a previous verdict.
+  if [ -z "$st" ] && [ "$explicit" != 1 ]; then
     if [ -n "$tp" ]; then
       deadline=$(( T_HOOK + 4 )); n=0
       while :; do
@@ -242,7 +248,7 @@ if [ "$EVENT" = "SubagentStop" ]; then
        && [ "$SID" != "." ] && [ "$SID" != ".." ] \
        && [ -n "$RESULT" ] \
        && printf '%s' "$AGENT_TYPE" | grep -qi 'code-reviewer'; then
-      MARK_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/review-marks"
+      MARK_DIR="$CACHE_ROOT/claude-subteams/review-marks"
       mkdir -p "$MARK_DIR" 2>/dev/null
       : > "$MARK_DIR/$SID" 2>/dev/null
       find "$MARK_DIR" -type f -mtime +7 -delete 2>/dev/null
