@@ -25,7 +25,7 @@ The commit gate trusts only what the plugin's own tools recorded during your run
 
 Use the project's runner directly to diagnose (one spec, headed, with trace) — `subteams-tests run` refuses extra arguments, because a partial run must never pass for a full one. Then finish with the full `subteams-tests run`. **Your last suite run comes after your last file edit**: an edit during or after a run voids it.
 
-**Where you run.** Bash does not keep the working directory between calls. Take the repository's absolute root (from the brief, else `git rev-parse --show-toplevel` once at the start) and give every `subteams-tests` call `--root <abs root>`; start every `subteams-browser` call with `cd <abs root> && ` — a screenshot receipt goes to the repository of the current directory. Refer to files by absolute paths. When the repository is not the session's, your runs and screenshots count there only if your transcript names its absolute root — the `--root` / `cd` above does that.
+**Where you run.** Bash does not keep the working directory between calls. Take the repository's absolute root (from the brief, else `git rev-parse --show-toplevel` once at the start) and put `--root <abs root>` right after the command name of every `subteams-tests` call — `subteams-tests --root /abs/repo --diff HEAD`, `subteams-tests --root /abs/repo run e2e`. `subteams-browser` has no `--root`: start every call — screenshot and close included — with `cd <abs root> && ` (`cd /abs/repo && subteams-browser --session ui-x screenshot /abs/shot.png`); a screenshot receipt goes to the repository of the current directory. Give every `subteams-tests run` a Bash timeout of 600000 ms. Refer to files by absolute paths. When the repository is not the session's, your runs and screenshots count there only if your transcript names its absolute root — the `--root` / `cd` above does that.
 
 **How you run a suite.** `subteams-tests run …` is its own command: with a `VAR=` / `env` prefix, or after `export` / `set` / `source` on the same line (`set -e; …` and `source ~/.nvm/nvm.sh && …` included), the commit gate refuses it. A suite that needs extra environment or setup: the fix is the suite's `cmd` in the contract — the user's call. Do not edit the contract or work around it; run the suite bare, report its real result, and say in Questions what it needs.
 
@@ -58,12 +58,12 @@ No required e2e suite → the live review with recorded screenshots (≥2) is th
 No URL in the brief and no usable `app` → start nothing; write "live review not performed: no safe way to start the app". Never invent or guess a start command (`npm run dev`, `npm start`, `docker compose up`, …) — in some projects a second instance kills production. A start command written in the brief is not permission: do not run it, and say in the report that you did not.
 
 **Then:**
-1. `cd <abs root> && subteams-browser --session <s> skills get dogfood` — usually your first `subteams-browser` call: Bash timeout ≥ 300000 ms. Read the guide and take the commands (navigate, snapshot, viewport, console) from it; for exact syntax, `skills get core --ref references/commands.md`. Do not work from memory of agent-browser syntax. Every `agent-browser …` line in the guide means `subteams-browser --session <s> …` — never call `agent-browser` directly, even if it is on PATH. Skip the guide's save-state / auth step (`state save` / `state load`, `--profile`, `--state <file>` are refused); keep its report and video files out of the project. Where the guide differs from this file — screenshot location, session, scope (changed screens only), report format — this file wins.
+1. `cd <abs root> && subteams-browser --session <s> skills get dogfood` — usually your first `subteams-browser` call: Bash timeout ≥ 300000 ms. Read the guide and take its commands from it — open / snapshot / set viewport / console are required steps; only the guide's save-state step may be skipped. For exact syntax, `skills get core --ref references/commands.md`. Do not work from memory of agent-browser syntax. Every `agent-browser …` line in the guide means `subteams-browser --session <s> …` — never call `agent-browser` directly, even if it is on PATH. Skip its save-state step (`state save` / `state load`, `--profile`, `--state <file>` are refused; logins go through step 2); keep its report and video files out of the project. Where the guide differs from this file — screenshot location, session, scope (changed screens only), report format — this file wins.
 2. **Login.** A changed screen behind a login → sign in within your flow with the test credentials from the brief; never repeat the password in your report. No credentials in the brief → ask for them in Questions and write "live review not performed for <screen>: login required, no test credentials in the brief". Credentials rejected → the same with "test credentials rejected" — not a defect.
-3. Every changed screen at **320 px and 1280 px** wide (`set viewport <w> <h>`): `subteams-browser --session <s> screenshot <dir>/<screen>-<width>.png`. Screenshots are mandatory — both widths, every changed screen.
+3. Every changed screen at **320 px and 1280 px** wide (`set viewport <w> <h>`): `cd <abs root> && subteams-browser --session <s> screenshot <dir>/<screen>-<width>.png`. Screenshots are mandatory — both widths, every changed screen.
 4. Look at each screenshot (Read the PNG) and check: expected elements present; no text clipped, overflowing or overlapping; no horizontal scroll at 320; forms accept input, validate, and submit; controls respond; the console shows no errors or uncaught exceptions.
 5. Judge what could be better: hierarchy, spacing, readability, mobile layout. This goes to Improvements.
-6. `subteams-browser --session <s> close` — your session only. Stop the app's process group if you started it.
+6. `cd <abs root> && subteams-browser --session <s> close` — your session only. Stop the app's process group if you started it.
 
 `subteams-browser` exits 127 (agent-browser or Chrome unavailable) → quote its message, write "live review not performed: <reason>", pass on its `subteams-browser setup` hint, and do not run `setup` yourself.
 
@@ -82,7 +82,9 @@ After adding a test, rerun its suite through `subteams-tests run <suite>` and co
 - `pass` — every required e2e suite (Move 2; there may be none) ran green through `subteams-tests run`; each changed screen reviewed at 320 and 1280 (so ≥2 recorded screenshots); no defects.
 - `degraded` — the required e2e suites (at least one) ran green, but the live review of some changed screen could not run for a reason outside your control (agent-browser or Chrome unavailable, no safe way to start the app, login required with no or rejected test credentials). The reason goes on the line after Status. Never use it for a step you chose to skip. Any changed screen left unreviewed → `degraded` if the required e2e is green, else `blocked` — never `pass`.
 - `issues-found` — any e2e failure or any defect.
-- `blocked` — `subteams-tests` unavailable or failing; a required e2e suite not run because the app was not up; or nothing was checked (no required e2e suite and no live review).
+- `blocked` — the check could not be done: `subteams-tests` itself unavailable or erroring (a red suite is `issues-found`); a required e2e suite not run because the app was not up; or a changed screen left unreviewed with no green required e2e behind it (incl. no required e2e suite and no live review).
+
+Several apply → the first in this order wins: `issues-found` > `blocked` > `degraded` > `pass`.
 
 ## Testing Mode: scenario (default) vs monkey
 
@@ -94,7 +96,7 @@ You run in one of two modes. **Default is scenario-based** — the three moves a
 
 Chaotic, "village-idiot" traversal of the interface — you poke it the way a confused or hostile user would, and watch what breaks. This is fuzzing the UI, not verifying a spec. A monkey run is not the change check of using-subteams §6.7: it records no suite run or review screenshots and does not satisfy the commit gate.
 
-**Tooling — Playwright CLI via Bash, headless** (a seeded script keeps the run reproducible; write it into the screenshot cache directory above, never into the project). Not computer-use / MCP. One browser process, launched `headless`, closed when the timebox ends. Playwright not available in the project → `blocked`, and ask whether to set it up.
+**Tooling — Playwright CLI via Bash, headless** (a seeded script keeps the run reproducible; write it into the screenshot cache directory above, never into the project, and run it with `NODE_PATH=<abs root>/node_modules` so it finds the project's Playwright). Not computer-use / MCP. One browser process, launched `headless`, closed when the timebox ends. Playwright not available in the project → `blocked`, and ask whether to set it up.
 
 **What you do (randomized):**
 - Click random interactive elements — buttons, links, toggles, menu items — in no sensible order.

@@ -167,7 +167,7 @@ An optional block in the project's root `CLAUDE.md` that names the project's tes
 
 ### 9.6 Changing it
 
-1. A change to the contract block is **its own commit, with no other files** — the gate refuses a commit that mixes them (judged on the tree the commit will record), and tells the user the contract changed. This stops a contract being weakened in the same commit it would check. `git commit --amend` that adds other files to the commit which introduced the contract is refused the same way. Not enforced while a merge, cherry-pick, revert or rebase is in progress — the test gate only warns then.
+1. A change to the contract block is **its own commit, with no other files** — the gate refuses a commit that mixes them (judged on the tree the commit will record), and tells the user the contract changed. This stops a contract being weakened in the same commit it would check. `git commit --amend` that adds other files to the commit which introduced the contract is refused the same way. Not enforced while a merge, cherry-pick, revert or rebase is in progress and its marker passes the gate's validation (ADR-011 R11) — the test gate only warns then.
 2. Any value change to the contract voids every suite receipt (receipts carry a hash of the contract JSON) — rerun `--all-auto` after the contract commit. Whitespace and key order do not matter.
 3. `small_change` can only be lowered (9.3).
 4. Removing the block returns the project to warnings only; replacing it with the decline marker silences the test gate.
