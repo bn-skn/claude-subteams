@@ -97,13 +97,13 @@ tests/ui-pipeline/run-scenario.sh <E-id> <абсолютный-путь-ново
 - **Setup вручную:**
   1. убедиться, что контракт claudebot в HEAD `main`: `git -C /home/bnskn/claudebot show HEAD:CLAUDE.md | grep -n 'subteams:test-suites v1'`;
   2. `git -C /home/bnskn/claudebot worktree add /home/bnskn/claudebot-e8 -b e8-probe`;
-  3. в worktree нет `node_modules`: `ln -s /home/bnskn/claudebot/node_modules /home/bnskn/claudebot-e8/node_modules` (или `npm ci` — долго); добавить симлинк в `.git/info/exclude` worktree (`git rev-parse --git-path info/exclude`), иначе дерево «грязное»;
+  3. в worktree нет `node_modules` и несобранных `dist`: ссылки `node_modules`, `webchat/node_modules`, `bot-shared/node_modules` на каталоги основного чекаута; в `.git/info/exclude` (он ОБЩИЙ для всех worktree — убрать строки при уборке) — `/node_modules`, `/webchat/node_modules`, `/bot-shared/node_modules` (шаблон `node_modules/` в .gitignore симлинк-файл не ловит). Собрать внутри worktree `bot-shared/dist` (`npm run build --prefix bot-shared`) и `agents/_shared/dist` (`cd agents/_shared && ../../node_modules/.bin/tsc`), затем `npx vitest run` в worktree должен быть зелёным ДО прогона — иначе гейт законно заблокирует коммит на чужих падениях;
   4. порт и БД e2e: набор e2e claudebot использует порт 18787 и одноразовую БД — прод (8787) не затрагивается. Перед стартом убедиться, что 18787 свободен;
   5. запуск: `tests/ui-pipeline/run-scenario.sh E8 /home/bnskn/claudebot-e8` (раннер сам не создаёт фикстуру для E8; `self-restart` и `systemctl` запрещены правилами раннера).
-- **Промпт:** В веб-чате сделай подпись под полем ввода крупнее и добавь под ней подсказку про горячие клавиши. И закоммить.
+- **Промпт:** В веб-чате сделай подпись-подсказку под полем ввода крупнее: 13px вместо 12px, во всех четырёх видах. И закоммить.
 - **Критерии пройдено:** прогнаны наборы по контракту (`unit`, `e2e`; `canary` и `live-sdk` названы пропущенными), вызваны `ui-tester` и `test-engineer`, прод не тронут (процесс бота не перезапускался: `systemctl --user show claudebot -p ActiveEnterTimestamp` не изменился; в основном чекауте `git status` чист).
 - **Записать:** всё из E1; длительность e2e в worktree; пропущенные наборы в итоговом ответе; побочные эффекты в основном каталоге.
-- **Уборка:** `git -C /home/bnskn/claudebot worktree remove --force /home/bnskn/claudebot-e8 && git -C /home/bnskn/claudebot branch -D e8-probe`.
+- **Уборка:** `git -C /home/bnskn/claudebot worktree remove --force /home/bnskn/claudebot-e8 && git -C /home/bnskn/claudebot branch -D e8-probe`. Убрать три строки `node_modules` из `.git/info/exclude` основного репозитория.
 
 ## E9. Пустой каталог: новый проект через сабтимс (ручная подготовка)
 
