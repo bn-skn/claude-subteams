@@ -35,7 +35,7 @@ SENT="sentinel-$$-c0ffee-do-not-print"
 # --- набор утилит без браузеров и без agent-browser -------------------------
 TOOLS="$TMP/tools"; mkdir -p "$TOOLS"
 for t in bash sh env uname mkdir rm mv cp mktemp cat date find sleep sha1sum shasum openssl git \
-         dirname basename readlink wc tr cut sed ls pkill chmod touch grep head node stat awk; do
+         dirname basename readlink wc tr cut sed ls pkill chmod touch grep head node stat awk cksum; do
   p=$(command -v "$t" 2>/dev/null) && [ -n "$p" ] && ln -s "$p" "$TOOLS/$t"
 done
 [ -e "$TOOLS/node" ] || { echo "node required"; exit 2; }
@@ -52,6 +52,7 @@ if [ "\${1:-}" = --version ]; then printf 'VERSION_CALL=%s\n' "$3" >> "\${FAKE_A
 log="\${FAKE_AB_LOG:-/dev/null}"
 { printf 'WHO=%s\n' "$3"; printf 'ARGC=%s\n' "\$#"; for a in "\$@"; do printf '[%s]\n' "\$a"; done
   printf 'SKILLS=%s\n' "\${AGENT_BROWSER_SKILLS_DIR:-}"; printf 'UMASK=%s\n' "\$(umask)"; env | grep '^AGENT_BROWSER_' | sed 's/^/ENV:/'; } >> "\$log"
+sleep "\${FAKE_AB_SLEEP:-0}"
 shot=0; last=""; for a in "\$@"; do [ "\$a" = screenshot ] && shot=1; last="\$a"; done
 if [ "\$shot" = 1 ] && [ "\${FAKE_AB_RC:-0}" = 0 ]; then case "\$last" in *.png) printf 'PNGDATA' > "\$last" ;; esac; fi
 exit "\${FAKE_AB_RC:-0}"
@@ -114,10 +115,66 @@ P_BASE="$TOOLS:$TMP/npm:$TMP/chrome"
 echo "--- поиск agent-browser"
 newcache same
 run "$P_BASE:$TMP/sys-same" -- --session s open https://example.com
-check "system 0.43.0: rc 0" 0 "$RC"
-check "system 0.43.0: npm not called" 0 "$(npm_calls)"
-check "system 0.43.0: system binary ran" yes "$(contains 'WHO=system' "$(cat "$ABLOG")")"
-check "system 0.43.0: no cache created" no "$([ -e "$(abdir)/0.43.0" ] && echo yes || echo no)"
+check "0.43.0 on PATH, cache installable: rc 0" 0 "$RC"
+check "0.43.0 on PATH: the lockfile install is preferred (npm called once)" 1 "$(npm_calls)"
+check "0.43.0 on PATH: cache binary ran, not the PATH one" "yes no" "$(contains 'WHO=cache' "$(cat "$ABLOG")") $(contains 'WHO=system' "$(cat "$ABLOG")")"
+check "0.43.0 on PATH: no PATH note when the cache is used" no "$(contains 'from PATH' "$ERR")"
+newcache same-noauto
+run "$P_BASE:$TMP/sys-same" CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1 -- --session s open x
+check "auto-install off: 0.43.0 from PATH, rc 0, one note" "0 yes 1" \
+  "$RC $(contains 'WHO=system' "$(cat "$ABLOG")") $(printf '%s\n' "$ERR" | grep -c 'note: using agent-browser 0.43.0 from PATH')"
+newcache same-npmfail
+run "$P_BASE:$TMP/sys-same" FAKE_NPM_FAIL=1 -- --session s open x
+check "npm fails, 0.43.0 on PATH: PATH used with a note, rc 0" "0 yes yes" \
+  "$RC $(contains 'WHO=system' "$(cat "$ABLOG")") $(contains 'from PATH' "$ERR")"
+check "npm fails, 0.43.0 on PATH: install failure reported too" yes "$(contains 'install failed' "$ERR")"
+check "npm fails, 0.43.0 on PATH: no partial install, no lock" "" "$(names "$(abdir)" | grep -v -e '^install\.log$' -e '^neutral-config\.json$' -e '^0\.43\.0\.install-failed$')"
+newcache same-nonpm
+run "$TOOLS:$TMP/chrome:$TMP/sys-same" -- --session s open x
+check "no npm, 0.43.0 on PATH: PATH used with a note" "0 yes" "$RC $(contains 'from PATH' "$ERR")"
+newcache old-path-npmfail
+run "$P_BASE:$TMP/sys-other" FAKE_NPM_FAIL=1 -- --session s open x
+check "npm fails, only 0.42.0 on PATH: 127, not run" "127 " "$RC $(cat "$ABLOG")"
+
+# неудачная установка запоминается на 10 минут (ключ — версия + хеш lock-файла)
+setmtime() { node -e 'const f=require("fs");const t=Date.now()/1000-Number(process.argv[2]);f.utimesSync(process.argv[1],t,t)' "$1" "$2"; }
+newcache negcache
+STAMPF="$(abdir)/0.43.0.install-failed"
+run "$P_BASE:$TMP/sys-same" FAKE_NPM_FAIL=1 -- --session s open x
+check "neg-cache: first failure runs npm once and writes a 0600 stamp" "1 yes 1" \
+  "$(npm_calls) $([ -f "$STAMPF" ] && [ ! -L "$STAMPF" ] && echo yes) $(find "$STAMPF" -perm 600 | wc -l | tr -d ' ')"
+: > "$ABLOG"
+run "$P_BASE:$TMP/sys-same" FAKE_NPM_FAIL=1 -- --session s open x
+check "neg-cache fresh: npm skipped, PATH used, rc 0" "1 0 yes" "$(npm_calls) $RC $(contains 'WHO=system' "$(cat "$ABLOG")")"
+check "neg-cache fresh: note names age, retry time and the stamp" yes \
+  "$(contains "from PATH" "$ERR" | grep -q yes && printf '%s' "$ERR" | grep -q "install failed 0 min ago; retry after 10 min or delete $STAMPF" && echo yes || echo no)"
+setmtime "$STAMPF" 660
+run "$P_BASE:$TMP/sys-same" FAKE_NPM_FAIL=1 -- --session s open x
+check "neg-cache older than 10 min: install retried" 2 "$(npm_calls)"
+printf 'other-lock-hash\n' > "$STAMPF"
+run "$P_BASE:$TMP/sys-same" FAKE_NPM_FAIL=1 -- --session s open x
+check "neg-cache with another key (plugin update): install retried at once" 3 "$(npm_calls)"
+cp "$STAMPF" "$TMP/stamp-target"; rm -f "$STAMPF"; ln -s "$TMP/stamp-target" "$STAMPF"   # valid key, fresh — only the symlink is wrong
+run "$P_BASE:$TMP/sys-same" FAKE_NPM_FAIL=1 -- --session s open x
+check "neg-cache planted as a symlink: ignored (retried) and replaced by a regular file" "4 no" \
+  "$(npm_calls) $([ -L "$STAMPF" ] && echo yes || echo no)"
+run "$P_BASE" FAKE_NPM_FAIL=1 -- --session s open x
+check "neg-cache fresh, no PATH fallback: 127 with the hint, npm skipped" "127 4 yes" \
+  "$RC $(npm_calls) $(contains "retry after 10 min or delete $STAMPF" "$ERR")"
+run "$P_BASE:$TMP/sys-same" CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1 -- --session s open x
+check "neg-cache: NO_AUTO_INSTALL unchanged (PATH, plain note, no hint)" "0 no" "$RC $(contains 'install failed' "$ERR")"
+: > "$ABLOG"
+run "$P_BASE:$TMP/sys-same" -- setup
+check "neg-cache: explicit setup retries the install despite the stamp, success removes it" "5 0 no yes" \
+  "$(npm_calls) $RC $([ -e "$STAMPF" ] && echo yes || echo no) $(contains 'WHO=cache' "$(cat "$ABLOG")")"
+newcache prune
+mkdir -p "$(abdir)/0.42.0/x" "$(abdir)/0.40.0" "$(abdir)/0.40.0.lock" "$(abdir)/1.2.3.4" "$(abdir)/notaversion" "$TMP/keep-target"
+: > "$TMP/keep-target/f"; ln -s "$TMP/keep-target" "$(abdir)/0.41.0"
+run "$P_BASE" -- --session s open x
+check "prune: old version dir removed after install" no "$([ -e "$(abdir)/0.42.0" ] && echo yes || echo no)"
+check "prune: kept — locked version, non-version names, symlink and its target" "yes yes yes yes yes" \
+  "$([ -d "$(abdir)/0.40.0" ] && echo yes) $([ -d "$(abdir)/1.2.3.4" ] && echo yes) $([ -d "$(abdir)/notaversion" ] && echo yes) $([ -L "$(abdir)/0.41.0" ] && echo yes) $([ -f "$TMP/keep-target/f" ] && echo yes)"
+check "prune: current install intact" "0 yes" "$RC $([ -s "$(abdir)/0.43.0/.subteams-bin" ] && echo yes)"
 
 newcache other
 run "$P_BASE:$TMP/sys-other" -- --session s open https://example.com
@@ -129,7 +186,7 @@ check "install notice line" "subteams: installing agent-browser 0.43.0 into $(ab
 check "cache binary ran (not system-old)" yes "$(contains 'WHO=cache' "$(cat "$ABLOG")")"
 check "AGENT_BROWSER_SKILLS_DIR -> cache skill-data" yes "$(contains "SKILLS=$(abdir)/0.43.0/node_modules/agent-browser/skill-data" "$(cat "$ABLOG")")"
 check "marker written" yes "$([ -s "$(abdir)/0.43.0/.subteams-bin" ] && echo yes || echo no)"
-check "no temp dirs left" "" "$(names "$(abdir)" | grep -v -e '^0\.43\.0$' -e '^install\.log$')"
+check "no temp dirs left" "" "$(names "$(abdir)" | grep -v -e '^0\.43\.0$' -e '^install\.log$' -e '^neutral-config\.json$')"
 : > "$ABLOG"
 run "$P_BASE:$TMP/sys-other" -- --session s snapshot -i
 check "second run: cache hit, npm not called again" 1 "$(npm_calls)"
@@ -169,7 +226,7 @@ newcache npmfail
 run "$P_BASE" FAKE_NPM_FAIL=1 -- --session s open x
 check "npm failed: 127" 127 "$RC"
 check "npm failed: reason + log path" yes "$(contains "log: $(abdir)/install.log" "$ERR")"
-check "npm failed: no partial install" "" "$(names "$(abdir)" | grep -v '^install\.log$')"
+check "npm failed: no partial install" "" "$(names "$(abdir)" | grep -v -e '^install\.log$' -e '^neutral-config\.json$' -e '^0\.43\.0\.install-failed$')"
 check "npm failed: npm env not echoed" no "$(contains "$SENT" "$ERR$OUT")"
 check "npm failed: agent-browser not run" "" "$(cat "$ABLOG")"
 
@@ -203,15 +260,28 @@ SB="$SB_SAVED"
 check "npm ci timeout: npm deaf to TERM is KILLed, not waited out (<15 s)" yes "$([ $((t1 - t0)) -lt 15 ] && echo yes || echo "no ($((t1 - t0)) s)")"
 check "npm ci timeout: 127" 127 "$RC"
 check "npm ci timeout: reason named" yes "$(contains 'did not finish within 2 s' "$ERR")"
-check "npm ci timeout: no partial install, no lock" "" "$(names "$(abdir)" | grep -v '^install\.log$')"
+check "npm ci timeout: no partial install, no lock" "" "$(names "$(abdir)" | grep -v -e '^install\.log$' -e '^neutral-config\.json$' -e '^0\.43\.0\.install-failed$')"
 check "npm ci timeout: npm process gone" no "$(pgrep -f "^bash $TMP/npm/npm ci" >/dev/null && echo yes || echo no)"
 check "npm ci timeout: npm child (sleep) gone" no "$(pgrep -f '^sleep 37[.]123$' >/dev/null && echo yes || echo no)"
+
+# INT/TERM всей группе процессов посреди npm ci (как Ctrl-C): ни временного каталога, ни блокировки
+if SETSID=$(command -v setsid 2>/dev/null); then
+  newcache install-term
+  (cd "$CWD" && exec env -i HOME="$HOMEDIR" XDG_CACHE_HOME="$CACHE" PATH="$P_BASE" TMPDIR="$TMP/t" FAKE_NPM_LOG="$NPMLOG" \
+     FAKE_NPM_SLEEP=30 "$SETSID" bash "$SB" --session s open x) >/dev/null 2>&1 &
+  ip=$!
+  k=0; until [ -s "$NPMLOG" ] || [ "$k" -ge 100 ]; do sleep 0.1; k=$((k + 1)); done
+  check "install interrupted: npm was running (control)" 1 "$(npm_calls)"
+  kill -TERM -- "-$ip" 2>/dev/null; wait "$ip" 2>/dev/null
+  k=0; while names "$(abdir)" | grep -q -e '^\.install-' -e '\.lock$' && [ "$k" -lt 30 ]; do sleep 0.1; k=$((k + 1)); done
+  check "install interrupted by TERM to the group: no temp dir, no lock left" "" "$(names "$(abdir)" | grep -e '^\.install-' -e '\.lock$')"
+else echo "SKIP install-interrupt check: no setsid"; fi
 
 newcache wrongver
 run "$P_BASE" FAKE_INSTALL_VER=0.42.0 -- --session s open x
 check "installed binary wrong version: 127" 127 "$RC"
 check "wrong version: reason named" yes "$(contains 'version is not 0.43.0' "$ERR")"
-check "wrong version: nothing left in cache" "" "$(names "$(abdir)" | grep -v '^install\.log$')"
+check "wrong version: nothing left in cache" "" "$(names "$(abdir)" | grep -v -e '^install\.log$' -e '^neutral-config\.json$' -e '^0\.43\.0\.install-failed$')"
 
 newcache broken
 mkdir -p "$(abdir)/0.43.0/node_modules"   # установка без маркера = битая
@@ -338,12 +408,59 @@ allow "hide-scrollbars false" --hide-scrollbars false --session s screenshot
 allow "wait --state (selector state)" --session s wait "#x" --state hidden
 allow "skills get --all (--all not denied outside close)" skills get --all
 deny "--session after the command" 'must come before the command' open y --session s
-deny "--session after -- (agent-browser stops parsing there)" 'must come before the command' open y -- --session s
+deny "--session only after -- (agent-browser stops parsing there)" 'own session required' open y -- --session s
 deny "--session swallowed by an unlisted value option" 'must come before the command' open y --proxy --session s
 deny "second --session after the command" 'must come before the command' --session s open y --session t
 deny "wait --state with a file path" 'option --state is not allowed' --session s wait 100 --state /x/auth.json
 deny "--state <selector-state word> after a non-wait command" 'option --state is not allowed' --session s open y --state hidden
 for st in visible hidden attached detached; do allow "wait --state $st" --session s wait "#x" --state "$st"; done
+
+echo "--- опции команд в любой позиции (глобальные разбираются везде до --)"
+# задокументированные формы из `skills get core --full` и `skills get dogfood`
+allow "snapshot -i -c -d 3 -s -u --delta --full" --session s snapshot -i -c -d 3 -s "#main" -u --delta --full
+allow "snapshot --interactive --compact --depth --selector --urls" --session s snapshot --interactive --compact --depth 2 --selector "#m" --urls
+allow "click --new-tab" --session s click @e1 --new-tab
+allow "click --human" --session s click @e1 --human
+allow "type --clear --delay -- --clear" --session s type @e2 --clear --delay 10 -- --clear
+allow "fill -- --json (literal text)" --session s fill @e2 -- --json
+allow "fill -- --profile (after --: inert text)" --session s fill @e2 -- --profile x
+allow "wait --url --timeout" --session s wait --url "**/dashboard" --timeout 120000
+allow "wait --load" --session s wait --load networkidle
+allow "wait --fn" --session s wait --fn "window.ready === true"
+allow "wait --text" --session s wait --text "Welcome"
+allow "find --name --exact" --session s find role button click --name Submit --exact
+allow "screenshot --full -f --if-changed --threshold" --session s screenshot --full -f --if-changed --threshold 0.1
+allow "screenshot --annotate (global)" --session s screenshot --annotate
+allow "eval -b / --base64" --session s eval -b ZG9j
+allow "eval --stdin" --session s eval --stdin
+allow "console --clear" --session s console --clear
+allow "errors --clear" --session s errors --clear
+allow "tab new --label" --session s tab new --label docs https://example.com
+allow "record start --fps --cursor --contact-sheet --contact-sheet-threshold" --session s record start "$TMP/v.webm" --fps 10 --cursor --contact-sheet --contact-sheet-threshold 0.1
+allow "skills get core --full" skills get core --full
+allow "skills get core --ref commands" skills get core --ref commands
+allow "scroll down 500 -s" --session s scroll down 500 -s ".box"
+allow "scroll up -100 (negative number)" --session s scroll up -100
+allow "press - (lone dash)" --session s press -
+allow "<cmd> --help" --session s open --help
+allow "global bool after the command" --session s snapshot -i --json
+allow "global value after the command" --session s open x --user-agent ua
+allow "global value option swallows a dash value" --session s open x --user-agent --weird-ua
+deny "fill text --profile without -- (agent-browser reads it as the global flag)" 'option --profile is not allowed' --session s fill '#f' x --profile /p
+deny "fill text --json-like unknown without --" "option --foo is not allowed with 'fill'" --session s fill '#f' --foo
+for f in --proxy --proxy-bypass --headers --namespace --use-system-ca --action-policy --confirm-actions --confirm-interactive \
+         --enable --capture --device --model -v -q --webgpu --no-ca-cert --no-auto-connect --version -V; do
+  deny "global $f after the command" "option $f is not allowed with 'open'" --session s open https://example.com "$f" x
+done
+deny "command option of another command" "option --new-tab is not allowed with 'open'" --session s open x --new-tab
+deny "snapshot unknown short option" "option -g is not allowed with 'snapshot'" --session s snapshot -g
+deny "dash-leading screenshot path without --" "option -capture.png is not allowed with 'screenshot'" --session s screenshot -capture.png
+deny "type --delay then --profile" 'option --profile is not allowed' --session s type '#f' --delay 10 --profile x
+deny "close -- --all (checked after -- too)" 'only your own session' --session s close -- --all
+deny "wait -- --download (checked after -- too)" 'arbitrary path' --session s wait -- --download /x
+deny "-- before the command" 'not allowed before the command' --session s -- open x
+deny "set -- credentials" "is not allowed; allowed: set" --session s set -- credentials u p
+
 
 echo "--- браузер"
 newcache nobrowser
@@ -383,7 +500,7 @@ CWD="$REPO/"
 run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/a \"b\".png"
 check "screenshot: rc 0" 0 "$RC"
 check "screenshot: one shot receipt in repo store (lib naming <ts>-shot-…json)" 1 "$(nshots)"
-check "screenshot: no warning on success" "" "$ERR"
+check "screenshot: no warning on success" no "$(contains 'warning' "$ERR")"
 rec=$(cat "$RDIR"/*-shot-*.json 2>/dev/null)
 got=$(printf '%s' "$rec" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log([j.type,j.kind,j.path,j.size,j.session,typeof j.ts,j.root].join("|"))})' 2>&1)
 check "screenshot: receipt fields (type + kind + root)" "shot|shot|$TMP/shots/a \"b\".png|7|ui-1|number|$REPO_C" "$got"
@@ -442,6 +559,45 @@ SB_SAVED="$SB"; SB="$TMP/nolib/bin/subteams-browser"
 run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/nolib.png"
 SB="$SB_SAVED"
 check "lib-testclass.sh missing: screenshot rc 0 + warning naming the lib" "0 yes" "$RC $(contains 'cannot load' "$ERR")"
+
+# библиотека-заглушка: чтение неустановленной переменной и exit на верхнем уровне не меняют код скриншота
+mkstub() { # <имя> <тело lib-testclass.sh>
+  mkdir -p "$TMP/$1/bin" "$TMP/$1/scripts"; ln -sfn "$(dirname "$(dirname "$SB")")/deps" "$TMP/$1/deps"
+  cp "$SB" "$TMP/$1/bin/subteams-browser"; printf '%s\n' "$2" > "$TMP/$1/scripts/lib-testclass.sh"
+}
+# shellcheck disable=SC2016  # тело заглушки — буквальный bash
+mkstub stub-unset ': "$SUBTEAMS_STUB_UNSET_TOP"
+tc_receipt_write() { : "$SUBTEAMS_STUB_UNSET_FN"; TC_ERR="stub refused"; return 1; }'
+mkstub stub-exit 'exit 3'
+for st in stub-unset stub-exit; do
+  newcache "$st"
+  SB_SAVED="$SB"; SB="$TMP/$st/bin/subteams-browser"
+  run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot "$TMP/shots/$st.png"
+  SB="$SB_SAVED"
+  check "lib $st: screenshot rc 0 preserved, exactly one warning line" "0 1" "$RC $(printf '%s\n' "$ERR" | grep -c 'no shot receipt written')"
+  [ "$st" = stub-unset ] && check "lib stub-unset: the lib's own error (TC_ERR) reaches the warning (lib runs without set -u)" yes "$(contains 'stub refused' "$ERR")"
+done
+
+# screenshot -- <имя с дефисом>: квитанция пишется (сам 0.43.0 такую форму не принимает: `--` уходит в селектор)
+newcache shot-dash
+DDIR="$CACHE/claude-subteams/receipts/$RID"
+run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot -- "$TMP/shots/-capture.png"
+check "screenshot -- <absolute -capture.png>: receipt written" "0 1" "$RC $(names "$DDIR" | grep -c -- '-shot-' | tr -d ' ')"
+run "$P_BASE:$TMP/sys-same" -- --session ui-1 screenshot -- -capture.png
+check "screenshot -- -capture.png (relative, cwd = repo): receipt written" "0 2 $REPO_C/-capture.png" \
+  "$RC $(names "$DDIR" | grep -c -- '-shot-' | tr -d ' ') $(cat "$DDIR"/*-shot-*.json | grep -o "\"path\":\"$REPO_C/-capture.png\"" | head -1 | sed 's/^"path":"//; s/"$//')"
+rm -f "$REPO/-capture.png"
+
+# INT/TERM во время скриншота: временная метка удаляется
+newcache shot-term
+rm -f "$TMP/t"/subteams-shot-*
+(cd "$CWD" && umask 022 && exec env -i HOME="$HOMEDIR" XDG_CACHE_HOME="$CACHE" PATH="$P_BASE:$TMP/sys-same" TMPDIR="$TMP/t" \
+   FAKE_AB_LOG="$ABLOG" FAKE_AB_SLEEP=2 bash "$SB" --session ui-1 screenshot "$TMP/shots/term.png") >/dev/null 2>&1 &
+tp=$!
+k=0; until ls "$TMP/t"/subteams-shot-* >/dev/null 2>&1 || [ "$k" -ge 100 ]; do sleep 0.1; k=$((k + 1)); done
+check "TERM: stamp existed while the screenshot ran (control)" yes "$(ls "$TMP/t"/subteams-shot-* >/dev/null 2>&1 && echo yes || echo no)"
+kill -TERM "$tp" 2>/dev/null; wait "$tp"; trc=$?
+check "TERM during screenshot: exit 130, stamp removed" "130 0" "$trc $(find "$TMP/t" -name 'subteams-shot-*' | wc -l | tr -d ' ')"
 CWD="$TMP"
 
 echo "--- subagent-rails находит скриншот по квитанции (e2e)"
@@ -503,11 +659,43 @@ run "$P_BASE:$TMP/sys-same" AGENT_BROWSER_ARGS=--no-sandbox AGENT_BROWSER_CONFIG
     AGENT_BROWSER_AUTO_CONNECT=1 AGENT_BROWSER_PLUGINS='{}' AGENT_BROWSER_ALLOW_FILE_ACCESS=1 AGENT_BROWSER_PROVIDER=x \
     AGENT_BROWSER_ENGINE=lightpanda AGENT_BROWSER_STATE=/x AGENT_BROWSER_RESTORE=x AGENT_BROWSER_RESTORE_SAVE=always \
     AGENT_BROWSER_SESSION_NAME=x AGENT_BROWSER_HEADED=1 AGENT_BROWSER_DOWNLOAD_PATH=/x AGENT_BROWSER_CA_CERT=/x \
-    AGENT_BROWSER_EXECUTABLE_PATH="$TMP/chrome/google-chrome" AGENT_BROWSER_COLOR_SCHEME=dark -- --session s open x
+    AGENT_BROWSER_EXECUTABLE_PATH="$TMP/chrome/google-chrome" AGENT_BROWSER_COLOR_SCHEME=dark \
+    AGENT_BROWSER_PROXY=http://evil AGENT_BROWSER_SOCKET_DIR=/x AGENT_BROWSER_SESSION=shared \
+    AGENT_BROWSER_SKILLS_DIR=/evil/skills AGENT_BROWSER_SOMETHING_NEW=1 -- --session s open x
 check "env: rc 0" 0 "$RC"
-check "env: dangerous AGENT_BROWSER_* scrubbed, the rest kept" \
-  "ENV:AGENT_BROWSER_COLOR_SCHEME=dark|ENV:AGENT_BROWSER_EXECUTABLE_PATH=$TMP/chrome/google-chrome" \
+check "env: every AGENT_BROWSER_* dropped except EXECUTABLE_PATH; CONFIG and SKILLS_DIR set by the wrapper" \
+  "ENV:AGENT_BROWSER_CONFIG=$(abdir)/neutral-config.json|ENV:AGENT_BROWSER_EXECUTABLE_PATH=$TMP/chrome/google-chrome|ENV:AGENT_BROWSER_SKILLS_DIR=$(abdir)/0.43.0/node_modules/agent-browser/skill-data" \
   "$(grep '^ENV:' "$ABLOG" | sort | paste -sd'|' -)"
+check "neutral config: content {} and mode 600" "{} 1" "$(cat "$(abdir)/neutral-config.json") $(find "$(abdir)/neutral-config.json" -perm 600 | wc -l | tr -d ' ')"
+printf '{"profile":"/x"}' > "$(abdir)/neutral-config.json"
+run "$P_BASE" -- --session s open x
+check "neutral config with other content: rewritten to {}" "0 {}" "$RC $(cat "$(abdir)/neutral-config.json")"
+rm -f "$(abdir)/neutral-config.json"; printf '{"profile":"/x"}' > "$TMP/evil-config.json"; ln -s "$TMP/evil-config.json" "$(abdir)/neutral-config.json"
+run "$P_BASE" -- --session s open x
+check "neutral config planted as a symlink: replaced by a regular {} file, target untouched" "0 no {} {\"profile\":\"/x\"}" \
+  "$RC $([ -L "$(abdir)/neutral-config.json" ] && echo yes || echo no) $(cat "$(abdir)/neutral-config.json") $(cat "$TMP/evil-config.json")"
+rm -f "$(abdir)/neutral-config.json"; printf '{}' > "$TMP/evil-config2.json"; ln -s "$TMP/evil-config2.json" "$(abdir)/neutral-config.json"
+run "$P_BASE" -- --session s open x
+check "neutral config symlinked to a {} file: still replaced by a regular file" "0 no" "$RC $([ -L "$(abdir)/neutral-config.json" ] && echo yes || echo no)"
+newcache env-blocked
+mkdir -p "$CACHE/claude-subteams"; : > "$CACHE/claude-subteams/agent-browser"   # the cache dir is a file
+: > "$ABLOG"
+run "$P_BASE:$TMP/sys-same" -- --session s open x
+check "neutral config cannot be created: 127, agent-browser not run" "127 yes " "$RC $(contains 'neutral-config' "$ERR") $(cat "$ABLOG")"
+
+if REAL_AB=$(command -v agent-browser 2>/dev/null) && [ "$("$REAL_AB" --version 2>/dev/null)" = "agent-browser 0.43.0" ]; then
+  # настоящий 0.43.0 (браузер не нужен): конфиг пользователя и проекта с {"json":true} не должен действовать
+  newcache realcfg
+  mkdir -p "$TMP/cfghome/.agent-browser" "$TMP/cfgproj"
+  printf '{"json":true}' > "$TMP/cfghome/.agent-browser/config.json"
+  CWD="$TMP/cfgproj"
+  run "$TOOLS" HOME="$TMP/cfghome" CLAUDE_SUBTEAMS_AGENT_BROWSER="$REAL_AB" -- session list
+  check "real 0.43.0: ~/.agent-browser/config.json ignored through the wrapper (plain output)" "0 no" "$RC $(contains '"success"' "$OUT")"
+  rm -f "$TMP/cfghome/.agent-browser/config.json"; printf '{"json":true}' > "$TMP/cfgproj/agent-browser.json"
+  run "$TOOLS" HOME="$TMP/cfghome" CLAUDE_SUBTEAMS_AGENT_BROWSER="$REAL_AB" -- session list
+  check "real 0.43.0: ./agent-browser.json ignored through the wrapper (plain output)" "0 no" "$RC $(contains '"success"' "$OUT")"
+  CWD="$TMP"
+else echo "SKIP real-binary config check: no agent-browser 0.43.0 on PATH"; fi
 mkdir -p "$TMP/pw/ms-playwright/chromium-1/chrome-linux"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/pw/ms-playwright/chromium-1/chrome-linux/chrome"; chmod +x "$TMP/pw/ms-playwright/chromium-1/chrome-linux/chrome"
 ln -s "$TMP/pw/ms-playwright/chromium-1/chrome-linux/chrome" "$TMP/innocent-chrome"

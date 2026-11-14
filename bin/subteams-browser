@@ -3,12 +3,14 @@
 #
 # Finding agent-browser (plan 1.50.0, R3 and Task 2):
 #   1. CLAUDE_SUBTEAMS_AGENT_BROWSER — explicit user path, taken as is;
-#   2. cache ${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/agent-browser/0.43.0/
+#   2. cache ${XDG_CACHE_HOME:-$HOME/.cache}/claude-subteams/agent-browser/0.43.0/ — the lockfile install
 #      (marker must name a platform candidate; version re-checked, result cached per binary mtime/size/inode);
-#   3. system `agent-browser`, only if `--version` is exactly 0.43.0;
-#   4. auto-install (unless CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1): `npm ci --ignore-scripts`
+#   3. auto-install (unless CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1): `npm ci --ignore-scripts`
 #      from the plugin's deps/agent-browser/ (sha512 from the lock) into a temp dir next to the cache,
-#      platform binary and `--version` checked, atomic rename into the cache.
+#      platform binary and `--version` checked, atomic rename into the cache; older versioned installs
+#      in the cache are pruned afterwards;
+#   4. only if 2-3 are unavailable or disabled: `agent-browser` on PATH whose `--version` is exactly
+#      0.43.0, with a note on stderr (it is not the lockfile install).
 # From the cache the platform binary is run directly: the package's JS launcher rewrites the install
 # on first run (spike 0.3). Paths come from readlink -f "$0": a bin script gets no CLAUDE_PLUGIN_ROOT,
 # and CLAUDE_PLUGIN_DATA may belong to another plugin (spike 0.2).
@@ -18,6 +20,14 @@
 # Every browser command needs `--session <name>`. Commands and options pass an allowlist (see the
 # argument policy below); allowed arguments are passed through verbatim.
 # `screenshot` writes a `shot` receipt after success (§5.3). The environment is never printed.
+#
+# Environment passed to agent-browser: every AGENT_BROWSER_* variable is dropped except
+#   AGENT_BROWSER_EXECUTABLE_PATH — the user's browser choice (refused if it is Playwright's Chromium);
+# and the wrapper sets
+#   AGENT_BROWSER_CONFIG     — an empty `{}` config in the cache: disables discovery of
+#                              ~/.agent-browser/config.json and ./agent-browser.json (profile, args,
+#                              extensions, plugins, cdp ... from there never apply);
+#   AGENT_BROWSER_SKILLS_DIR — skill-data of the cache install (when running from the cache).
 #
 # Exit codes: 2 — invalid or denied call; 127 — no agent-browser / browser / install failed;
 # otherwise — agent-browser's code.
@@ -57,31 +67,43 @@ INSTALL="$AB_DIR/$AB_VERSION"
 LOCK="$AB_DIR/$AB_VERSION.lock"
 
 AB_BIN=""; AB_SKILLS=""
-TMP_INSTALL=""; LOCK_HELD=0
+TMP_INSTALL=""; LOCK_HELD=0; STAMP=""
 # shellcheck disable=SC2317  # called from trap
 cleanup() {
   [ -n "$TMP_INSTALL" ] && rm -rf -- "$TMP_INSTALL"
   [ "$LOCK_HELD" = 1 ] && rm -rf -- "$LOCK"
+  [ -n "$STAMP" ] && rm -f -- "$STAMP"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 # --- environment ------------------------------------------------------------
-# Env twins of denied options: real profile / running Chrome / code loading / browser swap / disk state.
-scrub_env() {
+scrub_env() { # every AGENT_BROWSER_* except the user's browser path (see the header)
   local v
   for v in $(compgen -e); do
     case "$v" in
-      AGENT_BROWSER_ARGS|AGENT_BROWSER_CONFIG|AGENT_BROWSER_PROFILE|AGENT_BROWSER_INIT_SCRIPTS| \
-      AGENT_BROWSER_EXTENSIONS|AGENT_BROWSER_CDP*|AGENT_BROWSER_AUTO_CONNECT|AGENT_BROWSER_PLUGINS| \
-      AGENT_BROWSER_ALLOW_FILE_ACCESS|AGENT_BROWSER_PROVIDER|AGENT_BROWSER_ENGINE|AGENT_BROWSER_STATE| \
-      AGENT_BROWSER_RESTORE*|AGENT_BROWSER_SESSION_NAME|AGENT_BROWSER_HEADED|AGENT_BROWSER_DOWNLOAD_PATH| \
-      AGENT_BROWSER_CA_CERT)
-        unset "$v" ;;
+      AGENT_BROWSER_EXECUTABLE_PATH) ;;
+      AGENT_BROWSER_*) unset "$v" ;;
     esac
   done
 }
 scrub_env
+
+# An explicit config file replaces default discovery (agent-browser 0.43.0 --help, verified): an empty
+# one keeps the user-level and project-level configs out. Rewritten if missing, a symlink or not `{}`.
+NEUTRAL_CONFIG="$AB_DIR/neutral-config.json"
+ensure_neutral_config() {
+  local tmp
+  if [ -f "$NEUTRAL_CONFIG" ] && [ ! -L "$NEUTRAL_CONFIG" ] && [ "$(cat -- "$NEUTRAL_CONFIG" 2>/dev/null)" = '{}' ]; then
+    return 0
+  fi
+  mkdir -p -- "$AB_DIR" 2>/dev/null || return 1
+  tmp=$(mktemp "$AB_DIR/.neutral.XXXXXX" 2>/dev/null) || return 1
+  if printf '{}\n' > "$tmp" && mv -f -- "$tmp" "$NEUTRAL_CONFIG"; then return 0; fi
+  rm -f -- "$tmp"; return 1
+}
+ensure_neutral_config || die 127 "cannot create $NEUTRAL_CONFIG (an empty config that keeps ~/.agent-browser/config.json out)"
+export AGENT_BROWSER_CONFIG="$NEUTRAL_CONFIG"
 
 # AGENT_BROWSER_EXECUTABLE_PATH is how the user picks a browser — honoured, except Playwright's Chromium
 if [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]; then
@@ -261,8 +283,50 @@ auto_install() {
     install_fail "cannot move the install into $INSTALL"
   fi
   TMP_INSTALL=""
+  prune_old_installs
   release_lock
   cache_valid || die 127 "install in $INSTALL failed verification"
+}
+
+# Older pinned versions left by earlier plugin releases: real directories only (find -type d does not
+# follow symlinks), names exactly N.N.N, directly inside the cache dir, not this version, no lock dir
+# (an install of that version in progress).
+prune_old_installs() {
+  local d n
+  while IFS= read -r d; do
+    n=${d##*/}
+    [[ $n =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    if [ "$n" = "$AB_VERSION" ] || [ -e "$AB_DIR/$n.lock" ]; then continue; fi
+    rm -rf -- "${AB_DIR:?}/$n"
+  done < <(find "$AB_DIR" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)
+  return 0
+}
+
+# Negative cache of a failed auto-install: for FAIL_TTL seconds every call skips `npm ci` (up to
+# INSTALL_TIMEOUT each) and goes straight to the PATH fallback. Keyed to the version + lockfile hash,
+# so a plugin update retries at once; a symlink or another key is ignored (and replaced on the next
+# failure). A successful install — e.g. an explicit `subteams-browser setup` — removes it.
+FAIL_STAMP="$AB_DIR/$AB_VERSION.install-failed"
+FAIL_TTL=600
+FAIL_HINT=""
+install_key() { { printf '%s\n' "$AB_VERSION"; cat -- "$DEPS/package-lock.json" 2>/dev/null; } | cksum | tr -s ' ' '-'; }
+fail_fresh() { # -> 0 and FAIL_HINT set when a matching stamp is younger than FAIL_TTL
+  local m now age
+  [ -f "$FAIL_STAMP" ] && [ ! -L "$FAIL_STAMP" ] || return 1
+  [ "$(cat -- "$FAIL_STAMP" 2>/dev/null)" = "$(install_key)" ] || return 1
+  m=$(file_sig "$FAIL_STAMP") || return 1
+  m=${m%% *}; now=$(date +%s)
+  case "$m" in ''|*[!0-9]*) return 1 ;; esac
+  age=$((now - m))
+  [ "$age" -ge 0 ] && [ "$age" -lt "$FAIL_TTL" ] || return 1
+  FAIL_HINT="install failed $((age / 60)) min ago; retry after $(((FAIL_TTL - age + 59) / 60)) min or delete $FAIL_STAMP"
+}
+fail_record() {
+  local tmp
+  mkdir -p -- "$AB_DIR" 2>/dev/null || return 0
+  tmp=$(mktemp "$AB_DIR/.failed.XXXXXX" 2>/dev/null) || return 0
+  if install_key > "$tmp" && mv -f -- "$tmp" "$FAIL_STAMP"; then return 0; fi
+  rm -f -- "$tmp"; return 0
 }
 
 resolve_agent_browser() {
@@ -274,12 +338,24 @@ resolve_agent_browser() {
     AB_BIN="$CLAUDE_SUBTEAMS_AGENT_BROWSER"; return 0
   fi
   cache_valid && return 0
+  local rc=0
+  if [ "${CLAUDE_SUBTEAMS_NO_AUTO_INSTALL:-}" = 1 ]; then rc=1
+  elif [ "${1:-}" != retry ] && fail_fresh; then rc=127
+  else
+    # own EXIT/INT/TERM traps: a die inside still removes the temp dir and releases the lock
+    ( trap cleanup EXIT; trap 'exit 130' INT TERM; auto_install ) || rc=$?
+    [ "$rc" = 130 ] && exit 130
+    if [ "$rc" = 0 ] && cache_valid; then rm -f -- "$FAIL_STAMP"; return 0; fi
+    fail_record
+  fi
   if sys=$(command -v agent-browser 2>/dev/null) && [ -n "$sys" ] && version_ok "$sys"; then
+    say "note: using agent-browser $AB_VERSION from PATH ($sys): the plugin's lockfile install is unavailable${FAIL_HINT:+ ($FAIL_HINT)}"
     AB_BIN="$sys"; return 0
   fi
   [ "${CLAUDE_SUBTEAMS_NO_AUTO_INSTALL:-}" = 1 ] \
     && die 127 "agent-browser $AB_VERSION not found, auto-install is off (CLAUDE_SUBTEAMS_NO_AUTO_INSTALL=1). Live UI review not performed"
-  auto_install
+  [ -n "$FAIL_HINT" ] && die 127 "agent-browser $AB_VERSION not available: $FAIL_HINT. Live UI review not performed"
+  exit "${rc:-127}"
 }
 
 # --- browser ----------------------------------------------------------------
@@ -318,8 +394,7 @@ no_receipt() { say "warning: screenshot taken, but no shot receipt written: $*";
 write_shot_receipt() {
   local file="$1" session="$2" size ts jpath jsess top jroot
   git rev-parse --git-dir >/dev/null 2>&1 || return 0
-  # shellcheck source=../scripts/lib-testclass.sh disable=SC1091
-  . "$LIB" 2>/dev/null || { no_receipt "cannot load $LIB"; return 0; }
+  [ -f "$LIB" ] || { no_receipt "cannot load $LIB"; return 0; }
   size=$(wc -c < "$file" | tr -d ' ') || size=""
   [ -n "$size" ] || { no_receipt "cannot read $file"; return 0; }
   ts=$(date +%s)
@@ -328,10 +403,15 @@ write_shot_receipt() {
   fi
   # root = the working tree where the screenshot was taken (worktree): subagent-rails picks the snapshot by it
   top=$(git rev-parse --show-toplevel 2>/dev/null) && jroot=$(json_str "$top") || jroot=null
-  # the lib reads XDG_CACHE_HOME raw; hand it the validated cache root (a relative value is ignored)
-  XDG_CACHE_HOME="$CACHE_ROOT" tc_receipt_write "$PWD" \
-    "{\"type\":\"shot\",\"kind\":\"shot\",\"path\":$jpath,\"size\":$size,\"session\":$jsess,\"ts\":$ts,\"root\":$jroot}" >/dev/null \
-    || no_receipt "${TC_ERR:-tc_receipt_write failed}"
+  # In a subshell without `set -u`: whatever the lib does (an unset variable, exit) cannot change
+  # agent-browser's exit code. The lib reads XDG_CACHE_HOME raw: hand it the validated cache root.
+  ( set +u
+    # shellcheck source=../scripts/lib-testclass.sh disable=SC1091
+    . "$LIB" 2>/dev/null || { no_receipt "cannot load $LIB"; exit 0; }
+    XDG_CACHE_HOME="$CACHE_ROOT" tc_receipt_write "$PWD" \
+      "{\"type\":\"shot\",\"kind\":\"shot\",\"path\":$jpath,\"size\":$size,\"session\":$jsess,\"ts\":$ts,\"root\":$jroot}" >/dev/null \
+      || no_receipt "${TC_ERR:-tc_receipt_write failed}"
+  ) || no_receipt "the receipt step exited with an error"
   return 0
 }
 
@@ -343,16 +423,41 @@ abs_path() { # <path> -> absolute, directory canonicalized
 }
 
 # --- argument policy --------------------------------------------------------
-# agent-browser 0.43.0 strips its global options anywhere in argv and takes the first remaining token
-# as the command (an unknown option becomes the "command"); `--opt=value` is not parsed. A value option
-# consumes the next token even if it starts with a dash; a boolean one consumes a following true/false.
+# agent-browser 0.43.0 strips its global options anywhere in argv — also between and after the
+# operands (`fill '#f' x --json` takes --json as the flag, verified) — and takes the first remaining
+# token as the command (an unknown option becomes the "command"); `--opt=value` is not parsed. A global
+# value option consumes the next token even if it starts with a dash; a boolean one consumes a following
+# true/false. Global parsing stops at `--`: the rest reaches the command as plain operands (verified live
+# with `<cmd> ... -- --json` for every allowed command except record). Hence every dash token before
+# `--` must be an allowed global option or an allowed option of the command; text that starts with a
+# dash goes after `--` (`fill <sel> -- --text`), as the agent-browser docs say.
 # Arity below was probed against 0.43.0 with `session` as the stand-in command.
 VALUE_OPTS=" --session --user-agent --color-scheme --screenshot-dir --screenshot-quality --screenshot-format --max-output --idle-timeout --input-mode --allowed-domains "
 BOOL_OPTS=" --json --annotate --debug --content-boundaries --ignore-https-errors --no-auto-dialog --pin-tab --no-pin-tab --relaunch --no-webmcp --hide-scrollbars "
-# Denied anywhere in argv (also as --opt=value): the user's real Chrome/profile/saved state, code loading,
-# file access, another browser binary or engine, cloud/plugin providers, arbitrary download paths.
+# Named for a clearer refusal (any option not allowed is refused anyway): the user's real
+# Chrome/profile/saved state, code loading, file access, another browser binary or engine,
+# cloud/plugin providers, arbitrary download paths.
 DENY_OPTS=" --profile --auto-connect --cdp --cdp-headers --args --config --extension --init-script --init-scripts --allow-file-access --executable-path --user-data-dir --headed --state --restore --restore-save --restore-check-url --restore-check-text --restore-check-fn --session-name -p --provider --engine --ca-cert --download-path "
 COMMANDS=" open snapshot click dblclick fill type press hover focus select check uncheck scroll scrollintoview wait get is find screenshot eval console errors set tab close back forward reload record skills session "
+
+cmd_opts() { # <command> -> its own options (agent-browser <command> --help, 0.43.0); --help/-h for all
+  local o=""
+  case "$1" in
+    snapshot) o="-i --interactive -u --urls -c --compact -d --depth -s --selector --delta --full" ;;
+    click) o="--new-tab --human" ;;
+    type) o="--clear --delay" ;;
+    scroll) o="-s --selector" ;;
+    wait) o="--url --load --fn --text --timeout" ;;   # --state: the wait exception above
+    find) o="--name --exact" ;;
+    screenshot) o="--full -f --if-changed --threshold" ;;
+    eval) o="-b --base64 --stdin" ;;
+    console|errors) o="--clear" ;;
+    tab) o="--label" ;;
+    record) o="--fps --cursor --contact-sheet --contact-sheet-threshold" ;;
+    skills) o="--full --ref --all" ;;
+  esac
+  printf ' %s--help -h ' "${o:+$o }"
+}
 
 inlist() { # <word> <" list ">
   case "$1" in ''|*[[:space:]]*) return 1 ;; esac
@@ -363,8 +468,8 @@ inlist() { # <word> <" list ">
 if [ "${1:-}" = setup ]; then
   shift
   case "$*" in ''|--with-deps) ;; *) die 2 "setup takes no arguments other than --with-deps" ;; esac
-  resolve_agent_browser
-  [ -n "$AB_SKILLS" ] && [ -z "${AGENT_BROWSER_SKILLS_DIR:-}" ] && export AGENT_BROWSER_SKILLS_DIR="$AB_SKILLS"
+  resolve_agent_browser retry   # explicit: ignore the failed-install stamp; success removes it
+  [ -n "$AB_SKILLS" ] && export AGENT_BROWSER_SKILLS_DIR="$AB_SKILLS"
   umask "$CALLER_UMASK"
   exec "$AB_BIN" install "$@"
 fi
@@ -377,12 +482,14 @@ elif [ "$#" -eq 1 ]; then case "$1" in --version|-V|--help|-h) exempt=1 ;; esac
 fi
 
 if [ "$exempt" = 0 ]; then
+  END=${#args[@]}   # index of the first `--` after the command (global parsing stops there)
   i=0
   while [ "$i" -lt "${#args[@]}" ]; do
     a="${args[$i]}"
+    if [ "$a" = -- ] && [ "$CMD_IDX" -ge 0 ]; then END=$i; break; fi
     if inlist "$a" "$VALUE_OPTS"; then
       if [ "$a" = --session ]; then
-        # after the command agent-browser may never see it (`--` or an unlisted value option swallows it)
+        # after the command agent-browser may never see it (an unlisted value option swallows it)
         if [ "$CMD_IDX" -lt 0 ]; then SESSION="${args[$((i + 1))]:-}"; else SESSION_LATE=1; fi
       fi
       i=$((i + 2)); continue
@@ -396,7 +503,8 @@ if [ "$exempt" = 0 ]; then
     i=$((i + 1))
   done
 
-  for ((k = 0; k < ${#args[@]}; k++)); do
+  # 1) named dangerous options anywhere before `--` (values of allowed options too: fail closed)
+  for ((k = 0; k < END; k++)); do
     a="${args[$k]}"
     if inlist "${a%%=*}" "$DENY_OPTS"; then
       # after `wait`, --state is the selector state (visible/hidden/...), not the auth-state file;
@@ -428,6 +536,29 @@ if [ "$exempt" = 0 ]; then
     session) case "$SUB" in list) ;; *) bad_sub "list" ;; esac ;;
     record) case "$SUB" in start|stop) ;; *) bad_sub "start|stop" ;; esac ;;
   esac
+  # 2) every other dash token before `--` (after the command) is an allowed option of this command;
+  #    global options are skipped with their value, exactly as agent-browser does
+  copts=$(cmd_opts "$CMD")
+  i=$((CMD_IDX + 1))
+  while [ "$i" -lt "$END" ]; do
+    a="${args[$i]}"
+    if inlist "$a" "$VALUE_OPTS"; then i=$((i + 2)); continue; fi
+    if inlist "$a" "$BOOL_OPTS"; then
+      case "${args[$((i + 1))]:-}" in true|false) i=$((i + 2)) ;; *) i=$((i + 1)) ;; esac
+      continue
+    fi
+    case "$a" in
+      -|-[0-9]*) ;;   # a lone dash or a negative number is an operand
+      -*)
+        case "$CMD:$a" in
+          close:--all|wait:--download|wait:--state) ;;   # refused below / checked in 1)
+          *) inlist "$a" "$copts" \
+               || die 2 "option $a is not allowed with '$CMD' (allowed:${copts% }); text that starts with a dash goes after --" ;;
+        esac ;;
+    esac
+    i=$((i + 1))
+  done
+  # also after `--`: the command itself may still read these
   for ((k = CMD_IDX + 1; k < ${#args[@]}; k++)); do
     case "$CMD:${args[$k]}" in
       close:--all) die 2 "close --all is not allowed: close only your own session (subteams-browser --session <name> close)" ;;
@@ -445,7 +576,7 @@ if [ "$exempt" = 0 ]; then
 fi
 
 resolve_agent_browser
-[ -n "$AB_SKILLS" ] && [ -z "${AGENT_BROWSER_SKILLS_DIR:-}" ] && export AGENT_BROWSER_SKILLS_DIR="$AB_SKILLS"
+[ -n "$AB_SKILLS" ] && export AGENT_BROWSER_SKILLS_DIR="$AB_SKILLS"
 
 if [ "$CMD" != screenshot ]; then
   umask "$CALLER_UMASK"
@@ -453,16 +584,17 @@ if [ "$CMD" != screenshot ]; then
 fi
 
 # screenshot: run as a child so a receipt can be written after success
-stamp=$(mktemp "${TMPDIR:-/tmp}/subteams-shot-XXXXXX") || stamp=""
+STAMP=$(mktemp "${TMPDIR:-/tmp}/subteams-shot-XXXXXX") || STAMP=""
 (umask "$CALLER_UMASK"; exec "$AB_BIN" "$@")
 rc=$?
-if [ "$rc" -eq 0 ] && [ -n "$stamp" ]; then
-  # path = the last positional argument after screenshot that became a fresh non-empty file
+if [ "$rc" -eq 0 ] && [ -n "$STAMP" ]; then
+  # path = the last argument after screenshot that became a fresh non-empty file (a name may start
+  # with a dash, e.g. after `--`; option words are never fresh files, `--` itself is skipped)
   shot=""
   j=$((CMD_IDX + 1))
   while [ "$j" -lt "${#args[@]}" ]; do
     a="${args[$j]}"
-    if [ "${a#-}" = "$a" ] && [ -f "$a" ] && [ -s "$a" ] && ! [ "$stamp" -nt "$a" ]; then shot="$a"; fi
+    if [ "$a" != -- ] && [ -f "$a" ] && [ -s "$a" ] && ! [ "$STAMP" -nt "$a" ]; then shot="$a"; fi
     j=$((j + 1))
   done
   if [ -n "$shot" ] && shot_abs=$(abs_path "$shot"); then
@@ -472,5 +604,6 @@ if [ "$rc" -eq 0 ] && [ -n "$stamp" ]; then
     say "screenshot taken, but no shot receipt written: pass an absolute path to the file"
   fi
 fi
-[ -n "$stamp" ] && rm -f -- "$stamp"
+[ -n "$STAMP" ] && rm -f -- "$STAMP"
+STAMP=""
 exit "$rc"
