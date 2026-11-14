@@ -48,19 +48,21 @@
 # only). The same R6 rule decides commits into different repos in one line: deny
 # only if one of the resolved target repos has a contract.
 
-CS_GITVARS='GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR'
+# (GIT_*_PATHSPECS change how a replayed pathspec matches: not replayed, so denied)
+CS_GITVARS='GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_ICASE_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_LITERAL_PATHSPECS'
 
 cs__reset() {
   CS_KIND=(); CS_TXT=(); CS_SUB=(); CS_ARGS=(); CS_DIR=(); CS_DRAW=(); CS_ENV=(); CS_GENV=()
-  CS_PEXP=(); CS_REDIR=(); CS_X=(); CS_RUN=(); CS_GOPT=(); CS_SEP=(); CS_DEPTH=(); CS_CFG=(); CS_LITPS=()
+  CS_PEXP=(); CS_REDIR=(); CS_X=(); CS_RUN=(); CS_GOPT=(); CS_SEP=(); CS_DEPTH=(); CS_CFG=(); CS_LITPS=(); CS_KW=(); CS_UGLOB=()
   CS_VN=(); CS_VV=(); CS_RELIABLE=1; CS_CUR="$PWD"; CS_CURRAW=""; CS_LGENV=0; CS_LEXP=0; CS_LCFG=0
   CS_SHAPE=""
 }
 
 cs__isgitvar() { case " $CS_GITVARS " in *" $1 "*) return 0 ;; esac; return 1; }
 # variables that inject configuration or other binaries into git: GIT_CONFIG_COUNT /
-# _KEY_n / _VALUE_n / _PARAMETERS / _GLOBAL / _SYSTEM, GIT_EXEC_PATH, PATH
-cs__iscfgvar() { case "$1" in GIT_CONFIG*|GIT_EXEC_PATH|PATH) return 0 ;; esac; return 1; }
+# _KEY_n / _VALUE_n / _PARAMETERS / _GLOBAL / _SYSTEM, GIT_EXEC_PATH, PATH, and
+# HOME / XDG_CONFIG_HOME (they move the global git config)
+cs__iscfgvar() { case "$1" in GIT_CONFIG*|GIT_EXEC_PATH|PATH|HOME|XDG_CONFIG_HOME) return 0 ;; esac; return 1; }
 # `git -c` keys a commit line may carry under a contract (cosmetic / identity only)
 cs__cfg_ok() {
   case "$(printf '%s' "${1%%=*}" | tr '[:upper:]' '[:lower:]')" in
@@ -214,17 +216,20 @@ cs__tokenize() {
       out = ""; nt = 0
     }
     function flag(r) { if (!(r in seen)) { seen[r] = 1; print FL r } }
+    # quoted / escaped > * ? [ are marked (\001-\004) so later checks can tell
+    # `echo "a -> b"` from a redirection and "src/[id]" from a shell glob
+    function mk(c) { return c == ">" ? "\001" : c == "*" ? "\002" : c == "?" ? "\003" : c == "[" ? "\004" : c }
     BEGIN { RS = "\001"; US = "\037"; GS = "\035"; FL = "\034"; s = ""; q = ""; tok = ""; has = 0; out = ""; nt = 0; nh = 0; ar = 0; bad = 0; held = ""; hsep = "" }
     { s = s $0 }
     END {
       n = length(s)
       for (i = 1; i <= n; i++) {
         c = substr(s, i, 1)
-        if (q == "\047") { if (c == "\047") q = ""; else tok = tok (c == "\n" ? " " : c); continue }
+        if (q == "\047") { if (c == "\047") q = ""; else tok = tok (c == "\n" ? " " : mk(c)); continue }
         if (q == "A") {
-          if (c == "\\") { tok = tok substr(s, i + 1, 1); i++ }
+          if (c == "\\") { tok = tok mk(substr(s, i + 1, 1)); i++ }
           else if (c == "\047") q = ""
-          else tok = tok (c == "\n" ? " " : c)
+          else tok = tok (c == "\n" ? " " : mk(c))
           continue
         }
         if (q == "\"") {
@@ -241,12 +246,12 @@ cs__tokenize() {
             if (substr(s, i, length(E2)) == E2) { tok = tok E2; i += length(E2) - 1; continue }
             flag("command substitution with backticks")
           }
-          if (c == "\"") q = ""; else tok = tok (c == "\n" ? " " : c)
+          if (c == "\"") q = ""; else tok = tok (c == "\n" ? " " : mk(c))
           continue
         }
         if (c == "\\") {
           nx = substr(s, i + 1, 1); i++
-          if (nx != "\n") { tok = tok nx; has = 1 }
+          if (nx != "\n") { tok = tok mk(nx); has = 1 }
           continue
         }
         if (c == "$" && substr(s, i + 1, 1) == "\047") { q = "A"; has = 1; i++; continue }
@@ -322,6 +327,12 @@ cs__tokenize() {
     }'
 }
 
+cs__envdir() { # <env -C value> — resolved like a cd (so the TARGET is right), "" when unknown
+  CS_R_DIRSET=1
+  if cs_expand "$1" && cs__abs "$CS_CUR" "$CS_E" && [ -d "$CS_P" ]; then CS_R_DIR=$(cs__canon_dir "$CS_P"); CS_R_DRAW=""
+  else CS_R_DIR=""; CS_R_DRAW="env -C $1"; fi
+}
+
 cs__record() { # <kind> <tokens from index i…> uses locals of cs__stmt via dynamic scope
   local k=${#CS_KIND[@]} txt
   txt="${CS_STMT_TXT:0:100}"
@@ -330,7 +341,7 @@ cs__record() { # <kind> <tokens from index i…> uses locals of cs__stmt via dyn
   CS_ENV[k]="$CS_R_ENV"; CS_GENV[k]="$CS_R_GENV"; CS_PEXP[k]="$CS_LEXP"
   CS_REDIR[k]="$CS_R_REDIR"; CS_X[k]="$CS_R_X"; CS_RUN[k]="${CS_R_RUN:-0}"
   CS_GOPT[k]="${CS_R_GOPT:-0}"; CS_SEP[k]="${CS_STMT_SEP:-n}"; CS_DEPTH[k]="${CS_STMT_DEPTH:-0}"
-  CS_CFG[k]="$CS_R_CFG"; CS_LITPS[k]="${CS_R_LITPS:-0}"
+  CS_CFG[k]="$CS_R_CFG"; CS_LITPS[k]="${CS_R_LITPS:-0}"; CS_KW[k]="${CS_R_KW:-0}"; CS_UGLOB[k]="${CS_R_UGLOB:-0}"
 }
 
 # cs_scan "<command line>" [depth] [inherited env 0/1] [inherited git env 0/1]
@@ -360,10 +371,15 @@ cs_scan() {
 cs__stmt() { # uses T from cs_scan
   local depth="$1" n=${#T[@]} i=0 w base wrap="" need_pos=0 j k v nm assigns=0 dir d raw
   local CS_R_ENV="$2" CS_R_GENV="$3" CS_R_X=0 CS_R_REDIR="" CS_R_SUB="" CS_R_ARGS="" CS_R_RUN=0 CS_STMT_TXT
-  local CS_R_GOPT=0 CS_R_CFG="" CS_R_LITPS=0
+  local CS_R_GOPT=0 CS_R_CFG="" CS_R_LITPS=0 CS_R_KW=0 CS_R_UGLOB=0 PRE_REDIR=0
   local CS_R_DIR="" CS_R_DRAW="" CS_R_DIRSET=0
+  local -a TM
   [ "$CS_LGENV" = 1 ] && CS_R_GENV=1
   [ "$CS_LCFG" != 0 ] && CS_R_CFG="$CS_LCFG"
+  # TM keeps the quote markers of cs__tokenize (redirections, shell globs); T is the
+  # plain text every other use sees
+  TM=("${T[@]}")
+  T=("${T[@]//$'\001'/>}"); T=("${T[@]//$'\002'/*}"); T=("${T[@]//$'\003'/?}"); T=("${T[@]//$'\004'/[}")
   CS_STMT_TXT=$(printf '%s ' "${T[@]}" | tr -d '\000-\037'); CS_STMT_TXT="${CS_STMT_TXT% }"
   while :; do
     while [ "$i" -lt "$n" ]; do
@@ -371,6 +387,7 @@ cs__stmt() { # uses T from cs_scan
       case "$w" in
         '!'|if|then|else|elif|do|while|until|'{'|time|exec|nohup|builtin|command|sudo|doas|nice|ionice|stdbuf|setsid|timeout|flock|xargs)
           wrap="$w"; i=$((i + 1))
+          case "$w" in '!'|if|then|else|elif|do|while|until|'{') CS_R_KW=1 ;; esac
           case "$w" in timeout|flock) need_pos=1 ;; *) need_pos=0 ;; esac
           [ "$w" = xargs ] && CS_R_X=1
           continue ;;
@@ -378,8 +395,13 @@ cs__stmt() { # uses T from cs_scan
         -*)
           if [ -n "$wrap" ]; then
             case "$wrap:$w" in
-              env:-C|env:--chdir) CS_R_DIRSET=1; CS_R_DIR=""; CS_R_DRAW="env -C ${T[$((i + 1))]:-}"; i=$((i + 2)) ;;
-              env:-u|env:-S|env:--unset|sudo:-u|sudo:-g|sudo:-h|sudo:-C|sudo:-p|sudo:-r|sudo:-t|sudo:-U|doas:-u|doas:-C|nice:-n|ionice:-c|ionice:-n|ionice:-p|ionice:-P|ionice:-t|timeout:-s|timeout:-k|stdbuf:-i|stdbuf:-o|stdbuf:-e|flock:-w|flock:-E|xargs:-I|xargs:-n|xargs:-P|xargs:-L|xargs:-d|xargs:-E|xargs:-s|xargs:-a)
+              env:-C|env:--chdir) cs__envdir "${T[$((i + 1))]:-}"; CS_R_CFG="${CS_R_CFG:-env $w}"; i=$((i + 2)) ;;
+              env:-u|env:--unset) i=$((i + 2)) ;;
+              env:--unset=*) i=$((i + 1)) ;;
+              env:--chdir=*) cs__envdir "${w#--chdir=}"; CS_R_CFG="${CS_R_CFG:-env --chdir}"; i=$((i + 1)) ;;
+              env:-S|env:--split-string) CS_R_CFG="${CS_R_CFG:-env $w}"; i=$((i + 2)) ;;
+              env:*) CS_R_CFG="${CS_R_CFG:-env $w}"; i=$((i + 1)) ;;   # -S…, -i, -0, --split-string=… : only NAME=value and -u pass
+              sudo:-u|sudo:-g|sudo:-h|sudo:-C|sudo:-p|sudo:-r|sudo:-t|sudo:-U|doas:-u|doas:-C|nice:-n|ionice:-c|ionice:-n|ionice:-p|ionice:-P|ionice:-t|timeout:-s|timeout:-k|stdbuf:-i|stdbuf:-o|stdbuf:-e|flock:-w|flock:-E|xargs:-I|xargs:-n|xargs:-P|xargs:-L|xargs:-d|xargs:-E|xargs:-s|xargs:-a)
                 i=$((i + 2)) ;;
               *) i=$((i + 1)) ;;
             esac
@@ -388,6 +410,13 @@ cs__stmt() { # uses T from cs_scan
           break ;;
       esac
       if [ "$need_pos" -eq 1 ] && [ -n "$wrap" ]; then need_pos=0; i=$((i + 1)); continue; fi
+      # a redirection BEFORE the command word (`>f git commit`, `2>f git …`): skip it
+      # here; the redirect scan below sees every token of the statement
+      case "${TM[$i]}" in
+        [0-9]'>'*|[0-9][0-9]'>'*|'>'*|'&>'*|[0-9]'<'*|'<'*)
+          case "${TM[$i]}" in *'>'|*'<'|'&>'|'>>'|'>|') i=$((i + 2)) ;; *) i=$((i + 1)) ;; esac
+          PRE_REDIR=1; continue ;;
+      esac
       if _gc_is_assign "$w"; then
         nm="${w%%=*}"; assigns=$((assigns + 1))
         cs__isgitvar "$nm" && CS_R_GENV=1
@@ -428,14 +457,19 @@ cs__stmt() { # uses T from cs_scan
     fi
     break
   done
-  # output redirections of the statement (every kind)
+  case "$base" in fi|done|esac|case|for|select|function|'}'|'[['|'['|test|']]') CS_R_KW=1 ;; esac
+  # output redirections of the statement (every kind) — on the MARKED tokens: a
+  # quoted '>' is \001 there and never a redirection
   local loose=0 t nx
   case "$base" in echo|printf|cat) loose=1 ;; esac
-  j=$((i + 1))
+  j=$((i + 1)); [ "$PRE_REDIR" = 1 ] && j=0
   while [ "$j" -lt "$n" ]; do
-    t="${T[$j]}"; nx="${T[$((j + 1))]:-}"
+    [ "$j" -eq "$i" ] && { j=$((j + 1)); continue; }
+    t="${TM[$j]}"; nx="${TM[$((j + 1))]:-}"
+    case "$t" in *'*'*|*'?'*|*'['*) CS_R_UGLOB=1 ;; esac   # an UNQUOTED glob char: the shell expands it
     cs__redir "$t" "$nx" "$loose"
     if [ -n "$CS_RT" ]; then
+      CS_RT="${CS_RT//$'\001'/>}"; CS_RT="${CS_RT//$'\002'/*}"; CS_RT="${CS_RT//$'\003'/?}"; CS_RT="${CS_RT//$'\004'/[}"
       cs__resolve_target "$CS_RT"; CS_R_REDIR="$CS_R_REDIR${CS_R_REDIR:+$'\037'}$CS_RT2"
       [ "$CS_RSKIP" = 1 ] && j=$((j + 1))
     fi
@@ -631,10 +665,14 @@ cs_readonly_git() { # <sub> <args \037> -> 0 if it changes nothing
   return 0
 }
 
-cs__in_repo() { # <absolute path> -> 0 if inside CS_REPO (lexically or via its canonical dir)
-  local p="$1" d r
+cs__in_repo() { # <absolute path> -> 0 if inside CS_REPO (lexically, via its canonical dir, or as a symlink pointing in)
+  local p="$1" d r l
   r="${CS_REPO%/}"
   case "$p/" in "$r"/*) return 0 ;; esac
+  if [ -L "$p" ]; then                      # a file symlink outside the repo pointing at a tracked file
+    l=$(readlink -f -- "$p" 2>/dev/null) || l=$(tc_realpath "$p" 2>/dev/null) || return 0
+    case "$l/" in "$r"/*) return 0 ;; esac
+  fi
   d=$(dirname -- "$p")
   while [ ! -d "$d" ] && [ "$d" != / ] && [ -n "$d" ]; do d=$(dirname -- "$d"); done
   d=$(cd -P -- "$d" 2>/dev/null && pwd) || return 0
@@ -673,6 +711,20 @@ cs_shape_ok() {
   if [ -n "$CS_SHAPE" ]; then CS_BAD="the line uses ${CS_SHAPE%%$'\n'*}"; return 1; fi
   for j in ${CS_KIND[@]+"${!CS_KIND[@]}"}; do
     [ "${CS_DEPTH[j]:-0}" = 0 ] || { CS_BAD="the commit line nests commands in bash -c / sh -c / eval ('${CS_TXT[j]}')"; return 1; }
+    if [ "$j" -le "$ck" ] && [ "${CS_KW[j]:-0}" = 1 ]; then
+      CS_BAD="the commit line uses shell control flow ('${CS_TXT[j]}': if/while/for/case/test/[ … ]) — the gate cannot know which branch runs"; return 1
+    fi
+    if [ "$j" -le "$ck" ] && [ "${CS_KIND[j]}" = git ]; then
+      case "${CS_SUB[j]}" in *'$'*|*'`'*) CS_BAD="'${CS_TXT[j]}' computes the git subcommand at run time"; return 1 ;; esac
+    fi
+    if [ "$j" -lt "$ck" ] && cs__conditional "$j"; then
+      if [ "${CS_KIND[j]}" = cd ]; then
+        CS_BAD="'${CS_TXT[j]}' runs only if an earlier command of its && chain succeeds — the gate cannot know the directory"; return 1
+      fi
+      if [ "${CS_KIND[j]}" = git ] && case "${CS_SUB[j]}" in add|stage|rm) true ;; *) false ;; esac && ! cs__same_chain "$j" "$ck"; then
+        CS_BAD="'${CS_TXT[j]}' is conditional (an earlier command of its && chain may fail) and not chained to the commit with && — the gate cannot know whether it runs"; return 1
+      fi
+    fi
     if [ "$j" -lt "$ck" ]; then
       case "${CS_SEP[j]}" in ';'|A|n) ;; *) CS_BAD="'${CS_TXT[j]}' is joined to the next command by '${CS_SEP[j]}' before the commit"; return 1 ;; esac
     fi
@@ -682,9 +734,31 @@ cs_shape_ok() {
     if [ "$j" -gt "$ck" ] && [ "${CS_SEP[$((j - 1))]}" = '|' ]; then
       b="${CS_TXT[j]%% *}"; b="${b##*/}"
       case "$CS_CONSUMERS" in *" $b "*) ;; *) CS_BAD="the commit's output is piped into '$b' (only read-only consumers:${CS_CONSUMERS%?})"; return 1 ;; esac
+      # a consumer runs WHILE the commit runs: its redirection into the repo races it
+      if cs_redir_bad "$j"; then CS_BAD="'${CS_TXT[j]}' (piped from the commit) writes to '$CS_RB' inside the repository while the commit runs"; return 1; fi
     fi
   done
   [ "${CS_X[ck]}" = 1 ] && { CS_BAD="the commit takes arguments from stdin (xargs)"; return 1; }
+  return 0
+}
+
+# cs__conditional <i> -> 0 if statement i sits behind an earlier element of its &&
+# chain that can fail (anything but cd / add / stage / rm / assignment / export / echo)
+cs__conditional() {
+  local i=$(( $1 - 1 ))
+  while [ "$i" -ge 0 ] && [ "${CS_SEP[i]}" = A ]; do
+    case "${CS_KIND[i]}" in
+      cd|assign|export|echo) ;;
+      git) case "${CS_SUB[i]}" in add|stage|rm) ;; *) return 0 ;; esac ;;
+      *) return 0 ;;
+    esac
+    i=$((i - 1))
+  done
+  return 1
+}
+cs__same_chain() { # <i> <k> -> 0 if statements i .. k are joined only by &&
+  local i="$1"
+  while [ "$i" -lt "$2" ]; do [ "${CS_SEP[i]}" = A ] || return 1; i=$((i + 1)); done
   return 0
 }
 
@@ -711,8 +785,11 @@ cs_prior_ok() {
         t=$(cs_top_of "${CS_DIR[j]}") || t=""
         if [ -z "$t" ] || [ "$t" != "$CS_REPO" ]; then CS_BAD="run '${CS_TXT[j]}' separately first (another or an unresolvable directory), then commit"; return 1; fi
         if [ "${CS_X[j]}" = 1 ]; then CS_BAD="'${CS_TXT[j]}' takes its paths from stdin (xargs) — run it separately first, then commit"; return 1; fi
-        case "${CS_ARGS[j]}" in *'$'*|*'`'*|*'*'*|*'?'*|*'['*)
-          CS_BAD="'${CS_TXT[j]}' has dynamic or glob arguments — run it separately first, then commit"; return 1 ;; esac
+        # quoted glob characters reach git as they are and are replayed exactly (git
+        # matches the pathspec literally AND as a glob); unquoted ones the shell expands
+        case "${CS_ARGS[j]}" in *'$'*|*'`'*)
+          CS_BAD="'${CS_TXT[j]}' has dynamic arguments — run it separately first, then commit"; return 1 ;; esac
+        [ "${CS_UGLOB[j]:-0}" = 1 ] && { CS_BAD="'${CS_TXT[j]}' has unquoted glob arguments (the shell expands them) — quote the paths or run it separately first, then commit"; return 1; }
         IFS=$'\037' read -r -a A <<< "${CS_ARGS[j]}"
         for a in ${A[@]+"${A[@]}"}; do
           case "$a" in
@@ -743,17 +820,15 @@ cs__tree_reading() {
   cs_parse_commit "${CS_ARGS[ck]}" $lim
   [ -z "$CSP_BAD" ] || { CS_CTERR="$CSP_BAD"; return 3; }
   P=()
+  if [ "${CS_UGLOB[ck]:-0}" = 1 ]; then
+    CS_CTERR="the commit has unquoted glob characters (the shell expands them, git would see something else) — quote the paths, use ':(literal)<path>', or stage them and commit without paths"; return 2
+  fi
   for j in ${CSP_PATHS[@]+"${CSP_PATHS[@]}"}; do
     case "$j" in *'$'*|*'`'*)
       CS_CTERR="commit pathspec '$j' has dynamic characters — name the files literally"; return 2 ;;
     esac
     if [ "${CS_LITPS[ck]:-0}" = 1 ]; then P+=(":(literal)$j"); continue; fi   # git --literal-pathspecs
-    case "$j" in
-      ':(literal)'*) ;;
-      *'*'*|*'?'*|*'['*)
-        CS_CTERR="commit pathspec '$j' has glob characters (the shell and git would expand it differently) — name the files, use ':(literal)<path>', or stage them and commit without paths"; return 2 ;;
-    esac
-    P+=("$j")
+    P+=("$j")                    # quoted glob characters: git matches literally and as a glob — same on the replay
   done
   if [ -n "$CSP_PFF" ]; then
     case "$CSP_PFF" in -) CS_CTERR="--pathspec-from-file=- (stdin) cannot be checked before the commit runs"; return 2 ;; esac
@@ -777,7 +852,9 @@ cs__tree_reading() {
   tc_ct_begin "$CS_REPO" || { CS_CTERR="cannot create a temp index"; return 1; }
   for j in ${CS_REPLAY[@]+"${CS_REPLAY[@]}"}; do
     IFS=$'\037' read -r -a A <<< "${CS_ARGS[j]}"
-    if [ "${CS_SUB[j]}" = rm ]; then tc_ct_rm "${CS_DIR[j]}" ${A[@]+"${A[@]}"}; else tc_ct_add "${CS_DIR[j]}" ${A[@]+"${A[@]}"}; fi
+    if [ "${CS_LITPS[j]:-0}" = 1 ]; then          # git --literal-pathspecs add …: replayed the same way
+      if [ "${CS_SUB[j]}" = rm ]; then GIT_LITERAL_PATHSPECS=1 tc_ct_rm "${CS_DIR[j]}" ${A[@]+"${A[@]}"}; else GIT_LITERAL_PATHSPECS=1 tc_ct_add "${CS_DIR[j]}" ${A[@]+"${A[@]}"}; fi
+    elif [ "${CS_SUB[j]}" = rm ]; then tc_ct_rm "${CS_DIR[j]}" ${A[@]+"${A[@]}"}; else tc_ct_add "${CS_DIR[j]}" ${A[@]+"${A[@]}"}; fi
     rc=$?; [ "$rc" -eq 0 ] || { CS_CTERR="$TC_ERR"; tc_ct_end; return "$rc"; }
   done
   tc_ct_commit "$CS_REPO" "${CS_DIR[ck]}" "$mode" ${P[@]+"${P[@]}"}; rc=$?

@@ -100,19 +100,19 @@ _reason_stated() {
   printf '%s\n' "$1" | awk 'NF { n++; if (n == 2) { ok = ($0 !~ /^[ \t]*#/); exit } } END { exit !ok }'
 }
 
-_transcript_result() { # <path> -> last SubagentHandback message (rc 0) or nothing (rc 1)
-  local m
+# _transcript_final <path> -> the agent's FINAL assistant output: line 1 "H" (a
+# SubagentHandback message) or "T" (plain text), then the message. Only the last
+# assistant turn counts — an earlier "Status: pass" never stands in for a later
+# handback "done" (M3).
+_transcript_final() {
+  local j
   [ -f "$1" ] || return 1
-  m=$(grep -F 'SubagentHandback' "$1" 2>/dev/null | jq -r 'select(.type == "assistant") | .message.content[]?
-        | select(.type == "tool_use" and .name == "SubagentHandback") | .input.message // empty | @json' 2>/dev/null | tail -n 1)
-  [ -n "$m" ] || return 1
-  printf '%s' "$m" | jq -r . 2>/dev/null
-}
-
-_transcript_last_text() { # <path> -> text of the last assistant message that has text
-  [ -f "$1" ] || return 1
-  tail -n 200 "$1" 2>/dev/null | jq -r 'select(.type == "assistant") | [.message.content[]? | select(.type == "text") | .text] | select(length > 0) | join("\n") | @json' 2>/dev/null \
-    | tail -n 1 | jq -r . 2>/dev/null
+  j=$(tail -n 400 "$1" 2>/dev/null | jq -c 'select(.type == "assistant") | (.message.content // []) as $c
+        | ([$c[]? | select(.type == "tool_use" and .name == "SubagentHandback") | (.input.message // "" | tostring)] | last) as $h
+        | ([$c[]? | select(.type == "text") | .text] | join("\n")) as $t
+        | if $h != null then {k: "H", m: $h} elif ($t | length) > 0 then {k: "T", m: $t} else empty end' 2>/dev/null | tail -n 1)
+  [ -n "$j" ] || return 1
+  printf '%s\n%s' "$(printf '%s' "$j" | jq -r .k)" "$(printf '%s' "$j" | jq -r .m)"
 }
 
 # _test_receipt <ui|te> — SubagentStop for ui-tester / test-engineer.
@@ -131,7 +131,7 @@ _transcript_last_text() { # <path> -> text of the last assistant message that ha
 # gate and `status` can say "ui-tester ran but its final answer had no Status line".
 _test_receipt() {
   local kind="$1" aid tfile t_start t_end cwd repo rid root rr tree msg st tp rs ev rec deadline n at sid r rej=""
-  local stores="" line nst=0 hd tpc="" explicit
+  local stores="" line nst=0 hd tpc="" explicit fin
   aid=$(printf '%s' "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)
   printf '%s' "$aid" | grep -qE '^[A-Za-z0-9._-]+$' || return 0
   case "$aid" in .|..) return 0 ;; esac
@@ -153,14 +153,17 @@ _test_receipt() {
   # to an older Status in the transcript would credit a previous verdict.
   if [ -z "$st" ] && [ "$explicit" != 1 ]; then
     if [ -n "$tp" ]; then
-      deadline=$(( T_HOOK + 4 )); n=0
+      # the handback is written after the hook fires: poll (~2 s, never past ~4 s of
+      # hook time) until the final output is a handback; then use the final output
+      deadline=$(( T_HOOK + 4 )); n=0; fin=""
       while :; do
-        msg=$(_transcript_result "$tp") && st=$(_status_of "$msg")
-        [ -n "$st" ] && break
+        fin=$(_transcript_final "$tp") || fin=""
+        [ "${fin%%$'\n'*}" = H ] && break
         n=$((n + 1)); [ "$n" -le 10 ] && [ "$(date +%s)" -lt "$deadline" ] || break
         sleep 0.2
       done
-      if [ -z "$st" ]; then msg=$(_transcript_last_text "$tp") && st=$(_status_of "$msg"); fi
+      msg="${fin#*$'\n'}"; [ -n "$fin" ] || msg=""
+      st=$(_status_of "$msg")
     fi
   fi
   if [ -z "$st" ]; then

@@ -546,7 +546,7 @@ tc_drift() {
   local -a P
   TC_DRIFT_CAPPED=0; TC_DRIFT_LINES=0; TC_DRIFT_FILES=0; TC_DRIFT_ADDED=0; TC_DRIFT_DELETED=0; TC_DRIFT_RENAMED=0; TC_DRIFT_BINARY=0
   tc_is_tree "$repo" "$a" && tc_is_tree "$repo" "$b" || return 1
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-drift.XXXXXX") || return 1
+  tmp=$(mktemp -d "${TC__WORK:-${TMPDIR:-/tmp}}/tc-drift.XXXXXX") || return 1
   if ! git -c core.quotePath=false -C "$repo" diff --name-status -M -z "$a" "$b" -- > "$tmp/ns" 2>/dev/null \
      || ! tr '\0' '\n' < "$tmp/ns" > "$tmp/ns.l"; then
     rm -rf "$tmp"; return 1
@@ -607,7 +607,7 @@ tc_drift() {
 # printed (the caller computes them exactly). One cat-file, one diff-tree --stdin.
 tc__drift_batch() {
   local repo="$1" tree="$2" grp="$3" thf="$4" big="$5" tmp memb dc=/dev/null t ty
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-db.XXXXXX") || return 0
+  tmp=$(mktemp -d "${TC__WORK:-${TMPDIR:-/tmp}}/tc-db.XXXXXX") || return 0
   cat > "$tmp/c"
   git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' < "$tmp/c" > "$tmp/types" 2>/dev/null || { rm -rf "$tmp"; return 0; }
   while read -r t ty; do
@@ -701,6 +701,7 @@ tc_ct_add() {
 }
 tc_ct_rm() {
   local cwd="$1" a args=(); shift
+  for a in "$@"; do case "$a" in --) break ;; -n|--dry-run|-[!-]*n*) return 0 ;; esac; done   # git rm -n removes nothing
   for a in "$@"; do case "$a" in -n|--dry-run|--cached) ;; *) args+=("$a") ;; esac; done
   # the dry run performs git's own safety checks for the user's exact form
   GIT_INDEX_FILE="$TC_CT_DIR/index" git -C "$cwd" rm -n "$@" </dev/null >/dev/null 2>&1 \
@@ -850,10 +851,12 @@ tc_receipt_list() {
   local dir
   dir=$(tc_receipt_dir "$1") || return 1
   [ -d "$dir" ] || return 0
-  (cd "$dir" 2>/dev/null && ls -1 2>/dev/null) | LC_ALL=C sort -r | awk -v d="$dir" -v cap="$TC_RECEIPT_CAP" '
-    /\.json$/ && !/^\./ {
-      n = split($0, f, "-"); t = (f[1] ~ /^[0-9]+$/) ? f[2] : f[1]
-      if (++c[t] <= cap) print d "/" $0; else dropped++
+  # newest by the PARSED time stamp (legacy "shot-<ts>-…" and "<ts>-<type>-…" names mix)
+  (cd "$dir" 2>/dev/null && ls -1 2>/dev/null) | awk '/\.json$/ && !/^\./ {
+      n = split($0, f, "-"); if (f[1] ~ /^[0-9]+$/) { ts = f[1]; t = f[2] } else { t = f[1]; ts = (f[2] ~ /^[0-9]+$/) ? f[2] : 0 }
+      print ts "\t" t "\t" $0 }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1nr -k3,3r | awk -F'\t' -v d="$dir" -v cap="$TC_RECEIPT_CAP" '
+    {
+      if (++c[$2] <= cap) print d "/" $3; else dropped++
     }
     END { if (dropped) print "#capped " dropped }' | while IFS= read -r f; do
       case "$f" in '#capped '*) printf '%s\n' "$f" ;; *) [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f" ;; esac
@@ -909,7 +912,7 @@ tc_suite_check() {
   [ -n "$rows" ] || return 0
   # Content verdicts for all candidate trees at once (one cat-file, one diff-tree
   # --stdin, awk): map lines "<tree> same|missing|err|hit<TAB><path>".
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/tc-sc.XXXXXX") || return 0
+  tmp=$(mktemp -d "${TC__WORK:-${TMPDIR:-/tmp}}/tc-sc.XXXXXX") || return 0
   memb=$(tc__memb_file "suite:$i") || { rm -rf "$tmp"; return 0; }
   printf '%s\n' "$rows" | awk -F'\037' -v c="$csha" -v m="$msha" '$4 == c && $5 == m && $3 == "0" && $6 ~ /^[0-9a-f]+$/ && !s[$6]++ { print $6 }' > "$tmp/trees"
   if [ -s "$tmp/trees" ]; then
@@ -1045,7 +1048,7 @@ tc_agent_check() {
     n=${#ck[@]}; ck[n]=$k; ctr[n]="$rt"; cf[n]="$f"; cst[n]="$st"; cte[n]="$te"; csc[n]=-1; cna[n]=$((1 - a))
     [ "$n" -ge 29 ] && break
   done < <(jq -rs --arg t "$type" '
-      [.[] | select(.type == "suite" and .exit == 0)] as $ok
+      [.[] | select(.type == "suite" and .exit == 0 and .dirty != true)] as $ok
       | [.[] | select(.type == "shot")] as $shots
       | [.[] | select(.type == $t)] | sort_by(.t_end // 0) | reverse | .[:100][]
       | ((.t_start // 0) | if type == "number" then floor else 0 end) as $s
@@ -1187,7 +1190,9 @@ tc_requirements() {
   tc_is_tree "$repo" "$tree" || { TC_ERR="not a tree: $tree"; return 1; }
   flist=$(tc_changed_files "$repo" "$base" "$tree") || { TC_ERR="git diff $base..$tree failed"; return 1; }
   tc_groups_load "$cfg" || { TC_ERR="cannot read the suites/globs of the test config"; return 1; }
-  rfile=$(mktemp "${TMPDIR:-/tmp}/tc-req.XXXXXX") || { TC_ERR="cannot create a temp file"; return 1; }
+  [ -n "$TC__WORK" ] && rm -rf "$TC__WORK"
+  TC__WORK=$(mktemp -d "${TMPDIR:-/tmp}/tc-work.XXXXXX") || { TC_ERR="cannot create a temp dir"; return 1; }
+  rfile="$TC__WORK/receipts.jsonl"
   tc_receipts_load "$repo" > "$rfile"
   tc_threshold "$cfg"
   htree=$(git -C "$repo" rev-parse "$base^{tree}" 2>/dev/null) || htree=$(tc_empty_tree "$repo")
@@ -1195,14 +1200,12 @@ tc_requirements() {
   # receipts and anchors are bound to the REAL history: on --amend the base is
   # HEAD^, but a check taken now has .head = HEAD — ancestry is tested against HEAD
   TC__HEADC=$(git -C "$repo" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) || TC__HEADC=""
-  [ -n "$TC__WORK" ] && rm -rf "$TC__WORK"
-  TC__WORK=$(mktemp -d "${TMPDIR:-/tmp}/tc-work.XXXXXX") || { rm -f "$rfile"; TC_ERR="cannot create a temp dir"; return 1; }
   tc_dcommit_set "$repo" "$htree" "$tree" || TC__DFILTER=0      # no filter = the stricter old comparison
   TC_UNSTAGED=$'\n'"$(tc_unstaged "$repo" "$tree")"$'\n'
   # (i) unstaged files NOT in this commit that another live instance has claimed:
   # outside every group for this evaluation (tc__memb_file seeds them), with a warning
+  printf '%s\n' "$flist" > "$TC__WORK/changed"
   if [ "$TC_UNSTAGED" != $'\n\n' ]; then
-    printf '%s\n' "$flist" > "$TC__WORK/changed"
     printf '%s' "$TC_UNSTAGED" | awk -v cf="$TC__WORK/changed" 'FILENAME == cf { c[$0] = 1; next } $0 != "" && !($0 in c)' \
       "$TC__WORK/changed" - > "$TC__WORK/cand" 2>/dev/null
     if [ -s "$TC__WORK/cand" ]; then
@@ -1214,6 +1217,7 @@ tc_requirements() {
       [ -n "$TC_COORD_NOTE" ] && tc__req_warn "$TC_COORD_NOTE"
     fi
   fi
+  tc__foreign_dirty "$repo" "$rfile"
   if [ "$(printf '%s' "$cfg" | jq -r '.small_change_clamped // false' 2>/dev/null)" = true ]; then
     tc__req_warn "small_change in the test contract is above the built-in ceiling — clamped to $TC_MAX_LINES lines / $TC_MAX_FILES files"
   fi
@@ -1262,7 +1266,7 @@ tc_requirements() {
   tc__req_agent "$repo" "$rfile" "$tree" code "$cot" 0 "$htree"; ag_te="$TC__AG_JSON"
   [ "$TC_AC_OK" -eq 1 ] || { TC_REQ_OK=0; TC_REQ_MISSING="$TC_REQ_MISSING${TC_REQ_MISSING:+$'\n'}test-engineer: $TC_AC_REASON$(tc__unstaged_note code test-engineer)"; }
   [ -n "${TC_AC_ANCHOR:-}" ] && TC_REQ_ANCHORS="${TC_REQ_ANCHORS}code $TC_AC_ANCHOR ${TC__BASEC:--}"$'\n'
-  rm -f "$rfile"; rm -rf "$TC__WORK"; TC__WORK=""; TC__DFILTER=0
+  rm -rf "$TC__WORK"; TC__WORK=""; TC__DFILTER=0
   files_json=$(printf '%s\n' "$flist" | jq -R . | jq -sc 'map(select(length > 0))')
   TC_REQ_JSON=$(printf '%s' "$rows" | jq -sc --arg tree "$tree" --arg base "$base" --argjson files "$files_json" \
     --argjson ui "$ag_ui" --argjson te "$ag_te" --argjson ok "$(tc_bool "$TC_REQ_OK")" --arg missing "$TC_REQ_MISSING" \
@@ -1323,6 +1327,36 @@ tc_coord_foreign() {
     FILENAME == cf { if ($0 in own) print $0 "\t" own[$0]; next }
     { k = $1; sub(/^\.\//, "", k); if (index(k, top) == 1) k = substr(k, length(top) + 1)
       if ($2 != self && ($2 in ok)) own[k] = $2 }' - "$3"
+}
+
+# tc__foreign_dirty <repo> <receipts jsonl> — (owner rule, as for unstaged files) a
+# suite receipt marked dirty ONLY because tracked files changed during the run that
+# are NOT part of this commit and are claimed by another LIVE instance is not dirty
+# for this evaluation: rewritten with dirty=false + foreign_paths, and a warning.
+# Decided at check time (the commit is known only here); the run records dirty_paths.
+tc__foreign_dirty() {
+  local rf="$2" f n paths id fo files="" tmp
+  jq -r 'select(.type == "suite" and .dirty == true and ((.dirty_paths // []) | type) == "array" and ((.dirty_paths // []) | length) > 0)
+         | .dirty_paths[] | tostring' "$rf" 2>/dev/null | LC_ALL=C sort -u \
+    | awk -v cf="$TC__WORK/changed" 'FILENAME == cf { c[$0] = 1; next } $0 != "" && !($0 in c)' "$TC__WORK/changed" - > "$TC__WORK/dcand"
+  [ -s "$TC__WORK/dcand" ] || return 0
+  tc_coord_foreign "$1" "${TC_SELF_ID:-}" "$TC__WORK/dcand" > "$TC__WORK/dforeign.tsv"
+  [ -s "$TC__WORK/dforeign.tsv" ] || return 0
+  while IFS=$'\037' read -r f n paths; do
+    [ -n "$f" ] || continue
+    fo=1
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      awk -F'\t' -v p="$id" '$1 == p { found = 1 } END { exit !found }' "$TC__WORK/dforeign.tsv" || { fo=0; break; }
+    done <<< "$(printf '%s' "$paths" | tr '\036' '\n')"
+    [ "$fo" -eq 1 ] || continue
+    files="$files$f"$'\n'
+    tc__req_warn "suite $n ran while $(printf '%s' "$paths" | tr '\036' ' ') changed (claimed by another live instance); not part of this commit — the run counts"
+  done < <(jq -r 'select(.type == "suite" and .dirty == true and ((.dirty_paths // []) | type) == "array" and ((.dirty_paths // []) | length) > 0)
+                  | [._file, (.suite // ""), (.dirty_paths | map(tostring) | join("\u001e"))] | join("\u001f")' "$rf" 2>/dev/null)
+  [ -n "$files" ] || return 0
+  tmp="$rf.fd"
+  jq -c --arg fl "$files" '($fl | split("\n")) as $L | if (._file as $x | $L | index($x)) then .dirty = false | .foreign_paths = .dirty_paths else . end' "$rf" > "$tmp" 2>/dev/null && mv -f "$tmp" "$rf"
 }
 
 tc__req_warn() { TC_REQ_WARN="$TC_REQ_WARN${TC_REQ_WARN:+$'\n'}$1"; }

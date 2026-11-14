@@ -117,14 +117,19 @@ CS_LIB=1; CS_SCANNED=0
 # B17: a suite run whose environment is changed in the same line (VAR=… / env …
 # prefix, export / declare / set / source earlier in the line) would leave a
 # receipt for something other than the project's own command — deny, every repo.
-if [ "$ST_LINE" -eq 1 ] && [ "$CS_LIB" -eq 1 ] && [ "${CLAUDE_SUBTEAMS_SKIP_TEST_GATE:-0}" != "1" ]; then
-  cs_scan "$COMMAND"; CS_SCANNED=1
+_st_check() { # B17 on one scanner result
+  local k
   for k in ${CS_KIND[@]+"${!CS_KIND[@]}"}; do
     [ "${CS_KIND[k]}" = st ] && [ "${CS_RUN[k]}" = 1 ] || continue
     if [ "${CS_ENV[k]}" = 1 ] || [ "${CS_PEXP[k]}" = 1 ]; then
-      _tg_deny "Test gate: '${CS_TXT[k]}' runs a suite with a changed environment (VAR=… / env prefix, or export / set / source earlier in the same command). A receipt must reflect the project's own command: run 'subteams-tests run …' as its own command, without environment changes (put needed settings into the suite's cmd in the contract)."
+      _tg_deny "Test gate: '${CS_TXT[k]}' runs a suite with a changed environment (VAR=… / env prefix, or export / set / source earlier in the same command). A receipt must reflect the project's own command: run 'subteams-tests run …' as its own command, without environment changes (the fix is the suite's cmd in the contract — the user's call; report it, do not edit the contract)."
     fi
   done
+}
+if [ "$ST_LINE" -eq 1 ] && [ "$CS_LIB" -eq 1 ] && [ "${CLAUDE_SUBTEAMS_SKIP_TEST_GATE:-0}" != "1" ]; then
+  # raw text AND normalized text: `subteams-test$'\x73' run` is only visible in the latter
+  [ "$NORM_CMD" = "$COMMAND" ] || { cs_scan "$NORM_CMD"; _st_check; }
+  cs_scan "$COMMAND"; CS_SCANNED=1; _st_check
   case "$NORM_CMD" in *commit*) ;; *) exit 0 ;; esac
 fi
 # Shared test rules (docs-class for the review gate below, contract, receipts).
@@ -183,11 +188,11 @@ gitcmd_scan "$COMMAND"
 
 # One entry per REAL commit in the command line (every commit is examined, not
 # just the first; --dry-run / -h skip only their own commit).
-CM_I=(); CM_ALL=(); CM_PATHS=(); CM_PFF=()
+CM_I=(); CM_ALL=(); CM_PATHS=(); CM_PFF=(); CM_PFNUL=()
 if [ "$GC_RELIABLE" -eq 1 ]; then
   for i in "${!GC_SUB[@]}"; do
     [ "${GC_SUB[$i]}" = "commit" ] || continue
-    all=0; dry=0; skip=0; rest=0; cpaths=""; pff=""
+    all=0; dry=0; skip=0; rest=0; cpaths=""; pff=""; pfnul=0
     IFS=$'\037' read -r -a CARGS <<< "${GC_ARGS[$i]}"
     for a in "${CARGS[@]}"; do
       if [ "$skip" = pff ]; then pff="$a"; skip=0; continue; fi
@@ -198,6 +203,7 @@ if [ "$GC_RELIABLE" -eq 1 ]; then
         --dry-run|--help) dry=1 ;;
         --all) all=1 ;;
         --pathspec-from-file) skip=pff ;;
+        --pathspec-file-nul) pfnul=1 ;;
         --pathspec-from-file=*) pff="${a#--pathspec-from-file=}" ;;
         --message|--file|--author|--date|--reuse-message|--reedit-message|--fixup|--squash|--cleanup|--template|--trailer) skip=1 ;;
         --*) ;;
@@ -219,23 +225,48 @@ if [ "$GC_RELIABLE" -eq 1 ]; then
     done
     [ "$dry" -eq 0 ] || continue
     n=${#CM_I[@]}
-    CM_I[n]=$i; CM_ALL[n]=$all; CM_PATHS[n]="$cpaths"; CM_PFF[n]="$pff"
+    CM_I[n]=$i; CM_ALL[n]=$all; CM_PATHS[n]="$cpaths"; CM_PFF[n]="$pff"; CM_PFNUL[n]=$pfnul
   done
   if [ "${#CM_I[@]}" -eq 0 ]; then
-    # A commit hidden behind quoting / escapes ($'\x63ommit'): the tokenizer does not
-    # see it, the normalized text does. Under a contract in the cwd repo -> deny.
-    if [ "$CS_LIB" -eq 1 ] && [ "${CLAUDE_SUBTEAMS_SKIP_TEST_GATE:-0}" != "1" ] && [ "$RAW_COMMIT" -eq 0 ]; then
-      cs_scan "$NORM_CMD"
+    # The 1.49 tokenizer sees no commit: the REVIEW gate answers as 1.49 did (skips
+    # the line). The TEST gate still looks with its own scanner, on the raw text and
+    # on the normalized one, and either routes the commit through the test gate
+    # (TG_ROUTE: `git -C $(git rev-parse --show-toplevel) commit`, prefix redirects)
+    # or — under a contract in the target / cwd repo — denies a commit it cannot
+    # model: a computed subcommand (git $C, git ${X:-commit}), a commit spelled
+    # through escapes ($'\x63ommit', $'\x67it'), a commit inside a substitution
+    # ("$(…; git commit)"), or a command word "commit" left over by a substitution
+    # ($(printf git) commit, git -C $(echo /x) commit).
+    TG_ROUTE=0
+    if [ "$CS_LIB" -eq 1 ] && [ "${CLAUDE_SUBTEAMS_SKIP_TEST_GATE:-0}" != "1" ]; then
+      cs_scan "$COMMAND"; CS_SCANNED=1; _hc_why=""; _hc_repo=""
       for k in ${CS_KIND[@]+"${!CS_KIND[@]}"}; do
-        [ "${CS_KIND[k]}" = git ] && [ "${CS_SUB[k]}" = commit ] || continue
-        _hc_top=$(git rev-parse --show-toplevel 2>/dev/null)
-        if [ -n "$_hc_top" ] && { if [ "$TC_LIB" -eq 1 ]; then case "$(tc_contract_marker "$_hc_top" head)" in v1|error) true ;; *) false ;; esac; else _crude_contract_in_head "$_hc_top"; fi; }; then
-          _tg_deny "Test gate: this line runs a git commit spelled through quoting or escapes, and this repository has a test contract. Write the commit as a plain command: [cd /abs &&] [git add <literal paths> &&] git commit [-a] [-m '…' | -F - <<'EOF'] [-- <paths>] [&& read-only follow-ups]."
+        if [ "${CS_KIND[k]}" = git ] && [ "${CS_SUB[k]}" = commit ]; then TG_ROUTE=1; break; fi
+        if [ "${CS_KIND[k]}" = git ]; then
+          case "${CS_SUB[k]}" in *'$'*|*'`'*) _hc_why="a git subcommand computed at run time ('${CS_TXT[k]}')"; _hc_repo=$(cs_top_of "${CS_DIR[k]}") || _hc_repo="" ;; esac
         fi
-        break
+        [ "${CS_TXT[k]%% *}" = commit ] && [ -n "$CS_SHAPE" ] && [ -z "$_hc_why" ] && _hc_why="a commit whose command word comes from a substitution ('${CS_TXT[k]}')"
       done
+      if [ "$TG_ROUTE" -eq 0 ]; then
+        if [ -z "$_hc_why" ]; then
+          cs_scan "$NORM_CMD"
+          for k in ${CS_KIND[@]+"${!CS_KIND[@]}"}; do
+            [ "${CS_KIND[k]}" = git ] && [ "${CS_SUB[k]}" = commit ] || continue
+            _hc_why="a git commit spelled through quoting, escapes or a substitution"; _hc_repo=$(cs_top_of "${CS_DIR[k]}") || _hc_repo=""
+            break
+          done
+        fi
+        if [ -n "$_hc_why" ]; then
+          for _r in "$_hc_repo" "$(git rev-parse --show-toplevel 2>/dev/null)"; do
+            [ -n "$_r" ] || continue
+            if { if [ "$TC_LIB" -eq 1 ]; then case "$(tc_contract_marker "$_r" head)" in v1|error) true ;; *) false ;; esac; else _crude_contract_in_head "$_r"; fi; }; then
+              _tg_deny "Test gate: this line runs $_hc_why, and $_r has a test contract. Write the commit as a plain command: [cd /abs &&] [git add <literal paths> &&] git commit [-a] [-m '…' | -F - <<'EOF'] [-- <paths>] [&& read-only follow-ups]."
+            fi
+          done
+        fi
+      fi
     fi
-    exit 0
+    [ "$TG_ROUTE" -eq 1 ] || exit 0
   fi
 elif ! _legacy_has_commit; then
   exit 0
@@ -320,17 +351,22 @@ _tg_in_progress() { # <repo> -> name of the operation in progress, or rc 1
   # MERGE_HEAD / CHERRY_PICK_HEAD must name a real commit NOT already reachable from
   # HEAD (a hand-written marker pointing at HEAD does not turn the gate into warnings);
   # REVERT_HEAD a real commit; a rebase dir its `onto` commit.
-  local p n c
+  local p n c hn
   for n in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
     p=$(git -C "$1" rev-parse --git-path "$n" 2>/dev/null) || continue
     case "$p" in /*) ;; *) p="$1/$p" ;; esac
     [ -e "$p" ] || continue
     case "$n" in
-      rebase-*) c=$(head -n 1 "$p/onto" 2>/dev/null) ;;
+      rebase-*)
+        # a real rebase: HEAD detached, head-name names an existing ref, onto a commit
+        git -C "$1" symbolic-ref -q HEAD >/dev/null 2>&1 && continue
+        hn=$(head -n 1 "$p/head-name" 2>/dev/null)
+        case "$hn" in refs/?*) git -C "$1" show-ref --verify -q "$hn" 2>/dev/null || continue ;; *) continue ;; esac
+        c=$(head -n 1 "$p/onto" 2>/dev/null) ;;
       *) c=$(head -n 1 "$p" 2>/dev/null) ;;
     esac
     git -C "$1" rev-parse -q --verify "${c:-x}^{commit}" >/dev/null 2>&1 || continue
-    case "$n" in MERGE_HEAD|CHERRY_PICK_HEAD) git -C "$1" merge-base --is-ancestor "$c" HEAD 2>/dev/null && continue ;; esac
+    case "$n" in MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD) git -C "$1" merge-base --is-ancestor "$c" HEAD 2>/dev/null && continue ;; esac
     case "$n" in MERGE_HEAD) echo merge ;; CHERRY_PICK_HEAD) echo cherry-pick ;; REVERT_HEAD) echo revert ;; *) echo rebase ;; esac
     return 0
   done
@@ -374,10 +410,10 @@ fi
 # A line whose control flow cannot be modelled (subshell, ||, &, substitutions, …)
 # also makes the TARGET uncertain: `(cd /other) && git commit` commits in the cwd.
 # So a shape violation is judged against the cwd repo AND every resolved target.
-if [ "$TG_SKIP" -eq 0 ] && [ "$CS_LIB" -eq 1 ] && [ -n "$CS_SHAPE" ] && [ "$TG_NCOMMIT" -gt 0 ]; then
+if [ "$TG_SKIP" -eq 0 ] && [ "$CS_LIB" -eq 1 ] && [ "$TG_NCOMMIT" -gt 0 ] && ! cs_shape_ok "$TG_CK"; then
   _tg_any=0
   while IFS= read -r t; do [ -n "$t" ] && _tg_has_contract "$t" && { _tg_any=1; break; }; done <<< "$TG_TOPS$TG_CWDREPO"
-  [ "$_tg_any" -eq 1 ] && _tg_deny "Test gate: this commit line is not a shape the gate can verify — it uses ${CS_SHAPE%%$'\n'*}. Under a test contract, $CS_SHAPE_HELP."
+  [ "$_tg_any" -eq 1 ] && _tg_deny "Test gate: this commit line is not a shape the gate can verify — $CS_BAD. Under a test contract, $CS_SHAPE_HELP."
 fi
 
 # R6: a hard deny only where a contract is active; elsewhere a visible warning.
@@ -491,7 +527,9 @@ FILES=$(
       # everything modified + untracked, as for any dynamic pathspec
       _pf="${CM_PFF[$k]}"; case "$_pf" in /*) ;; *) _pf="$TARGET_DIR/$_pf" ;; esac
       if [ "${CM_PFF[$k]}" != - ] && [ -f "$_pf" ] && [ -r "$_pf" ]; then
-        PS=(); while IFS= read -r _l || [ -n "$_l" ]; do _l="${_l%$'\r'}"; [ -n "$_l" ] && PS+=("$_l"); done < "$_pf"
+        PS=()
+        if [ "${CM_PFNUL[$k]:-0}" = 1 ]; then while IFS= read -r -d '' _l; do [ -n "$_l" ] && PS+=("$_l"); done < "$_pf"
+        else while IFS= read -r _l || [ -n "$_l" ]; do _l="${_l%$'\r'}"; [ -n "$_l" ] && PS+=("$_l"); done < "$_pf"; fi
         if [ "${#PS[@]}" -gt 0 ]; then
           "${G[@]}" diff HEAD --name-only -- "${PS[@]}" 2>/dev/null || "${G[@]}" ls-files --full-name -- "${PS[@]}" 2>/dev/null
           "${G[@]}" ls-files -o --exclude-standard --full-name -- "${PS[@]}" 2>/dev/null
@@ -561,7 +599,7 @@ FILES=$(printf '%s\n' "$FILES" | sort -u)
 # whereas tsc can run for tens of seconds and a hook killed by its timeout is a
 # non-blocking error (the commit would go through unreviewed).
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
-if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ] && [ "$RAW_COMMIT" -eq 1 ]; then
+if [ "${CLAUDE_SUBTEAMS_SKIP_REVIEW_GATE:-0}" != "1" ] && [ "$RAW_COMMIT" -eq 1 ] && [ "${TG_ROUTE:-0}" -eq 0 ]; then
   if [ -n "$SID" ] && printf '%s' "$SID" | grep -qE '^[A-Za-z0-9._-]+$' \
      && [ "$SID" != "." ] && [ "$SID" != ".." ]; then
     HAS_CODE=0

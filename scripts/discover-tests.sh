@@ -51,6 +51,16 @@ EOF
 command -v jq >/dev/null 2>&1 || die 3 "jq is required (install jq: apt install jq / brew install jq)"
 
 MODE=list; ROOT_ARG=""; DIFF_BASE=""; FILES_STDIN=0; SUITE=""; ALL_AUTO=0
+# --root DIR / --root=DIR is accepted anywhere (also after `run <suite>`); it is
+# the only option taken out of order
+_a=(); while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) [ $# -ge 2 ] || die 64 "--root needs a directory"; ROOT_ARG="$2"; shift 2 ;;
+    --root=*) ROOT_ARG="${1#--root=}"; shift ;;
+    *) _a+=("$1"); shift ;;
+  esac
+done
+set -- ${_a[@]+"${_a[@]}"}
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) [ $# -ge 2 ] || die 64 "--root needs a directory"; ROOT_ARG="$2"; shift 2 ;;
@@ -117,12 +127,12 @@ pmx_for() { case "$1" in pnpm) echo "pnpm exec" ;; yarn) echo yarn ;; bun) echo 
 # shellcheck disable=SC2016  # jq program
 PKG_JQ='
 if type != "object" then error("not a JSON object") else . end
-| (.scripts // {}) | (if type == "object" then . else {} end) | to_entries[]
+| (.scripts // {}) | (if type == "object" then . else {} end) | . as $all | to_entries[]
 | select((.key | test("^(test|test:.+|e2e.*)$")) and (.value | type == "string"))
 | .key as $k | .value as $v
 | if ($k | test("^[A-Za-z0-9_][A-Za-z0-9_:.@/+-]*$") | not) then empty else
   ($v | test("RUN_[A-Za-z0-9_]*=")) as $runenv
-  | ($v | test("\\bbuild\\b"; "i")) as $build
+  | ((($all["pre" + $k] // "") | tostring) as $pre | (($v + " " + $pre) | test("\\bbuild\\b"; "i"))) as $build
   | ($k | test("live|canary"; "i")) as $live
   | (($k | test("watch|(^|:)ui($|:)|debug|headed|update"; "i"))
      or ($v | test("--watch|--ui( |$)|--headed|--debug|--update|(^| )-u( |$)"))) as $inter

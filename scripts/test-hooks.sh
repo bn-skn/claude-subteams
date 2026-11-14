@@ -679,7 +679,7 @@ tg "$R" 'git commit -m x'; check "B4 twin: no merge -> the same commit is denied
 R=$(mkc fx4r); addl "$R/src/lib/x.ts" 20 c; stage "$R"; RB="$(git -C "$R" rev-parse --absolute-git-dir)/rebase-merge"; mkdir -p "$RB"
 tg "$R" 'git commit -m x'; check "r3 an empty rebase-merge dir (no 'onto') is not a rebase -> deny" 2 "$RC"
 git -C "$R" rev-parse HEAD > "$RB/onto"
-tg "$R" 'git commit -m x'; check "B4 rebase in progress: allow + warning" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'rebase in progress')"
+tg "$R" 'git commit -m x'; check "r4 a rebase dir with 'onto' but HEAD attached and no head-name is forged -> deny (a real rebase: see r4)" 2 "$RC"
 fi
 
 if sec fix05-none; then
@@ -792,7 +792,7 @@ tg "$R" "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\ndocs: $(literal) and `t
 check "B13 a quoted-delimiter message heredoc with \$( / backticks in its literal body: allow" 0 "$RC"
 for c in "GIT_INDEX_FILE=/tmp/i git commit -m x" "env GIT_DIR=.git git commit -m x" "export GIT_WORK_TREE=/tmp; git commit -m x" \
          "git --git-dir=.git commit -m x" "git --work-tree /tmp commit -m x" "git -c core.worktree=/tmp commit -m x"; do
-  tg "$R" "$c"; check "KEY B15 GIT_* override on a checked baseline -> deny: $c" "2:1" "$RC:$(has 'GIT_INDEX_FILE / GIT_DIR' "$ERR")"
+  tg "$R" "$c"; check "KEY B15 GIT_* override on a checked baseline -> deny: $c" "2:1" "$RC:$( [ "$(has 'GIT_INDEX_FILE / GIT_DIR' "$ERR")$(has 'injects git configuration' "$ERR")" != 00 ] && echo 1 || echo 0)"
 done
 tg "$R" 'git commit -m x src/lib/*.ts'; check "B13 commit pathspec with a glob -> deny (shell vs git expansion)" "2:1" "$RC:$(has 'glob characters' "$ERR")"
 fi
@@ -860,7 +860,7 @@ tg "$C" "D=$R; cd \"\${D}\" && git commit -m x"; check "B15 cd \"\${D}\": resolv
 tg "$C" "git -C $C commit -m a; git -C $R commit -m b"; check "KEY R6d one of two target repos has a contract -> deny 'split'" "2:1" "$RC:$(has 'different repositories' "$ERR")"
 for c in "GIT_INDEX_FILE=/tmp/i git commit -m x" "env GIT_DIR=.git git commit -m x" "export GIT_WORK_TREE=/tmp; git commit -m x" \
          "git --git-dir=.git commit -m x" "git --work-tree /tmp commit -m x" "git -c core.worktree=/tmp commit -m x"; do
-  tg "$R" "$c"; check "B15 GIT_* override under a contract -> deny: $c" "2:1" "$RC:$(has 'GIT_INDEX_FILE / GIT_DIR' "$ERR")"
+  tg "$R" "$c"; check "B15 GIT_* override under a contract -> deny: $c" "2:1" "$RC:$( [ "$(has 'GIT_INDEX_FILE / GIT_DIR' "$ERR")$(has 'injects git configuration' "$ERR")" != 00 ] && echo 1 || echo 0)"
 done
 tg "$R" "git commit -m a && git commit -m b"; check "B15 two commits in one line under a contract -> deny" "2:1" "$RC:$(has 'several commits' "$ERR")"
 fi
@@ -1034,6 +1034,7 @@ TP="$TMP/r3h-transcript.jsonl"
 jq -nc '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",name:"SubagentHandback",input:{message:"Status: pass\nold verdict"}}]}}' > "$TP"
 run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "te$AGN" --arg p "$TP" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",agent_transcript_path:$p,last_assistant_message:"I ran out of time"}')"
 check "KEY r3h explicit unparsable answer + an older Status in the transcript -> rejected" rejected "$(lastrec "$R" te | jq -r .status)"
+sleep 1   # receipts have second resolution: keep the twin's t_end strictly later (L1)
 run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "te$AGN" --arg p "$TP" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",agent_transcript_path:$p}')"
 check "r3h twin: no last_assistant_message at all (handback mode) -> the transcript is used" pass "$(lastrec "$R" te | jq -r .status)"
 fi
@@ -1088,6 +1089,83 @@ check "KEY r3j a modified package.json bypasses the cache (no stale suites)" '["
 git -C "$R" checkout -q -- package.json; sts "$R"; check "r3j back to HEAD: the cached result is the same as discovery" "$A1" "$(jq -c .suites "$TMP/sout")"
 fi
 
+if sec r4; then
+echo "--- r4 5: forged in-progress markers do not switch the gate to warnings; a real rebase still does"
+R=$(mkc r4m); addl "$R/src/lib/x.ts" 20 c; stage "$R"; GD=$(git -C "$R" rev-parse --absolute-git-dir)
+git -C "$R" rev-parse HEAD > "$GD/REVERT_HEAD"; tg "$R" 'git commit -m x'
+check "KEY r4 forged REVERT_HEAD (= HEAD, reachable) -> deny" 2 "$RC"; rm -f "$GD/REVERT_HEAD"
+mkdir -p "$GD/rebase-merge"; git -C "$R" rev-parse HEAD > "$GD/rebase-merge/onto"; tg "$R" 'git commit -m x'
+check "KEY r4 forged rebase-merge/onto with HEAD attached -> deny" 2 "$RC"; rm -rf "$GD/rebase-merge"
+mkdir -p "$GD/rebase-apply"; git -C "$R" rev-parse HEAD > "$GD/rebase-apply/onto"; tg "$R" 'git commit -m x'
+check "r4 forged rebase-apply/onto -> deny" 2 "$RC"; rm -rf "$GD/rebase-apply"
+R=$(mkc r4rb); git -C "$R" checkout -q -b topic; echo 'topic' > "$R/src/lib/x.ts"; git -C "$R" commit -q -am topic
+git -C "$R" checkout -q main; echo 'main' > "$R/src/lib/x.ts"; git -C "$R" commit -q -am main
+git -C "$R" checkout -q topic; git -C "$R" rebase -q main >/dev/null 2>&1
+echo 'resolved' > "$R/src/lib/x.ts"; git -C "$R" add src/lib/x.ts
+tg "$R" 'git commit -m x'; check "r4 a REAL rebase stopped on a conflict -> warning only (not over-tightened)" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'rebase in progress')"
+git -C "$R" rebase --abort >/dev/null 2>&1
+
+echo "--- r4 10 / M1: dirty receipts and claims; a dirty run is no test-engineer evidence"
+export CLAUDE_SUBTEAMS_COORD_HOME="$TMP/coord4"
+R=$(mkc r4d '{"suites":[{"name":"unit","cmd":"echo z >> docs/SYSTEM.md","paths":["src/**"]}],"ui_globs":["src/ui/**"],"code_globs":["src/lib/**"],"test_globs":["tests/**"]}')
+mkdir -p "$R/docs"; echo s > "$R/docs/SYSTEM.md"; git -C "$R" add -A; git -C "$R" commit -q -m sys
+addl "$R/src/lib/x.ts" 3 a; stage "$R"; sts "$R" run unit; git -C "$R" checkout -q -- docs/SYSTEM.md
+check "r4 the run that changed a tracked file is dirty, path recorded" "true:docs/SYSTEM.md" "$(lastrec "$R" suite | jq -r '"\(.dirty):\(.dirty_paths[0])"')"
+tg "$R" 'git commit -m x'; check "KEY r4 unclaimed: dirty -> deny naming the path" "2:1" "$RC:$(has 'docs/SYSTEM.md' "$ERR")"
+CD=$( . "$LIB"; tc__coord_dir "$R"); mkdir -p "$CD"
+jq -nc --arg w "$R" --argjson p $$ --argjson now "$(date +%s)" '{peer1:{pid:$p,pid_trusted:true,worktree:$w,heartbeat:$now}}' > "$CD/instances.json"
+jq -nc '{"docs/SYSTEM.md":{by:"peer1",at:1}}' > "$CD/claims.json"
+tg "$R" 'git commit -m x'
+check "KEY r4 10 claimed by another live instance, not in the commit -> not dirty, allow + warning" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'ran while docs/SYSTEM.md changed')"
+sts "$R" status; check "r4 10 status agrees" true "$(jq -r .ok "$TMP/sout")"
+jq -nc --arg w "$R" --argjson now "$(date +%s)" '{peer1:{pid:999999,pid_trusted:true,worktree:$w,heartbeat:$now}}' > "$CD/instances.json"
+tg "$R" 'git commit -m x'; check "r4 10 claimed by a DEAD instance -> deny" 2 "$RC"
+unset CLAUDE_SUBTEAMS_COORD_HOME
+R=$(mkc r4m1 '{"suites":[{"name":"unit","cmd":"echo z >> src/lib/y.ts","paths":["src/**"]}],"ui_globs":["src/ui/**"],"code_globs":["src/lib/**"],"test_globs":["tests/**"]}')
+addl "$R/src/lib/x.ts" 20 c; stage "$R"
+AGN=$((AGN+1)); ag_start "$R" claude-subteams:test-engineer "te$AGN"; sts "$R" run unit; git -C "$R" checkout -q -- src/lib/y.ts
+ag_stop "$R" claude-subteams:test-engineer "te$AGN" "Status: pass"
+sts "$R" status; check "KEY r4 M1 a dirty suite run is not test-engineer evidence" 1 "$(jq -r '.missing[]' "$TMP/sout" | grep -c 'test-engineer pass without a suite run')"
+
+echo "--- r4 11: subteams-tests run <suite> --root DIR"
+R=$(mkc r4r); addl "$R/src/lib/x.ts" 2 a; stage "$R"
+(cd "$TMP" && "$STS" run unit --root "$R") >/dev/null 2>&1; check "KEY r4 run unit --root DIR (after the suite) works" 0 "$?"
+(cd "$TMP" && "$STS" run --root="$R" unit) >/dev/null 2>&1; check "r4 run --root=DIR unit works" 0 "$?"
+(cd "$R" && "$STS" run unit --diff HEAD) >/dev/null 2>&1; check "r4 other extra arguments are still refused (64)" 64 "$?"
+
+echo "--- r4 H8: review gate reads --pathspec-from-file with --pathspec-file-nul"
+R=$(mkrepo r4h8); echo 'more' >> "$R/doc.md"; git -C "$R" add doc.md; echo 'z' >> "$R/a.ts"
+printf 'doc.md\0a.ts\0' > "$TMP/r4-pf0"; printf 'doc.md\0' > "$TMP/r4-pf0doc"
+gate "$R" sNOMARK8 "git commit --pathspec-from-file=$TMP/r4-pf0 --pathspec-file-nul -m x"
+check "KEY r4 H8 NUL list naming code -> review deny" "2:1" "$RC:$(has 'code-reviewer' "$ERR")"
+gate "$R" sNOMARK8 "git commit --pathspec-file-nul --pathspec-from-file $TMP/r4-pf0doc -m x"; check "r4 H8 NUL list naming only a doc -> allow" 0 "$RC"
+
+echo "--- r4 M3: handback mode — only the FINAL assistant output carries the status"
+R=$(mkc r4m3); addl "$R/src/lib/x.ts" 20 c; stage "$R"
+AGN=$((AGN+1)); ag_start "$R" claude-subteams:test-engineer "te$AGN"; sts "$R" run unit
+TP="$TMP/r4m3.jsonl"
+{ jq -nc '{type:"assistant",message:{role:"assistant",content:[{type:"text",text:"Status: pass\nall good"}]}}'
+  jq -nc '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",name:"SubagentHandback",input:{message:"done"}}]}}'; } > "$TP"
+run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "te$AGN" --arg p "$TP" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",agent_transcript_path:$p}')"
+check "KEY r4 M3 earlier 'Status: pass' text, final handback 'done' -> rejected" rejected "$(lastrec "$R" te | jq -r .status)"
+
+echo "--- r4 L2 / L3 / L4"
+R=$(mkc r4l2); D=$( . "$LIB"; tc_receipt_dir "$R"); mkdir -p "$D"
+for i in $(seq 1 205); do printf '{"type":"shot","kind":"shot","path":"/s","size":1,"session":"t","ts":%s}\n' "$i" > "$D/shot-$(printf '%010d' "$i")-1-$i.json"; done
+printf '{"type":"shot","kind":"shot","path":"/s","size":1,"session":"t","ts":%s}\n' 9000000000 > "$D/9000000000-shot-1-1.json"
+check "KEY r4 L2 the newest receipt by parsed time survives the cap (legacy names mixed in)" 1 "$( (. "$LIB"; tc_receipts_load "$R") | jq -s 'map(.ts) | index(9000000000) != null' | grep -c true)"
+mkdir -p "$TMP/slowgit2" "$TMP/r4tmp"
+printf '#!/bin/bash\ncase "$*" in *diff-tree*--stdin*) : > %s/r4-in-dt; sleep 2 ;; esac\nexec %s "$@"\n' "$TMP" "$(command -v git)" > "$TMP/slowgit2/git"; chmod +x "$TMP/slowgit2/git"; rm -f "$TMP/r4-in-dt"
+R=$(mkc r4l3); addl "$R/src/lib/x.ts" 2 a; stage "$R"; sts "$R" run unit; addl "$R/src/lib/x.ts" 1 b; stage "$R"
+( cd "$R" && bash_json "$TSID" 'git commit -m x' | PATH="$TMP/slowgit2:$PATH" TMPDIR="$TMP/r4tmp" bash "$HOOKS/pre-commit-gate" >/dev/null 2>&1 ) & GP=$!
+for _w in $(seq 1 100); do [ -e "$TMP/r4-in-dt" ] && break; sleep 0.1; done
+check "r4 L3 the gate is inside the batched diff-tree (suite check)" 1 "$([ -e "$TMP/r4-in-dt" ] && echo 1)"
+kill -TERM "$(pgrep -P "$GP" bash | head -1)" 2>/dev/null; wait "$GP" 2>/dev/null; sleep 0.3
+check "KEY r4 L3 killed inside the suite check: no tc-* temp dir left (tc-sc lives in the trapped work dir)" 0 "$(find "$TMP/r4tmp" -mindepth 1 -maxdepth 2 -name 'tc-*' 2>/dev/null | wc -l | tr -d ' ')"
+R=$(mkrepo r4l4); printf '{"scripts":{"test":"vitest","pretest":"npm run build"}}' > "$R/package.json"; git -C "$R" add -A; git -C "$R" commit -q -m p
+sts "$R"; check "KEY r4 L4 a pretest that builds makes the default test script non-auto" "opt-in:[]" "$(jq -r '.suites[0].run' "$TMP/sout"):$(jq -c '.recommend.run' "$TMP/sout")"
+fi
+
 if sec corpus; then
 echo "--- corpus: commit-line shapes under a contract (all-receipts-green baseline)"
 # Baseline CB: contract repo, every change staged and checked (te + unit). must-ALLOW
@@ -1100,7 +1178,9 @@ echo "--- corpus: commit-line shapes under a contract (all-receipts-green baseli
 CB=$(mkc corpus '{"suites":[{"name":"unit","cmd":"true","paths":["src/**"]}],"ui_globs":["src/ui/**"],"code_globs":["src/lib/**"],"test_globs":["tests/**"]}')
 mkdir -p "$CB/docs"; printf 'n\n' > "$CB/docs/release notes.md"; printf 'n\n' > "$CB/docs/notes[1].md"
 awk 'BEGIN{for(i=1;i<=20;i++) print "s " i}' > "$CB/src/lib/a b.ts"
+mkdir -p "$CB/src/app/[id]"; printf 'export default 1\n' > "$CB/src/app/[id]/page.tsx"
 git -C "$CB" add -A; git -C "$CB" commit -q -m second
+printf 'export const p = 2\n' >> "$CB/src/app/[id]/page.tsx"
 addl "$CB/src/lib/x.ts" 3 base; addl "$CB/src/lib/a b.ts" 2 base
 echo more >> "$CB/docs/release notes.md"; echo more >> "$CB/docs/notes[1].md"
 stage "$CB"; te_check "$CB"; sts "$CB" run unit
@@ -1114,9 +1194,13 @@ corpus_allow() { # <repo> <label> <command template>
   check "corpus ALLOW $2" 0 "$RC"
   [ "$RC" = 0 ] || printf '     deny text: %s\n' "$(printf '%s' "$ERR" | head -2 | tr '\n' ' ' | cut -c1-220)"
 }
-corpus_deny() { # <label> <setup: none|unstaged> <proof: sneaks|same|race> <command template>
+corpus_deny() { # <label> <setup: none|unstaged|unstaged-app|staged-evil> <proof: sneaks|same|race> <command template>
   local cp="$TMP/corpus-run" got
-  [ "$2" = unstaged ] && echo 'evil-unstaged' >> "$CB/src/lib/x.ts"
+  case "$2" in
+    unstaged) echo 'evil-unstaged' >> "$CB/src/lib/x.ts" ;;
+    unstaged-app) echo 'evil-unstaged' >> "$CB/src/app/[id]/page.tsx" ;;
+    staged-evil) echo 'evil' > "$CB/src/lib/evil.ts"; git -C "$CB" add src/lib/evil.ts ;;
+  esac
   tg "$CB" "$(cx "$4" "$CB")"
   check "corpus DENY $1" 2 "$RC"
   rm -rf "$cp"; cp -R "$CB" "$cp"
@@ -1126,7 +1210,11 @@ corpus_deny() { # <label> <setup: none|unstaged> <proof: sneaks|same|race> <comm
   else got=sneaks; fi
   if [ "$3" = race ]; then echo "INFO corpus DENY $1: real run -> $got (race)"
   else check "corpus DENY $1: real run proves '$3'" "$3" "$got"; fi
-  [ "$2" = unstaged ] && git -C "$CB" checkout -q -- src/lib/x.ts
+  case "$2" in
+    unstaged) git -C "$CB" checkout -q -- src/lib/x.ts ;;
+    unstaged-app) git -C "$CB" checkout -q -- 'src/app/[id]/page.tsx' ;;
+    staged-evil) git -C "$CB" rm -q --cached -f src/lib/evil.ts ;;
+  esac
   git -C "$CB" clean -qfd -- src >/dev/null 2>&1
   rm -rf "$cp"
 }
@@ -1198,6 +1286,96 @@ corpus_deny 'commit < <( … )'                      none race   "git commit -a 
 printf '%s\n' "$F" > "$TMP/corpus-list"
 corpus_deny 'xargs git commit < file (no pipe)'    unstaged sneaks "xargs git commit -m x < $TMP/corpus-list"
 corpus_deny 'a pipe INTO the commit'               none same   'printf m | git commit -a -F -'
+
+echo "--- corpus round 4"
+# 1 (N1): commits the 1.49 tokenizer does not see are evaluated / denied
+corpus_deny "git \$'\\x63ommit' -am 'fix commit hook'"  unstaged sneaks "git \$'\\x63ommit' -am 'fix commit hook'"
+corpus_deny 'git -C $(git rev-parse --show-toplevel) commit -am (unquoted, routed)' unstaged sneaks 'git -C $(git rev-parse --show-toplevel) commit -am x'
+corpus_deny 'git -C `git rev-parse --show-toplevel` commit -am (routed)' unstaged sneaks 'git -C `git rev-parse --show-toplevel` commit -am x'
+corpus_deny 'git ${X:-commit} -am x'                 unstaged sneaks 'git ${X:-commit} -am x'
+corpus_deny 'C=commit; git $C -am x'                 unstaged sneaks 'C=commit; git $C -am x'
+corpus_allow "$CB" 'git -C $(git rev-parse --show-toplevel) commit -m x (unquoted, routed and evaluated)' 'git -C $(git rev-parse --show-toplevel) commit -m x'
+# 2: conditional cd / shell control flow
+corpus_deny 'false && cd /nc; git commit -am x'      unstaged sneaks 'false && cd @N@; git commit -am x'
+corpus_deny '[ -d /nope ] && cd /nc; git commit'     unstaged sneaks '[ -d /nope ] && cd @N@; git commit -am x'
+corpus_deny 'test -d /nope && cd /nc; git commit'    unstaged sneaks 'test -d /nope && cd @N@; git commit -am x'
+corpus_deny 'false && pushd /nc; git commit'         unstaged sneaks 'false && pushd @N@; git commit -am x'
+corpus_deny 'if false; then cd /nc; fi; git commit'  unstaged sneaks 'if false; then cd @N@; fi; git commit -am x'
+corpus_allow "$CB" 'cd /abs && git add <path> && git commit (unconditional)' 'cd @R@ && git add src/lib/x.ts && git commit -m x'
+# H1: a conditional add/rm must be chained to the commit with &&
+corpus_deny 'git diff --cached --quiet && git rm --cached evil; git commit' staged-evil sneaks 'git diff --cached --quiet && git rm --cached -q src/lib/evil.ts; git commit -m x'
+corpus_allow "$CB" 'git status && git add -A && git commit (conditional add chained to the commit)' 'git status && git add -A && git commit -m x'
+# 3 / H2 / 4: env options and config-moving variables
+corpus_deny "env -S 'GIT_INDEX_FILE=…' git commit"   none sneaks "env -S 'GIT_INDEX_FILE=.git/evil-index' git commit -m x"
+corpus_deny 'env --chdir=/abs git commit -am x'      unstaged sneaks 'env --chdir=@R@ git commit -am x'
+echo 'evil-unstaged' >> "$CB/src/lib/x.ts"
+for c in "env --chdir=$CB git commit -am x" "env -C $CB git commit -am x" "env --chdir $CB git commit -am x"; do
+  tg "$NC" "$c"; check "KEY r4 H2 from a cwd WITHOUT a contract, $c resolves to the contract repo -> deny" 2 "$RC"
+done
+git -C "$CB" checkout -q -- src/lib/x.ts
+corpus_allow "$CB" 'env -u NAME / env NAME=value git commit' 'env -u FOO GIT_AUTHOR_NAME=bot git commit -m x'
+corpus_deny 'HOME=… git commit (global config swap)' none same 'HOME=/tmp/elsewhere git commit -m x'
+corpus_deny 'XDG_CONFIG_HOME=… git commit'           none same 'XDG_CONFIG_HOME=/tmp/elsewhere git commit -m x'
+# H3 / H4 / H6 / H7
+corpus_deny 'echo "$(…; git commit -am x)" (commit inside a quoted substitution)' none sneaks 'echo "$(echo evil >> src/lib/x.ts; git commit -am x)"'
+corpus_deny '>file git commit -am x (prefix redirect)' none sneaks '>src/lib/x.ts git commit -am x'
+corpus_deny '2>file git commit -am x'                none sneaks '2>src/lib/x.ts git commit -am x'
+corpus_deny '$(printf git) commit -am x'             unstaged sneaks '$(printf git) commit -am x'
+corpus_deny "\$'\\x67it' commit -am x"            unstaged sneaks "\$'\\x67it' commit -am x"
+corpus_deny '"g"it commit -am x'                     unstaged sneaks '"g"it commit -am x'
+corpus_deny 'g\it commit -am x'                     unstaged sneaks 'g\it commit -am x'
+corpus_deny 'git commit | cat > file (consumer writes into the repo)' none race 'git commit -am x | cat > src/lib/x.ts'
+corpus_deny 'git -C $(echo /abs) commit'             unstaged sneaks 'git -C $(echo @R@) commit -am x'
+corpus_deny 'git -C ../$(basename /abs) commit'      unstaged sneaks 'git -C ../$(basename @R@) commit -am x'
+# M2: pathspec-semantics variables
+corpus_deny 'GIT_ICASE_PATHSPECS=1 git add … && commit' unstaged sneaks 'GIT_ICASE_PATHSPECS=1 git add SRC/LIB/X.TS && git commit -m x'
+check "corpus M2 the deny names the environment override (not 'git would refuse')" 1 "$(tg "$CB" 'GIT_ICASE_PATHSPECS=1 git add SRC/LIB/X.TS && git commit -m x'; has 'GIT_INDEX_FILE / GIT_DIR' "$ERR")"
+# M5: git rm -n removes nothing
+corpus_allow "$CB" 'git rm -n <path> && git commit (dry run)' 'git rm -n -q src/lib/x.ts && git commit -m x'
+# 7: quoted ">" is text, not a redirection
+corpus_allow "$CB" "echo 'a -> b' && commit"          "echo 'a -> b' && git commit -m x"
+corpus_allow "$CB" 'echo "staged: a -> b" && commit'  'echo "staged: a -> b" && git commit -m x'
+corpus_allow "$CB" "printf 'x>y\\n' && commit"         "printf 'x>y\\n' && git commit -m x"
+# 9: quoted glob characters in paths (code path, so the twins can go red)
+corpus_allow "$CB" 'git add "src/app/[id]/page.tsx" && commit' 'git add "src/app/[id]/page.tsx" && git commit -m x'
+corpus_allow "$CB" "git add ':(literal)src/app/[id]/page.tsx' && commit" "git add ':(literal)src/app/[id]/page.tsx' && git commit -m x"
+corpus_allow "$CB" 'git --literal-pathspecs add "src/app/[id]/page.tsx" && commit' 'git --literal-pathspecs add "src/app/[id]/page.tsx" && git commit -m x'
+corpus_deny 'git add "src/app/[id]/…" with an unchecked change' unstaged-app sneaks 'git add "src/app/[id]/page.tsx" && git commit -m x'
+corpus_deny "git add ':(literal)src/app/[id]/…' unchecked" unstaged-app sneaks "git add ':(literal)src/app/[id]/page.tsx' && git commit -m x"
+corpus_deny 'git --literal-pathspecs add "src/app/[id]/…" unchecked' unstaged-app sneaks 'git --literal-pathspecs add "src/app/[id]/page.tsx" && git commit -m x'
+# commit -- <path>: a fixture where ONLY that code file changed (and was checked)
+CP=$(mkc corpus-p '{"suites":[{"name":"unit","cmd":"true","paths":["src/**"]}],"ui_globs":["src/ui/**"],"code_globs":["src/**"],"test_globs":["tests/**"]}')
+mkdir -p "$CP/src/app/[id]"; printf 'a\n' > "$CP/src/app/[id]/page.tsx"; git -C "$CP" add -A; git -C "$CP" commit -q -m p
+printf 'b\n' >> "$CP/src/app/[id]/page.tsx"; stage "$CP"; te_check "$CP"; sts "$CP" run unit
+for c in "git commit -m x -- ':(literal)src/app/[id]/page.tsx'" 'git --literal-pathspecs commit -m x -- "src/app/[id]/page.tsx"' 'git commit -m x -- "src/app/[id]/page.tsx"'; do
+  tg "$CP" "$c"; check "corpus ALLOW commit -- code path with glob chars (checked): $c" 0 "$RC"
+  echo 'evil-unstaged' >> "$CP/src/app/[id]/page.tsx"
+  tg "$CP" "$c"; check "corpus DENY the same with an unchecked change (red twin): $c" 2 "$RC"
+  rm -rf "$TMP/cp-run"; cp -R "$CP" "$TMP/cp-run"; (cd "$TMP/cp-run" && bash -c "$c" >/dev/null 2>&1)
+  check "corpus DENY red twin: real run proves 'sneaks': $c" 1 "$([ "$(git -C "$TMP/cp-run" show 'HEAD:src/app/[id]/page.tsx' 2>/dev/null | grep -c evil-unstaged)" = 1 ] && echo 1)"
+  git -C "$CP" checkout -q -- 'src/app/[id]/page.tsx'
+done
+# a sibling the glob [id] also matches (src/app/i/): literal forms must NOT pick it up
+mkdir -p "$CP/src/app/i"; printf 'i\n' > "$CP/src/app/i/page.tsx"; git -C "$CP" add -A; git -C "$CP" commit -q -m i
+printf 'c\n' >> "$CP/src/app/[id]/page.tsx"; git -C "$CP" add 'src/app/[id]/page.tsx'; te_check "$CP"; sts "$CP" run unit
+echo 'unchecked' >> "$CP/src/app/i/page.tsx"
+tg "$CP" 'git --literal-pathspecs commit -m x -- "src/app/[id]/page.tsx"'
+check "KEY r4 --literal-pathspecs is replayed (the glob sibling with an unchecked change is NOT taken) -> allow" 0 "$RC"
+tg "$CP" "git commit -m x -- ':(literal)src/app/[id]/page.tsx'"; check "r4 :(literal) the same -> allow" 0 "$RC"
+tg "$CP" 'git commit -m x -- "src/app/[id]/page.tsx"'; check "r4 the plain quoted glob DOES take the sibling (git semantics) -> deny" 2 "$RC"
+git -C "$CP" checkout -q -- src/app/i/page.tsx
+corpus_deny 'git add src/app/*/page.tsx (unquoted glob)' unstaged-app sneaks 'git add src/app/*/page.tsx && git commit -m x'
+# 8: a symlink OUTSIDE the repo pointing at a tracked file
+ln -sfn "$CB/src/lib/x.ts" "$TMP/corpus-lnk"
+tg "$CB" "echo evil >> $TMP/corpus-lnk && git commit -am x"; check "corpus DENY redirect into a symlink outside the repo that points at a tracked file" "2:1" "$RC:$(has 'inside the repository' "$ERR")"
+CPL="$TMP/corpus-run-lnk"; rm -rf "$CPL"; cp -R "$CB" "$CPL"; ln -sfn "$CPL/src/lib/x.ts" "$TMP/corpus-lnk2"
+(cd "$CPL" && bash -c "echo evil >> $TMP/corpus-lnk2 && git commit -qam x") >/dev/null 2>&1
+check "corpus DENY symlink redirect: real run proves 'sneaks'" 1 "$([ "$(git -C "$CPL" rev-parse 'HEAD^{tree}')" != "$CB_TREE" ] && echo 1)"
+rm -rf "$CPL"
+# 6 / 12: suite runs with a changed environment, also through escapes; the deny text
+tg "$CB" "PATH=/tmp/shim:\$PATH subteams-test\$'\\x73' run unit"
+check "KEY r4 B17 on the normalized text: PATH=… subteams-test\$'\\x73' run -> deny, text says 'the user's call'" "2:1" "$RC:$(has "the user's call; report it, do not edit the contract" "$ERR")"
+
 # target resolution from ANOTHER cwd (in CB the old parser passed these by accident)
 echo 'evil-unstaged' >> "$CB/src/lib/x.ts"
 tg "$NC" "cd -P $CB && git commit -am x"; check "corpus DENY cd -P /contract-repo from another cwd (resolved, unchecked -a content)" 2 "$RC"
