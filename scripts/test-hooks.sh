@@ -1228,6 +1228,103 @@ check "KEY r5 G2 an empty final handback -> rejected 'empty or missing final ans
   "$(lastrec "$R" te | jq -r .status):$(lastrec "$R" te | jq -r .reason | grep -c 'empty or missing'):$(lastrec "$R" te | jq -r .reason | grep -c 'first line: H')"
 fi
 
+if sec r6; then
+CO6="$DIR/scripts/coord.sh"
+echo "--- r6 A: --no-dry-run cancels an earlier --dry-run (the last one wins); -h / --help stay sticky"
+R=$(mkc r6a); addl "$R/src/lib/x.ts" 40 a; stage "$R"                 # unchecked staged code, review marker present
+for c in "git commit --dry-run --no-dry-run -m x" "git commit -m x --dry-run --no-dry-run" "git commit --dry-run -am x --no-dry-run" "git commit --dry-run -m x --no-dr"; do
+  tg "$R" "$c"; check "r6 A test gate: '$c' commits -> 2 (either fix alone denies it)" 2 "$RC"
+done
+tg "$R" "G=git; \$G commit --dry-run --no-dry-run -m x"; check "KEY r6 A test gate: a commit only the scanner sees ('\$G commit --dry-run --no-dry-run') -> 2" 2 "$RC"
+tg "$R" "git commit --no-dry-run --dry-run -m x"; check "r6 A twin: --dry-run last -> 0" 0 "$RC"
+tg "$R" "git commit --dry-run --no-dry-run -h"; check "r6 A twin: -h after --no-dry-run (usage, exit 129) -> 0" 0 "$RC"
+tg "$R" "git commit --help --no-dry-run -m x"; check "r6 A twin: --help before --no-dry-run -> 0" 0 "$RC"
+C=$(mkc r6ar); addl "$C/src/lib/x.ts" 3 a; stage "$C"; te_check "$C"; full "$C"   # tests satisfied, NO review
+for c in "git commit --dry-run --no-dry-run -m x" "git commit --dry-run -m x --no-dr"; do
+  gate "$C" sNOREV6 "$c"; check "KEY r6 A review gate: '$c' -> review deny" "2:1" "$RC:$(has 'no code-reviewer subagent has finished' "$ERR")"
+done
+gate "$C" sNOREV6 "git commit --dry-run -m x"; check "r6 A twin: a real dry run, no review -> 0" 0 "$RC"
+
+echo "--- r6 B: a git add through a variable / variable wrapper widens the review file set (contract)"
+C=$(mkc r6b); addl "$C/src/lib/x.ts" 3 a; stage "$C"; te_check "$C"; full "$C"; git -C "$C" reset -q   # change checked, now UNSTAGED
+for c in "G=git; \$G add -A && git commit -m x" "C=$CO6; bash \$C commit-lock -- git add -A && git commit -m x" "G=git; \$G add -A && \$G commit -m x"; do
+  gate "$C" sNOREV6 "$c"; check "KEY r6 B '$c' -> review deny" "2:1" "$RC:$(has 'no code-reviewer subagent has finished' "$ERR")"
+done
+tg "$C" "G=git; \$G add -A && git commit -m x"; check "r6 B twin: the same line with a review -> 0" 0 "$RC"
+N=$(mkrepo r6bn); echo 'export const b = 2;' >> "$N/a.ts"
+gate "$N" sNOREV6 "G=git; \$G add -A && git commit -m x"; check "r6 B twin: no contract -> unchanged (0)" 0 "$RC"
+
+echo "--- r6 C: with CDPATH set (in the line or in the environment) a relative cd x is a shape the gate cannot verify"
+CK=$(mkc r6ck); addl "$CK/src/lib/x.ts" 3 a; stage "$CK"; te_check "$CK"; full "$CK"
+UN=$(mkc r6un); addl "$UN/src/lib/x.ts" 40 a; stage "$UN"
+for c in "git status && CDPATH=$TMP cd r6un && git commit -m x" "export CDPATH=$TMP; cd r6un && git commit -m x" "CDPATH=$TMP; cd r6un && git commit -m x" "export C\\DPATH=$TMP; cd r6un && git commit -m x"; do
+  tg "$CK" "$c"; check "KEY r6 C '${c#git status && }' -> 2 (CDPATH)" "2:1" "$RC:$(has 'CDPATH' "$ERR")"
+done
+CDPATH="$TMP" tg "$CK" "cd r6un && git commit -m x"; check "KEY r6 C CDPATH in the hook's environment: cd r6un -> 2" 2 "$RC"
+tg "$CK" "cd src && git commit -m x"; check "r6 C twin: no CDPATH, cd src (same checked repo) -> 0" 0 "$RC"
+for c in "CDPATH=$TMP; cd ./src && git commit -m x" "CDPATH=$TMP; cd $CK/src && git commit -m x"; do
+  tg "$CK" "$c"; check "r6 C twin: CDPATH set, '${c#*; }' (./ or absolute) -> 0" 0 "$RC"
+done
+tg "$CK" "CDPATH=$TMP; cd src && git commit -m x"; check "r6 C twin: CDPATH set, cd src -> 2 even in the same repo (fail closed)" 2 "$RC"
+mkdir -p "$TMP/r6par"; PU=$(mkc r6par/pu); addl "$PU/src/lib/x.ts" 40 a; stage "$PU"           # unchecked, cwd = a non-repo parent
+tg "$TMP/r6par" "CDPATH=/nonexistent; cd pu && git commit -m x"; check "KEY r6 C from a cwd without a repo, CDPATH + cd into an unchecked contracted repo -> 2" "2:1" "$RC:$(has 'CDPATH' "$ERR")"
+
+echo "--- r6 D: . / source with arguments is read like an unknown command's arguments"
+printf '#!/bin/sh\n"$@"\n' > "$R/wrap.sh"; chmod +x "$R/wrap.sh"
+for c in ". $CO6 commit-lock -- git commit -m x" "source $CO6 commit-lock -- git commit -m x" ". ./wrap.sh git commit -m x" "source ./wrap.sh git commit -m x" "builtin . ./wrap.sh git commit -m x" "command source ./wrap.sh git commit -m x" "C=$CO6; . \$C commit-lock -- git commit -m x"; do
+  tg "$R" "$c"; check "KEY r6 D '$c' -> 2" 2 "$RC"
+done
+tg "$R" "source ./wrap.sh git log --grep commit"; check "r6 D twin: source with a non-commit git -> 0" 0 "$RC"
+
+echo "--- r6 E: env accepts any unique prefix of --split-string (and -S inside a short cluster)"
+for c in "env --split-s='git commit -m x'" "env --split='git commit -m x'" "env --sp='git commit -m x'" "env --s='git commit -m x'" "env -iS'git commit -m x'" "env -vS'git commit -m x'"; do
+  tg "$R" "$c"; check "KEY r6 E '$c' -> 2" 2 "$RC"
+done
+tg "$R" "env --sp 'git commit -m x'"; check "r6 E twin: the separate-argument form (already denied before) -> 2" 2 "$RC"
+tg "$R" "env --u=X git log --grep commit"; check "r6 E twin: env --u=X (unset) before a read-only git -> 0" 0 "$RC"
+
+echo "--- r6 F: git global options with a separate argument (--attr-source, --shallow-file)"
+for c in "./wrap.sh git --attr-source HEAD commit -m x" "./wrap.sh git --shallow-file x commit -m x" "git --attr-source HEAD commit -m x" "git --shallow-file x commit -m x"; do
+  tg "$R" "$c"; check "KEY r6 F '$c' -> 2" 2 "$RC"
+done
+tg "$R" "./wrap.sh git --attr-source HEAD log --grep commit"; check "r6 F twin: --attr-source before a non-commit -> 0" 0 "$RC"
+C=$(mkc r6fr); addl "$C/src/lib/x.ts" 3 a; stage "$C"; te_check "$C"; full "$C"   # tests satisfied, NO review
+for c in "git --attr-source HEAD commit -m x" "git --shallow-file x commit -m x"; do
+  gate "$C" sNOREV6F "$c"; check "KEY r6 F review gate: '$c' -> review deny" "2:1" "$RC:$(has 'no code-reviewer subagent has finished' "$ERR")"
+done
+
+echo "--- r6 H: find runs a command only after -exec / -execdir / -ok / -okdir"
+tg "$R" "find . -name git -o -name commit"; check "KEY r6 H 'find . -name git -o -name commit' -> 0" 0 "$RC"
+tg "$R" "find . -name commit -exec ls {} +"; check "r6 H twin: -exec of a non-git command -> 0" 0 "$RC"
+printf '#!/bin/sh\n"$@"\n' > "$R/find"; chmod +x "$R/find"
+for c in "./find git commit -m x" "find . -maxdepth 0 {-exec,} git commit -m x \\;" "find . -maxdepth 0 {,-exec} git commit -m x \\;" "find . -maxdepth 0 -exe? git commit -m x \\;"; do
+  tg "$R" "$c"; check "KEY r6 H2 '$c' -> 2 (a script named find; brace / glob spelling of -exec)" 2 "$RC"
+done
+rm -f "$R/find"
+for c in "find . -exec git commit -m x \;" "find . -name git -exec ./wrap.sh git commit -m x {} +" "find . -okdir git commit -m x \;" "X=-exec; find . \$X git commit -m x \;"; do
+  tg "$R" "$c"; check "r6 H twin: '$c' -> 2" 2 "$RC"
+done
+
+echo "--- r6 G2: one assistant message split over several transcript lines (same message.id) is one final turn"
+R=$(mkc r6g2); addl "$R/src/lib/x.ts" 20 c; stage "$R"
+AGN=$((AGN+1)); ag_start "$R" claude-subteams:test-engineer "te$AGN"; sts "$R" run unit
+TP="$TMP/r6g2.jsonl"
+r6m() { jq -nc --arg id "$1" --argjson c "$2" '{type:"assistant",message:{id:$id,role:"assistant",content:$c}}'; }
+{ r6m m1 '[{"type":"text","text":"working"}]'; r6m m2 '[{"type":"text","text":"Status: pass\nnew tests: 2"}]'
+  r6m m2 '[{"type":"tool_use","name":"SubagentHandback","input":{"message":"done"}}]'; } > "$TP"
+run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "te$AGN" --arg p "$TP" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",agent_transcript_path:$p}')"
+check "KEY r6 G2 split final message: text line 'Status: pass' + handback line 'done', same id -> pass" pass "$(lastrec "$R" te | jq -r .status)"
+sleep 1
+{ r6m m1 '[{"type":"text","text":"Status: pass"}]'; r6m m2 '[{"type":"tool_use","name":"SubagentHandback","input":{"message":"done"}}]'; } > "$TP"
+run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "te$AGN" --arg p "$TP" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",agent_transcript_path:$p}')"
+check "r6 G2 twin: 'Status: pass' in an EARLIER message (other id), final handback 'done' -> rejected" rejected "$(lastrec "$R" te | jq -r .status)"
+sleep 1
+{ r6m m3 '[{"type":"text","text":"Status: pass"}]'; r6m m3 '[{"type":"thinking","thinking":"x"}]'; r6m m3 '[{"type":"text","text":"Status: issues-found"}]'
+  r6m m3 '[{"type":"tool_use","name":"SubagentHandback","input":{"message":"done"}}]'; } > "$TP"
+run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "te$AGN" --arg p "$TP" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",agent_transcript_path:$p}')"
+check "KEY r6 G2a two status texts in the final message: the LAST one counts -> issues-found" issues-found "$(lastrec "$R" te | jq -r .status)"
+fi
+
 if sec corpus; then
 echo "--- corpus: commit-line shapes under a contract (all-receipts-green baseline)"
 # Baseline CB: contract repo, every change staged and checked (te + unit). must-ALLOW

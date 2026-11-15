@@ -55,7 +55,7 @@ cs__reset() {
   CS_KIND=(); CS_TXT=(); CS_SUB=(); CS_ARGS=(); CS_DIR=(); CS_DRAW=(); CS_ENV=(); CS_GENV=()
   CS_PEXP=(); CS_REDIR=(); CS_X=(); CS_RUN=(); CS_GOPT=(); CS_SEP=(); CS_DEPTH=(); CS_CFG=(); CS_LITPS=(); CS_KW=(); CS_UGLOB=(); CS_QCMD=(); CS_ENVS=(); CS_ACOMMIT=(); CS_VWRAP=()
   CS_VN=(); CS_VV=(); CS_RELIABLE=1; CS_CUR="$PWD"; CS_CURRAW=""; CS_LGENV=0; CS_LEXP=0; CS_LCFG=0
-  CS_SHAPE=""
+  CS_SHAPE=""; CS_CDPATH=0
 }
 
 cs__isgitvar() { case " $CS_GITVARS " in *" $1 "*) return 0 ;; esac; return 1; }
@@ -365,7 +365,7 @@ cs__argcommit() {
       q=$((p + 1))
       while [ "$q" -lt "$n" ]; do
         case "${T[$q]}" in
-          -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env) q=$((q + 2)) ;;
+          -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source|--shallow-file) q=$((q + 2)) ;;
           -*) q=$((q + 1)) ;;
           *) break ;;
         esac
@@ -386,7 +386,14 @@ cs__argcommit() {
 cs_scan() {
   local depth="${2:-0}" pe="${3:-0}" pg="${4:-0}" line sentinel=0 txt
   local -a T
-  if [ "$depth" -eq 0 ]; then cs__reset; txt=$(printf '%s' "$1" | cs__msg_prepass); else txt="$1"; fi
+  if [ "$depth" -eq 0 ]; then
+    cs__reset; txt=$(printf '%s' "$1" | cs__msg_prepass)
+    # CDPATH in the hook's environment, or set anywhere in the line (quotes and
+    # backslashes dropped; the gate adds its decoded text as CS_CDPATH_HINT): a
+    # relative `cd x` may land in another repository (see the cd case below)
+    case "${1//[\\\"\']/}" in *CDPATH*) CS_CDPATH=1 ;; esac
+    [ -z "${CDPATH:-}" ] && [ "${CS_CDPATH_HINT:-0}" != 1 ] || CS_CDPATH=1
+  else txt="$1"; fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     case "$line" in
@@ -426,6 +433,23 @@ cs__stmt() { # uses T from cs_scan
           continue ;;
         env) wrap=env; CS_R_ENV=1; i=$((i + 1)); continue ;;
         -*)
+          if [ "$wrap" = env ]; then
+            # GNU env: any unique prefix of a long option (--s=… is --split-string=…),
+            # and a short cluster (-iS…, -vu X): drop the flag letters i / 0 / v
+            case "$w" in
+              --?*)
+                nm="${w#--}"; v=""; case "$nm" in *=*) v="=${nm#*=}"; nm="${nm%%=*}" ;; esac
+                # shellcheck disable=SC2194  # a constant word on purpose: is $nm its prefix?
+                if [ -n "$nm" ]; then
+                  case split-string in "$nm"*) w="--split-string$v" ;; esac
+                  case chdir in "$nm"*) w="--chdir$v" ;; esac
+                  case unset in "$nm"*) w="--unset$v" ;; esac
+                fi ;;
+              -[!-]?*)
+                v="${w#-}"; while case "$v" in [i0v]?*) true ;; *) false ;; esac; do v="${v#?}"; done
+                [ "-$v" = "$w" ] || { CS_R_CFG="${CS_R_CFG:-env $w}"; w="-$v"; } ;;
+            esac
+          fi
           if [ -n "$wrap" ]; then
             case "$wrap:$w" in
               env:-C|env:--chdir) cs__envdir "${T[$((i + 1))]:-}"; CS_R_CFG="${CS_R_CFG:-env $w}"; i=$((i + 2)) ;;
@@ -530,6 +554,12 @@ cs__stmt() { # uses T from cs_scan
     cd|pushd)
       j=$((i + 1)); while [ "$j" -lt "$n" ] && case "${T[$j]}" in --|-P|-L|-e|-@|-PL|-LP|-Pe|-eP) true ;; *) false ;; esac; do j=$((j + 1)); done
       raw="${T[$j]:-~}"
+      # CDPATH set: bash may take a relative `cd x` (not ./ ../ /) into a directory
+      # found through CDPATH — a shape the gate cannot verify (the target stays the
+      # cwd-relative reading, so the shape check sees that repo and the cwd's)
+      if [ "$CS_CDPATH" = 1 ] && [ "$raw" != - ] && { ! cs_expand "$raw" || case "$CS_E" in /*|.|..|./*|../*) false ;; *) true ;; esac; }; then
+        CS_SHAPE="$CS_SHAPE${CS_SHAPE:+$'\n'}a relative 'cd $raw' with CDPATH set (bash may change into a directory found through CDPATH; write cd ./$raw or an absolute path)"
+      fi
       if [ "$raw" = - ]; then CS_CUR=""; CS_CURRAW="cd -"
       elif cs_expand "$raw" && cs__abs "$CS_CUR" "$CS_E"; then
         if [ -d "$CS_P" ]; then CS_CUR=$(cs__canon_dir "$CS_P"); CS_CURRAW=""; fi   # a failing cd leaves the dir as is
@@ -569,7 +599,9 @@ cs__stmt() { # uses T from cs_scan
       done
       [ "$CS_LGENV" = 1 ] && CS_R_GENV=1
       [ "$CS_LCFG" != 0 ] && CS_R_CFG="$CS_LCFG"
-      case "$base" in source|.) cs__record other ;; *) cs__record export ;; esac ;;
+      # `. file args…` / `source file args…` runs a script with arguments: read them
+      # like the arguments of an unknown command (`. ./wrap.sh git commit`)
+      case "$base" in source|.) cs__argcommit $((i + 1)); cs__record other ;; *) cs__record export ;; esac ;;
     unset) cs__record assign ;;
     true|false|:|test|'['|'[['|']]'|fi|done|esac|'}'|then|else) cs__record noop ;;
     echo|printf|cat) cs__record echo ;;
@@ -595,7 +627,7 @@ cs__stmt() { # uses T from cs_scan
           --git-dir|--work-tree) CS_R_GENV=1; CS_R_GOPT=1; j=$((j + 2)) ;;
           --git-dir=*|--work-tree=*|--bare) CS_R_GENV=1; CS_R_GOPT=1; j=$((j + 1)) ;;
           --exec-path=*) CS_R_GOPT=1; CS_R_CFG="${CS_R_CFG:---exec-path}"; j=$((j + 1)) ;;
-          --namespace|--super-prefix) j=$((j + 2)) ;;
+          --namespace|--super-prefix|--attr-source|--shallow-file) j=$((j + 2)) ;;   # (git 2.53: every global option with a separate argument)
           --exec-path) CS_R_GOPT=1; CS_R_CFG="${CS_R_CFG:---exec-path}"; j=$((j + 2)) ;;
           -*) j=$((j + 1)) ;;
           *) break ;;
@@ -608,7 +640,15 @@ cs__stmt() { # uses T from cs_scan
       [ "$CS_R_DIRSET" = 1 ] || { CS_R_DIRSET=1; CS_R_DIR="$dir"; CS_R_DRAW="$raw"; }
       cs__record git ;;
     *)
-      cs__argcommit $((i + 1))
+      if case "$w" in find|/usr/bin/find|/bin/find) true ;; *) false ;; esac; then
+        # find runs a command only after -exec / -execdir / -ok / -okdir (to the end
+        # of the statement: fail closed; a $VAR / backtick / brace / glob word may
+        # become one of them). Only the real find: a project script named find is a wrapper;
+        # `-name git -o -name commit` is no commit
+        j=$((i + 1))
+        while [ "$j" -lt "$n" ] && case "${T[$j]}" in -exec|-execdir|-ok|-okdir|*'$'*|*'`'*|*'{'*|*'*'*|*'?'*|*'['*) false ;; *) true ;; esac; do j=$((j + 1)); done
+        cs__argcommit "$j"
+      else cs__argcommit $((i + 1)); fi
       # a command word left as a $VAR (unknown, or several words: G="git -C /x"; $G
       # commit) with the word `commit` in the statement or in the variable's value
       case "$w" in
@@ -633,7 +673,7 @@ cs__stmt() { # uses T from cs_scan
 #                                 3 git would refuse (CS_CTERR), 2 unparsable,
 #                                 4 the two readings of a split heredoc message differ
 # git commit options for prefix resolution (git accepts unique abbreviations)
-CS_LONG="all patch reuse-message reedit-message fixup squash reset-author short branch porcelain long null file author date message template signoff no-signoff trailer no-verify verify allow-empty allow-empty-message cleanup edit no-edit amend no-amend no-post-rewrite include no-include only no-only no-all no-patch pathspec-from-file pathspec-file-nul untracked-files verbose quiet dry-run status no-status gpg-sign no-gpg-sign interactive help"
+CS_LONG="all patch reuse-message reedit-message fixup squash reset-author short branch porcelain long null file author date message template signoff no-signoff trailer no-verify verify allow-empty allow-empty-message cleanup edit no-edit amend no-amend no-post-rewrite include no-include only no-only no-all no-patch pathspec-from-file pathspec-file-nul untracked-files verbose quiet dry-run status no-status gpg-sign no-gpg-sign interactive help no-dry-run"
 CS_LONGV=" reuse-message reedit-message fixup squash file author date message template trailer cleanup pathspec-from-file "
 
 cs__long() { # <name> -> CS_LO (full option name, "" unknown, "?" ambiguous)
@@ -654,7 +694,7 @@ cs__long() { # <name> -> CS_LO (full option name, "" unknown, "?" ambiguous)
 # CSP_BAD (an ambiguous abbreviation: git refuses the command),
 # CSP_PATHS[] and CSP_SPLIT (index of the first token with an unbalanced `$(`, -1 none).
 cs_parse_commit() {
-  local -a A; local a i=0 lim skip=0 rest=0 cl ch nm val opens closes
+  local -a A; local a i=0 lim skip=0 rest=0 cl ch nm val opens closes help=0
   IFS=$'\037' read -r -a A <<< "$1"
   lim="${2:-${#A[@]}}"
   CSP_BAD=""; CSP_DRY=0; CSP_ALL=0; CSP_ONLY=0; CSP_INC=0; CSP_PATCH=0; CSP_AMEND=0; CSP_PFF=""; CSP_PFNUL=0; CSP_PATHS=(); CSP_SPLIT=-1
@@ -682,13 +722,14 @@ cs_parse_commit() {
           include) CSP_INC=1 ;; no-include) CSP_INC=0 ;;
           patch|interactive) CSP_PATCH=1 ;; no-patch) CSP_PATCH=0 ;;
           amend) CSP_AMEND=1 ;; no-amend) CSP_AMEND=0 ;;
-          dry-run|help) CSP_DRY=1 ;;
+          dry-run) CSP_DRY=1 ;; no-dry-run) CSP_DRY=0 ;;    # the last one wins (git)
+          help) help=1 ;;
           pathspec-file-nul) CSP_PFNUL=1 ;;
           pathspec-from-file) case "$a" in *=*) CSP_PFF="$val" ;; *) skip=pff ;; esac ;;
           '?') CSP_BAD="ambiguous option $a" ;;
           *) case "$CS_LONGV" in *" $CS_LO "*) case "$a" in *=*) ;; *) skip=1 ;; esac ;; esac ;;
         esac ;;
-      -h) CSP_DRY=1 ;;
+      -h) help=1 ;;
       -?*)
         cl="${a#-}"
         while [ -n "$cl" ]; do
@@ -702,6 +743,7 @@ cs_parse_commit() {
       *) CSP_PATHS+=("$a") ;;
     esac
   done
+  [ "$help" -eq 0 ] || CSP_DRY=1      # -h / --help: usage and exit 129, wherever it stands
 }
 
 cs_readonly_git() { # <sub> <args \037> -> 0 if it changes nothing

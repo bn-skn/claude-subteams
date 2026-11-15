@@ -109,10 +109,18 @@ _reason_stated() {
 _transcript_final() {
   local j h t
   [ -f "$1" ] || return 1
+  # One assistant message is written as several JSONL lines (one per content block)
+  # sharing .message.id: the trailing run of rows with the last row's id (never a
+  # null id) is the final turn — its last text row, its last handback. Per-line jq
+  # first, so a torn last line loses only itself.
   j=$(tail -n 400 "$1" 2>/dev/null | jq -c 'select(.type == "assistant") | (.message.content // []) as $c
         | ([$c[]? | select(.type == "tool_use" and .name == "SubagentHandback") | (.input.message // "" | tostring)] | last) as $h
         | ([$c[]? | select(.type == "text") | .text] | join("\n")) as $t
-        | if $h != null or ($t | length) > 0 then {h: $h, t: $t} else empty end' 2>/dev/null | tail -n 1)
+        | if $h != null or ($t | length) > 0 then {id: (.message.id // null), h: $h, t: $t} else empty end' 2>/dev/null \
+      | jq -sc 'select(length > 0) | . as $r | $r[-1] as $l
+        | (if $l.id == null then [$l]
+           else [foreach range(($r | length) - 1; -1; -1) as $k (true; . and $r[$k].id == $l.id; if . then $r[$k] else empty end)] | reverse end)
+        | {h: ([.[].h | select(. != null)] | last), t: ([.[].t | select(length > 0)] | last // "")}' 2>/dev/null)
   [ -n "$j" ] || return 1
   t=$(printf '%s' "$j" | jq -r '.t // ""')
   if [ "$(printf '%s' "$j" | jq -r 'if .h == null then "0" else "1" end')" = 1 ]; then

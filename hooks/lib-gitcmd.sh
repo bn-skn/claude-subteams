@@ -239,7 +239,7 @@ gitcmd_scan() { # $1 = command line, $2 = recursion depth (internal)
         while [ "$j" -lt "$n" ]; do
           case "${T[$j]}" in
             -C) dir="${T[$((j + 1))]:-}"; j=$((j + 2)) ;;
-            -c|--git-dir|--work-tree|--namespace|--config-env|--super-prefix) j=$((j + 2)) ;;
+            -c|--git-dir|--work-tree|--namespace|--config-env|--super-prefix|--attr-source|--shallow-file) j=$((j + 2)) ;;
             -*) j=$((j + 1)) ;;
             *) break ;;
           esac

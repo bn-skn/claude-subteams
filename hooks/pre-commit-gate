@@ -94,6 +94,8 @@ _norm_cmd() {
       printf "%s", out }'
 }
 NORM_CMD=$(_norm_cmd "$COMMAND")
+# shellcheck disable=SC2034  # read by lib-commitscan.sh
+case "$NORM_CMD" in *CDPATH*) CS_CDPATH_HINT=1 ;; *) CS_CDPATH_HINT=0 ;; esac   # lib-commitscan: CDPATH set in the line
 RAW_COMMIT=0; case "$COMMAND" in *commit*) RAW_COMMIT=1 ;; esac
 ST_LINE=0
 case "$NORM_CMD" in *subteams-tests*|*discover-tests*) ST_LINE=1 ;; esac
@@ -204,7 +206,7 @@ CM_I=(); CM_ALL=(); CM_PATHS=(); CM_PFF=(); CM_PFNUL=()
 if [ "$GC_RELIABLE" -eq 1 ]; then
   for i in "${!GC_SUB[@]}"; do
     [ "${GC_SUB[$i]}" = "commit" ] || continue
-    all=0; dry=0; skip=0; rest=0; cpaths=""; pff=""; pfnul=0
+    all=0; dry=0; help=0; skip=0; rest=0; cpaths=""; pff=""; pfnul=0
     IFS=$'\037' read -r -a CARGS <<< "${GC_ARGS[$i]}"
     for a in "${CARGS[@]}"; do
       if [ "$skip" = pff ]; then pff="$a"; skip=0; continue; fi
@@ -212,14 +214,16 @@ if [ "$GC_RELIABLE" -eq 1 ]; then
       if [ "$rest" -eq 1 ]; then cpaths="${cpaths}${cpaths:+$'\037'}$a"; continue; fi
       case "$a" in
         --) rest=1 ;;
-        --dry-run|--help) dry=1 ;;
+        --dry-run) dry=1 ;;
+        --no-d|--no-dr|--no-dry|--no-dry-|--no-dry-r|--no-dry-ru|--no-dry-run) dry=0 ;;   # last one wins (git takes prefixes)
+        --help) help=1 ;;
         --all) all=1 ;;
         --pathspec-from-file) skip=pff ;;
         --pathspec-file-nul) pfnul=1 ;;
         --pathspec-from-file=*) pff="${a#--pathspec-from-file=}" ;;
         --message|--file|--author|--date|--reuse-message|--reedit-message|--fixup|--squash|--cleanup|--template|--trailer) skip=1 ;;
         --*) ;;
-        -h) dry=1 ;;
+        -h) help=1 ;;
         -?*)
           # short-option cluster (`-am`, `-sam`, `-qvm`): scan chars until one that
           # takes a value (the rest of the cluster, or the next word, is that value)
@@ -235,7 +239,7 @@ if [ "$GC_RELIABLE" -eq 1 ]; then
         *) cpaths="${cpaths}${cpaths:+$'\037'}$a" ;;
       esac
     done
-    [ "$dry" -eq 0 ] || continue
+    [ "$dry$help" = 00 ] || continue
     n=${#CM_I[@]}
     CM_I[n]=$i; CM_ALL[n]=$all; CM_PATHS[n]="$cpaths"; CM_PFF[n]="$pff"; CM_PFNUL[n]=$pfnul
   done
@@ -600,6 +604,20 @@ FILES=$(
       "${G[@]}" diff HEAD --name-only -- "${CSP_PATHS[@]}" 2>/dev/null || "${G[@]}" ls-files --full-name -- "${CSP_PATHS[@]}" 2>/dev/null
       "${G[@]}" ls-files -o --exclude-standard --full-name -- "${CSP_PATHS[@]}" 2>/dev/null
     fi
+  fi
+  if [ "$CS_LIB" -eq 1 ] && [ "${TG_CONTRACT:-0}" -eq 1 ]; then
+    # (contract only) a git add / stage before the commit that the 1.49 parser below
+    # cannot see — its command word or wrapper read from a variable (`G=git; $G add
+    # -A`, `bash $C commit-lock -- git add -A`): the whole working tree, as for any
+    # dynamic add
+    for k in ${CS_KIND[@]+"${!CS_KIND[@]}"}; do
+      [ "$TG_CK" -lt 0 ] || [ "$k" -lt "$TG_CK" ] || continue
+      [ "${CS_KIND[k]}:${CS_VWRAP[k]:-0}" = git:1 ] || continue
+      case "${CS_SUB[k]}" in add|stage) ;; *) continue ;; esac
+      "${G[@]}" diff --name-only -- ":/" 2>/dev/null
+      "${G[@]}" ls-files -o --exclude-standard --full-name -- ":/" 2>/dev/null
+      break
+    done
   fi
   for i in "${!GC_SUB[@]}"; do
     [ "$i" -lt "$last" ] || continue
