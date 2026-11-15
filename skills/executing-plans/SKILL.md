@@ -53,8 +53,7 @@ For each task in the current batch:
    - [ ] **Compilation check** — does it build without errors?
    - [ ] **Code review** — dispatch reviewer subagent for spec compliance
    - [ ] **Devils-advocate challenge** (full pipeline, and any non-trivial logic — see using-subteams Section 6) — dispatch devils-advocate to challenge assumptions, edge cases, scale, necessity
-   - [ ] **Test verification** — run tests, verify new + existing pass
-   - [ ] **UI & test agents** — per using-subteams §6.7: ui-tester if UI changed, then test-engineer if logic changed (each above the small-change threshold), then `subteams-tests run --all-auto`
+   - [ ] **Tests & UI/test agents** — iterate with the project's runner; then per using-subteams §6.7: ui-tester if UI changed, test-engineer if logic changed (each above the small-change threshold) → `subteams-tests run --all-auto` (only this run leaves a receipt) → stage → `subteams-tests status`; verify new + existing pass
    - [ ] Gate passes: proceed to next task
    - [ ] Gate fails: retry with feedback (max 3 retries)
 

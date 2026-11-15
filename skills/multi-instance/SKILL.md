@@ -70,12 +70,12 @@ Do this **before taking any lock.** Rebasing keeps your branch's drift from `mai
 ### 7.2 Run the gate under gate-lock
 
 ```bash
-coord.sh gate-lock -- bash -c 'npx tsc --noEmit && npm test && npm run test:e2e'
+coord.sh gate-lock -- subteams-tests run --all-auto
 # bounded wait instead of indefinite:
-coord.sh gate-lock --timeout 1800 -- bash -c 'npx tsc --noEmit && npm test && npm run test:e2e'
+coord.sh gate-lock --timeout 1800 -- subteams-tests run --all-auto
 ```
 
-(Substitute your project's own gate — `subteams-tests` lists the suites the project has; type-check + every `run: auto` suite + whatever boot/smoke check it runs.) This is the main scaling guard: a full gate is CPU/RAM-heavy and minutes-long, and several of these running at once on a small box starve each other rather than finishing. `gate-lock` puts them on their own queue, separate from `commit-lock`, so one instance's long gate never blocks another instance's quick commit.
+(The run's exit code is the gate — non-zero → stop, do not merge. Run the type-check under the lock too: `coord.sh gate-lock -- npx tsc --noEmit`. Without a test contract `--all-auto` runs only the default test command; run the project's other gate suites (e2e) under the same lock as before. Under a contract only `subteams-tests run` leaves a receipt — a raw `npm test` under the lock does not count for the commit gate.) This is the main scaling guard: a full gate is CPU/RAM-heavy and minutes-long, and several of these running at once on a small box starve each other rather than finishing. `gate-lock` puts them on their own queue, separate from `commit-lock`, so one instance's long gate never blocks another instance's quick commit.
 
 No `--timeout`: waits as long as it takes — queuing behind another instance's gate is expected, not exceptional. With `--timeout N`: exit **75** almost always means the lock wasn't free within Ns — `coord.sh` reserves 75 for exactly that. It is not a guarantee, though: a gate command that itself happens to exit 75 is indistinguishable from a timeout (`coord.sh`'s own comment notes this as a rare, accepted collision, not an impossibility). When the lock IS acquired, your gate command's own exit code passes straight through, so an ordinary gate failure still reads as a real failure.
 

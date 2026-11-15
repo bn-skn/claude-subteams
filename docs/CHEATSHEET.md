@@ -3,7 +3,7 @@
 Quick reference for installing, updating, removing, and **repairing** the plugin from any machine.
 
 - **Repo:** `bn-skn/claude-subteams` (public)
-- **Marketplace:** `articortex` · **Plugin:** `claude-subteams` · **Version:** 1.48.1 (see CHANGELOG for the latest)
+- **Marketplace:** `articortex` · **Plugin:** `claude-subteams` · **Version:** 1.50.1 (see CHANGELOG for the latest)
 - **Contents:** 20 agents, 59 skills, 11 hooks
 
 ---
@@ -101,11 +101,27 @@ rm -rf ~/.claude/plugins/marketplaces/bn-skn
 |---|---|
 | `/research <question>` | Fetch current docs (Context7 + web) before coding |
 | `/whatsnew <lib> [N months]` | Changelog / breaking changes for a library |
-| `/cross-review` | Review with 4 critics (2 Claude + 2 GPT) |
+| `/cross-review` | Review with 4 critics (2 Claude + 2 GPT), plus the Gemini lane when agy is available |
 | `/rescue` | Codex diagnoses a stuck bug |
 | `/init-project <name>` | Bootstrap a new project skeleton (project-scaffold skill) |
 
 The `using-subteams` skill auto-loads at the start of any development work.
+
+---
+
+## Project tests & UI check (`subteams-tests`, `subteams-browser`)
+
+On the Bash PATH from the plugin's `bin/`. Flow before a commit: `using-subteams` §6.7. Details: README "Project suites & UI verification".
+
+```bash
+subteams-tests status              # what the commit gate requires for the staged content
+subteams-tests run <suite>         # run one suite and record a receipt
+subteams-tests run --all-auto      # run every `run: auto` suite with receipts
+subteams-tests --init-contract     # print a test-contract draft for CLAUDE.md (commit it alone)
+subteams-browser setup             # one-time Chrome for Testing download (~150 MB) when there is no system Chrome
+```
+
+Under a test contract only `subteams-tests run` counts — a raw `npm test` leaves no receipt.
 
 ---
 
@@ -115,8 +131,9 @@ Needs the Codex CLI on a machine **without a Russia IP block** (`codex login` �
 
 - **Model:** default = whatever `~/.codex/config.toml` is set to. Change it there and the
   critics inherit it natively — no plugin edit.
-- **Override:** `export CROSS_REVIEW_MODEL=<model>` and/or `export CROSS_REVIEW_EFFORT=high`
-  (effort defaults to `high` — never the shallow Codex default).
+- **Override:** `export CROSS_REVIEW_MODEL=<model>` and/or `export CROSS_REVIEW_EFFORT=high`.
+- **Effort:** unset → Codex uses its own config; the plugin forces nothing. Set
+  `model_reasoning_effort = "high"` (or above) in `~/.codex/config.toml` — Codex's bare default can be a shallow scan.
 - If Codex is unavailable, cross-review gracefully skips; the Claude critics still run.
 - `openai/codex-plugin-cc` (OpenAI's own plugin) can be installed separately for interactive
   `/codex:review` — it is independent of this plugin's cross-review.
@@ -145,10 +162,15 @@ Serialization — **`gate-lock` always OUTSIDE `commit-lock`, never the reverse*
 order is a real ABBA deadlock; shell cannot enforce it, so it is on you):
 
 ```bash
-# NOTE the bash -c: `gate-lock -- a && b` would run only `a` under the lock and `b` outside it.
-$CO gate-lock   -- bash -c 'npx tsc --noEmit && npx vitest run'   # heavy gate: minutes, one at a time
-$CO commit-lock -- git commit -m "…"                              # fast: serializes shared .git refs
+$CO gate-lock   -- subteams-tests run --all-auto   # heavy gate: minutes, one at a time; records receipts
+CLAUDE_SUBTEAMS_INSTANCE_ID=<you> subteams-tests status   # what the commit gate still requires (using-subteams §6.7)
+/abs/path/to/scripts/coord.sh commit-lock -- git commit -m '…'   # literal path: the gate cannot resolve $CO from an earlier command
 ```
+
+Under a test contract a raw `npm test` / `vitest` under the lock leaves no receipt and does not count, and the commit
+gate cannot resolve `$CO` set in an earlier command — on the commit line write coord.sh's literal path, or set
+`CO=/abs/…/coord.sh` earlier on the same line. A compound gate still needs `bash -c '…'` — `gate-lock -- a && b` runs
+only `a` under the lock.
 
 Landing a branch from a worktree: **`multi-instance` §7**. The merge runs **in the main
 checkout**, not the worktree — run it from the worktree and `git merge` prints

@@ -33,6 +33,7 @@ claude --version
 ```
 
 **Pass:** exits 0 and prints a version string.
+**Warn (do not stop):** version below 2.1.284 — the plugin's `bin/` commands (`subteams-tests`, `subteams-browser`) and the SubagentStart/Stop data the test receipts need require Claude Code ≥ 2.1.284. Tell the user to update Claude Code.
 **Fail:** command not found. Claude Code CLI is not on this shell's PATH. Before stopping, confirm with the user: Claude Code may be installed as an IDE extension with the CLI not exposed to this shell. If the user confirms it is present, proceed. If Claude Code is genuinely absent, stop — the plugin has nothing to load into.
 
 ### 1c. git
@@ -44,6 +45,15 @@ git --version
 **Pass:** exits 0.
 **Fail:** not found. Stop — git is required for marketplace cloning.
 
+### 1d. Node/npm and Chrome (UI checks)
+
+```bash
+command -v node && command -v npm
+```
+
+**Pass:** both paths printed.
+**Warn (do not stop):** missing. Node/npm are needed for the one-time agent-browser install on first use of `subteams-browser` (and for the TypeScript check in `pre-commit-gate`). The live UI review also needs a system Chrome, or a one-time `subteams-browser setup` (downloads Chrome for Testing, ~150 MB). Without Chrome the live review is reported as not done; e2e suites still run if the project's own toolchain is present. Continue installation.
+
 ### 1e. jq (hooks dependency)
 
 ```bash
@@ -51,7 +61,7 @@ jq --version
 ```
 
 **Pass:** exits 0.
-**Warn (do not stop):** not found. Hooks require jq to parse JSON; install it before working on projects that use the hooks (`apt install jq` / `brew install jq` / `apk add jq`). Continue installation.
+**Warn (do not stop):** not found. Hooks require jq to parse JSON: without it the review gate, the test gate and the test receipts are off, and in a project with a test contract every commit is blocked until jq is installed. Install it before working on projects that use the hooks (`apt install jq` / `brew install jq` / `apk add jq`). Continue installation.
 
 ### 1f. superpowers conflict check
 
@@ -220,19 +230,7 @@ After steps 1–3 pass, compile and deliver this report.
 
 2. **Run the smoke test** (step 5) in the reloaded session to confirm functional state.
 
-3. **Add the CLAUDE.md activation snippet** to your project's `CLAUDE.md` (or `~/.claude/CLAUDE.md` for global activation). Copy this block:
-
-   ```markdown
-   ## Development Methodology
-
-   For development tasks use the claude-subteams plugin (orchestrator + specialized sub-team agents).
-   Invoke skill "claude-subteams:using-subteams" before significant development work.
-   For small fixes — act directly, invoke code-review after if logic changed. Any logic change gets code-reviewer (and devils-advocate for non-trivial logic) — no "it's just one line" exemption.
-   Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect.
-   Building/editing agents, prompts, skills, or multi-agent systems → invoke agent-architect + prompt-engineer + prompt-evaluator (using-subteams Section 6.5).
-   ```
-
-   Also available at: `templates/claudemd-snippet.md` inside the plugin's installed directory (locate with `find "$HOME/.claude/plugins" -name "claudemd-snippet.md" 2>/dev/null`).
+3. **Add the CLAUDE.md activation snippet** to your project's `CLAUDE.md` (or `~/.claude/CLAUDE.md` for global activation). The snippet is the file `templates/claudemd-snippet.md` inside the plugin's installed directory — locate it with `find "$HOME/.claude/plugins" -name "claudemd-snippet.md" 2>/dev/null` and copy its full content. Do not retype it from memory or from an older copy: that file is the only current version.
 
 4. **superpowers conflict** — if detected in step 1f and not disabled, remove `"superpowers@claude-plugins-official": true` from `~/.claude/settings.json` manually.
 

@@ -188,7 +188,8 @@ Exit codes of `subteams-tests`: 0 ok · 1 error / something missing (`status`) �
 
 **Switches** — `CLAUDE_SUBTEAMS_SKIP_TEST_GATE`, `CLAUDE_SUBTEAMS_NO_AUTO_INSTALL`, `CLAUDE_SUBTEAMS_AGENT_BROWSER`: see [Environment variables](#environment-variables).
 
-**Cost** — not measured yet; the acceptance run (about 15 headless sessions, plan Task 8) measures it. Plan estimate: a live review 2–5 min and 20–50K sonnet tokens per check; the e2e layer costs what the project's suite takes (2.6 min in the project the release was audited on).
+**Cost** — measured on the 1.50 acceptance (Nov 2026, Opus headless, 19 sessions, about $12.6 in total). The figures are whole sessions (implement, review, checks, commit), not the marginal cost of one check: without ui-tester / test-engineer $0.15–0.56 and 18–140 s on the fixture app; with one or both $0.47–1.26 and 2–5.5 min; a greenfield app (E9) and a webchat change in a real project (E8: unit + e2e + ui-tester) about $1.95 and 8–14 min each.
+What raises the cost is dispatching ui-tester / test-engineer and the size of the task; each gate deny (1–3 per commit in acceptance, 2 on average) adds a turn. Tokens per check were not measured separately.
 
 ### New project: UI testing in three steps
 
@@ -261,7 +262,7 @@ All 59 skills (auto-loaded on demand by description match; `using-subteams` load
 | ops | `mobile-development` | Building, architecting, and deploying React Native, Flutter, or native apps. |
 | ops | `i18n-localization` | Internationalization, translation workflows, and locale-specific formatting. |
 | research | `live-research` | Fetch current library/API docs before coding against fast-moving SDKs (`/research`, `/whatsnew`). |
-| cross-model | `cross-review` | GPT (Codex) + Claude critics in parallel to break model-monoculture blind spots (`/cross-review`, `/rescue`); Claude-only when Codex is down. |
+| cross-model | `cross-review` | GPT (Codex) + Claude critics in parallel, plus the Gemini lane when agy is available, to break model-monoculture blind spots (`/cross-review`, `/rescue`); a missing lane is skipped and named — Claude-only when both Codex and agy are down. |
 | coordination | `multi-instance` | Opt-in coordination for several Claude Code instances on one repo: claim before edit, `commit-lock` for commits/merges, `gate-lock` to serialize heavy gates, mailbox + auto-notify, soft cap of 5. Owns the Merge Protocol (§7) for landing a worktree branch on `main`. Portable (file-based, not agent-teams). `CLAUDE_SUBTEAMS_MULTI_INSTANCE=1`. |
 
 ## Agents
@@ -278,7 +279,7 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 | `doc-agent` | sonnet | Documentation freshness checks and updates. Write access, no Bash. |
 | `researcher` | opus | Deep technology research. Read + web (WebSearch, WebFetch). |
 | `security-auditor` | opus | Security-sensitive changes, secrets, and auth flows. Read-only access. |
-| `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline + Standard (every logic change). |
+| `devils-advocate` | opus | Challenges assumptions: "what if?", edge cases, scale, necessity. Full pipeline; on Standard only for non-trivial logic (code-reviewer covers every logic change). |
 | `developer` | sonnet | Implementation specialist: modular code, minimal diffs, style preservation. |
 | `ui-tester` | sonnet | Runs the project's e2e suites via `subteams-tests`, reviews changed screens live at 320/1280 px via `subteams-browser` with mandatory screenshots, lists improvements. Monkey mode on request. |
 | `improvement-agent` | opus | Proactive codebase analyst. Finds improvement opportunities, returns prioritized proposals (read-only). |
@@ -295,10 +296,11 @@ Every agent below carries a built-in honesty invariant right after "Who You Are"
 
 | Event | Hook | Purpose |
 |---|---|---|
-| `SessionStart` | `session-start` | Checks for stale BACKLOG items and active plans from previous sessions. No prompt injection — activation via CLAUDE.md. |
+| `SessionStart` | `session-start` | Checks for stale BACKLOG items and active plans from previous sessions. Since 1.50 it also injects, once per repository, an offer to add a test contract when the repo has UI files or an e2e suite and neither a contract nor the `none` marker; and, at every start without `jq`, warns the user that the gates are off and repos with a contract block commits. Methodology activation stays in CLAUDE.md. |
 | `PreToolUse` (Bash) | `pre-commit-gate` | Before a `git commit`: runs tsc / mypy / go build and requires a finished code-reviewer run in the session when the commit includes code. Counts what the command itself will commit (`git add … && git commit`, `-a`, pathspec), parsed by `hooks/lib-gitcmd.sh`; the block reason goes to stderr so the model sees it. Size signal past 400 lines. Test gate: under a test contract accepts only the allowed commit-line shape, computes the tree the commit will record (`hooks/lib-commitscan.sh`, a statement-level view of the line, plus `scripts/lib-testclass.sh`) and compares it with recorded suite runs and ui-tester / test-engineer checks — blocks under a test contract, warns without one, silent under the `none` marker (see [Project suites & UI verification](#project-suites--ui-verification)). |
 | `PreToolUse` (Bash) | `pre-push-check` | Advisory (`additionalContext`) on a push to main/master or a force push; never blocks. |
 | `PreToolUse` (Edit/Write/MultiEdit/NotebookEdit/Bash) | `autonomy-gate` | Enforces scoped autonomy grants — blocks out-of-scope or cap-exceeding writes and edits to the grant's own run record before they land. Inert unless `CLAUDE_SUBTEAMS_AUTONOMY` is set. Delegates scope/cap checks to `scripts/autonomy-check.sh`. Contains agent drift off scope; not a sandbox against a shell-equipped agent — see [ADR-007](docs/adr/007-autonomy-enforcement-architecture.md). |
+| `PreToolUse` (Edit/Write/MultiEdit) | `convention-preflight` | Inert unless `CLAUDE_SUBTEAMS_AUTONOMY` is set. In an autonomous run, denies growing a code file past 400 lines (an edit adding more than 40 net lines to a file already over 400, or a single write over 400 lines that creates or grows a file). Override: `CLAUDE_SUBTEAMS_SKIP_PREFLIGHT=1`. |
 | `SubagentStart` / `SubagentStop` | `subagent-rails` | Start: injects a static rails pointer + honesty reminder into every spawned subagent (plugin text only, never repo content). Stop: writes the review marker `pre-commit-gate` checks, when a code-reviewer subagent finishes; for ui-tester / test-engineer, a receipt with the agent's status and the content it checked — in every repository where the agent left suite or screenshot receipts (another repository than the session's only if the agent's transcript names its absolute root); a final answer without a parsable first-line `Status:` leaves a `rejected` receipt the gate names. 20 s timeout. |
 | `PostToolUse` (Edit/Write) | `post-edit-check` | Async check after file edits; warnings delivered as `additionalContext`. |
 | `Stop` | `session-end-reminder` | **Advisory** documentation reminder, fired **at most once per undocumented changeset** (marker keyed on `session_id` stores the reminded file set; re-fires only for new undocumented files after a cooldown, default 45 min via `CLAUDE_SUBTEAMS_DOC_REMIND_COOLDOWN_MIN`). Detects unstaged code changes without `*.md` updates and delivers a hybrid, never-blocking notice: a framed advisory to the model via `additionalContext` ("not a task — surface to the user") + one `systemMessage` line to the operator. Escalates the advisory wording on breaking signals (file deletions, schema/migration files) — see the `doc-quality-gate` skill. Escape hatch: `CLAUDE_SUBTEAMS_SKIP_DOC_CHECK=1`. See [ADR-009](docs/adr/009-session-end-hybrid-advisory.md) and "Configuration" below. |

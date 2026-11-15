@@ -1,5 +1,5 @@
 #!/bin/bash
-# Фикстура приёмки 1.50 (docs/plans/active/2026-11-13-testing-ui-1.50.0.md, Задача 8).
+# Фикстура приёмки 1.50 (docs/plans/completed/2026-11-13-testing-ui-1.50.0.md, Задача 8).
 # Собирает свежий git-репозиторий с маленьким веб-приложением:
 #   Node без зависимостей (node:http), форма заявки, POST /api/lead,
 #   шапка «на грани переполнения» на 320px, Playwright Test с webServer,

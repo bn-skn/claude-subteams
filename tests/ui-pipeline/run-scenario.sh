@@ -1,5 +1,5 @@
 #!/bin/bash
-# Один прогон приёмки 1.50 (docs/plans/active/2026-11-13-testing-ui-1.50.0.md, Задача 8).
+# Один прогон приёмки 1.50 (docs/plans/completed/2026-11-13-testing-ui-1.50.0.md, Задача 8).
 #
 #   run-scenario.sh <E1..E12|SMOKE> <workdir>   — подготовить фикстуру и запустить ОДНУ headless-сессию
 #   run-scenario.sh --list                      — id и промпты

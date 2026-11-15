@@ -105,7 +105,7 @@ This is the core. For every function, systematically attack using the full check
 
 ### Step 5: RUN — Execute Everything
 
-1. Execute the FULL test suite — not just new tests
+1. Execute the FULL test suite — not just new tests. Iterate with the project's runner; the final run goes through `subteams-tests run <suite>` (or `run --all-auto`) — only that run is recorded for the commit gate (`agents/test-engineer.md` step 7)
 2. Read ALL output line by line — do not skim
 3. Check exit code — zero means pass, anything else means fail
 4. Count failures and errors separately
@@ -122,6 +122,8 @@ This is the core. For every function, systematically attack using the full check
 - Severity (critical / high / medium)
 
 NEVER downgrade a blocker. NEVER say "probably fine." Fix or escalate.
+
+**Status line (test-engineer):** PASS → `pass`; BLOCKER (any red suite, including a new test exposing a real bug) → `issues-found`. `blocked` is only for tests that could not be run at all — see the Status section of `agents/test-engineer.md`. test-engineer does not fix the code under test: a test exposing a real bug stays red and is reported.
 
 ## Attack Vector Checklist (25 Vectors)
 

@@ -37,6 +37,13 @@ In this order — the first two are structure debt from review round 3; (4) and 
 - [ ] **macOS / bash 3.2 verification** — the gate, `lib-commitscan.sh`, `lib-testclass.sh` and `subteams-browser` are written bash-3.2-compatible but were not run on macOS before release.
 - [ ] **`scripts/gemini/review.sh` hardcodes `-t 330`** (outer timeout 330 s → agy `--print-timeout` 300 s, 5 min) — timed out on a ~1,500-line gate diff in round 4; the workaround was calling `agy-run.sh -m pro -j -t 900` directly. Make the timeout a flag, or scale it with the diff size.
 
+Acceptance observations (1.50.0, 15.11.2026 — `tests/ui-pipeline/runs/acc-35eea36/findings.md`, gitignored):
+- [ ] **A visible UI change stays under the small-change threshold** — a new form field or a visible message was 4–6 lines in 1–2 UI files (E1, E3, E11), under `small_change` 10/2, so no ui-tester and no screenshots. Owner reviewed 15.11.2026 and kept 10/2; revisit if UI regressions slip through.
+- [ ] **ui-tester / test-engineer dispatched mostly only after a gate deny** (E2, E7, E11). Better in the E8 rerun (acc-c015f3a): ui-tester dispatched before any test-gate deny.
+- [ ] **About 2 gate denies per commit** in acceptance (36 over 18 commits; 3 in most first-pass sessions) (review gate, commit-line shape, missing suites/checks), each recovered in one turn — a cost and friction signal.
+- [ ] **E9 (empty directory) created no contract and no scaffold** — no test suite, no Playwright, `--init-contract` never used; the model built and committed the app without them.
+- [ ] **Screenshots are counted per agent run, not per changed screen** — a ui-tester `pass` needs ≥2 screenshots in total during its run (`scripts/lib-testclass.sh` ~:1035), so two screenshots of one screen cover a change to several.
+
 ## Ideas
 
 - ~~**pre-commit-gate: false-positive matcher**~~ CLOSED in 1.34.3 (anchored statement match + env-prefix tolerance). Was: — a non-echo-leading command containing literal `git commit` inside a string (`make build && echo "then git commit"`) passes the top filter; with staged unreviewed code it would block a harmless command. Pre-existing class (review F4, 1.33); fix = match `git commit` only as the statement's command position, not substring.

@@ -1,7 +1,7 @@
 ---
 name: using-subteams
 description: "Use before any significant development work — establishing orchestrator methodology with a roster of specialized agents, quality pipeline, and team-based development. Invoke when building features, fixing bugs, refactoring, planning architecture, or building/editing agents, prompts, skills, and multi-agent systems. Also invoke before producing a document deliverable with subagents — spec, requirements, TZ, report, proposal — to set the size budget before any writer starts (Section 1.1)."
-version: 1.13.0
+version: 1.13.1
 ---
 
 # Using Subteams — Orchestrator Meta-Skill
@@ -256,7 +256,7 @@ The docs are populated by the orchestrator in-context during `brainstorming` (Ar
 For lightweight tasks (**zero logic** — purely mechanical, any file count), the pipeline is:
 1. Implement (you or developer agent)
 2. tsc/lint check
-3. Commit
+3. Commit. Project with a test contract: `subteams-tests status` first; if it names suites or agents, do them in Section 6.7 order (ui-tester → test-engineer → `subteams-tests run --all-auto`), stage, `subteams-tests status` again. A mechanical change above the small-change threshold still needs test-engineer — the gate counts lines, not logic
 
 No review, no plan, no backup — justified ONLY because a mechanical change has nothing to reason about. The moment the change touches behavior (a condition, calculation, control flow, contract, data shape) it is no longer lightweight: **escalate to Standard** so at least code-reviewer sees it (and devils-advocate too if the logic is non-trivial — see Section 6 calibration). When unsure whether it is "logic," treat it as logic and escalate.
 

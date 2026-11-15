@@ -15,6 +15,16 @@ rm -rf "$HOME/.claude/plugins/marketplaces/bn-skn"
 
 Then follow the primary path below.
 
+## Requirements
+
+- **Claude Code ≥ 2.1.284** — the plugin's `bin/` commands (`subteams-tests`, `subteams-browser`) and the test receipts depend on it.
+- **git** — marketplace cloning.
+- **jq** — used by the hooks; mandatory in a project with a test contract (without it the commit gate blocks every commit there).
+- **Node.js / npm** — the TypeScript check in `pre-commit-gate` and the one-time agent-browser install.
+- **Chrome** (system install), or run `subteams-browser setup` once — for the live UI review.
+
+Details: README "Requirements" and "Project suites & UI verification".
+
 ## Primary path (recommended)
 
 Inside Claude Code, run:
@@ -58,17 +68,7 @@ The CLI manages the final install location. Do not manually place files in `~/.c
 
 ### Step 3: Activate in your project
 
-Add this to your project's `CLAUDE.md`:
-
-```markdown
-## Development Methodology
-
-For development tasks use the claude-subteams plugin (orchestrator + specialized sub-team agents).
-Invoke skill "claude-subteams:using-subteams" before significant development work.
-For small fixes — act directly, invoke code-review after if logic changed. Any logic change gets code-reviewer (and devils-advocate for non-trivial logic) — no "it's just one line" exemption.
-Available agents: code-reviewer, test-engineer, architecture-guard, design-critic, prompt-evaluator, doc-agent, researcher, security-auditor, devils-advocate, developer, ui-tester, improvement-agent, gpt-code-reviewer, gpt-devils-advocate, prompt-engineer, agent-architect.
-Building/editing agents, prompts, skills, or multi-agent systems → invoke agent-architect + prompt-engineer + prompt-evaluator (using-subteams Section 6.5).
-```
+Copy the content of `templates/claudemd-snippet.md` (in the cloned repo, or in the installed plugin: `find "$HOME/.claude/plugins" -name "claudemd-snippet.md" 2>/dev/null`) into your project's `CLAUDE.md`. That file is the current snippet; README "Activation" shows an excerpt.
 
 ### Step 4: Verify
 

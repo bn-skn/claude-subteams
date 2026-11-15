@@ -3,7 +3,18 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [1.50.0] - 2026-11-13
+## [1.50.1] - 2026-11-15
+
+Docs and skills only — places the 1.50 test flow (`using-subteams` §6.7) did not reach. No hook, script or `bin/` change.
+
+### Fixed
+- Raw test runs that leave no receipt under a test contract replaced by `subteams-tests run` / the §6.7 sequence: `multi-instance` §7.2 gate-lock example, `docs/CHEATSHEET.md`, `writing-plans` task template (commit step), `subagent-driven-dev` (final review, verification rules), `executing-plans` quality gate, `adversarial-testing` Step 5 (+ PASS / BLOCKER mapped to test-engineer's `pass` / `issues-found`; `blocked` only when tests could not run), `using-subteams` Lightweight pipeline (1.13.1).
+- `INSTALL.md` and `llms-install.md` no longer carry a stale copy of the activation snippet — they point to `templates/claudemd-snippet.md`. Requirements added/updated there: Claude Code ≥ 2.1.284, jq mandatory under a test contract, Node/npm and Chrome (or `subteams-browser setup`) for the UI check.
+- README: devils-advocate runs on Standard only for non-trivial logic; `cross-review` row and CHEATSHEET `/cross-review` mention the Gemini lane; hooks table adds `convention-preflight` and describes what `session-start` injects since 1.50; the "Cost" paragraph (and ADR-011) carries the measured acceptance figures instead of "not measured yet".
+- CHEATSHEET: version, a `subteams-tests` / `subteams-browser` section, and the Codex effort note aligned with `cross-review` (the plugin forces no effort).
+- BACKLOG: acceptance observations filed under the 1.50.0 follow-ups; the 1.50 plan's task checkboxes ticked; plan path in `tests/ui-pipeline/` comments → `docs/plans/completed/`; the 1.50.0 heading date corrected to its release day (15.11).
+
+## [1.50.0] - 2026-11-15
 
 Project tests and UI checks that actually run. Audit of 31 days of claudebot sessions (13.11.2026): test-engineer and ui-tester never dispatched, the project's e2e suite never run. Decisions R1–R12 and residuals: [ADR-011](docs/adr/011-project-suites-and-ui-verification.md); plan `docs/plans/completed/2026-11-13-testing-ui-1.50.0.md`.
 

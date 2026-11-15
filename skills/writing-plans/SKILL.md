@@ -115,6 +115,8 @@ Expected: PASS
 
 - [ ] **Step 5: Commit**
 
+In a project with a test contract, first run the using-subteams §6.7 sequence: `subteams-tests status` → the agents it names (ui-tester → test-engineer; the orchestrator dispatches them — an implementer subagent cannot) → `subteams-tests run --all-auto` → stage → `subteams-tests status` again.
+
 ```bash
 git add tests/path/test.py src/path/file.py
 git commit -m "feat: add specific feature"

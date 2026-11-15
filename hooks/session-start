@@ -1,6 +1,6 @@
 #!/bin/bash
-# SessionStart hook — minimal, no prompt injection
-# Only checks for stale state from previous session.
+# SessionStart hook — checks stale state from the previous session; since 1.50 also
+# injects a once-per-repo test-contract offer and, without jq, a warning (see below).
 # Methodology activation is controlled by CLAUDE.md, not by this hook.
 #
 # 1.50 (IMPL-PLAN testing-ui): (a) jq missing → a warning the USER sees

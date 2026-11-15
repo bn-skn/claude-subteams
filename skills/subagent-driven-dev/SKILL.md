@@ -49,13 +49,14 @@ For each task:
    - If no: implementer fixes, quality reviewer re-reviews
    - If yes: mark task complete
 5. **Update the plan-of-record:** if a living plan-of-record exists (`docs/plans/active/IMPL-PLAN-*.md`, see the `living-plan` skill), flip the matching acceptance criterion's status (TODO → WIP → DONE, or BLOCKED / TBD where apt) and recompute its Rollup row as the task closes; validate with `scripts/check-plan.sh` before declaring the plan done. This skill is a plan executor too — the matrix must stay in lockstep, not die because `subagent-driven-dev` was chosen over `executing-plans`.
-6. Move to next task
+6. **Commit (if the task ends in one) — the orchestrator commits, not the implementer.** Project with a test contract: using-subteams §6.7 first — `subteams-tests status` → the agents it names (ui-tester → test-engineer; the orchestrator dispatches them — an implementer subagent cannot) → `subteams-tests run --all-auto` → stage → `subteams-tests status` again. The small-change threshold is cumulative, so per-task commits hit it early.
+7. Move to next task
 
 ### Step 3: Final Review
 
 After all tasks complete:
 1. Dispatch final code reviewer for the entire implementation
-2. Verify all tests pass together
+2. Verify all tests pass together — per using-subteams §6.7: ui-tester if UI changed, then test-engineer if logic changed (each above the small-change threshold), then `subteams-tests run --all-auto` → stage → `subteams-tests status`
 3. **REQUIRED SUB-SKILL:** Use claude-subteams:finishing-branch
 
 ## Blocker Protocol
@@ -87,7 +88,7 @@ When a subagent reports BLOCKED:
 **MUST verify every changed file yourself.** Do not trust subagent reports. After each task:
 
 1. Check that claimed file changes actually exist
-2. Run the tests yourself — do not accept "tests pass" without running them
+2. Run the tests yourself through `subteams-tests run` — do not accept "tests pass" without running them (a raw `npm test` leaves no receipt for the commit gate)
 3. Verify no unintended changes to files outside scope
 4. Confirm the implementation matches the spec (that is what the spec reviewer does)
 5. If a living plan-of-record exists, confirm its matching criterion + Rollup row were updated for this task — `scripts/check-plan.sh` output is the evidence, not memory.
