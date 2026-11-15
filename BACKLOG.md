@@ -35,6 +35,7 @@ In this order — the first two are structure debt from review round 3; (4) and 
 - [ ] **One-shot per-commit user override** (owner deferred 14.11) — a user-only way to let exactly one commit through, narrower than `CLAUDE_SUBTEAMS_SKIP_TEST_GATE=1`.
 - [ ] **Warn once per session in repos without a contract** (owner deferred 14.11) — the no-contract warning currently fires on every commit.
 - [ ] **macOS / bash 3.2 verification** — the gate, `lib-commitscan.sh`, `lib-testclass.sh` and `subteams-browser` are written bash-3.2-compatible but were not run on macOS before release.
+- [ ] **`scripts/gemini/review.sh` hardcodes `-t 330`** (outer timeout 330 s → agy `--print-timeout` 300 s, 5 min) — timed out on a ~1,500-line gate diff in round 4; the workaround was calling `agy-run.sh -m pro -j -t 900` directly. Make the timeout a flag, or scale it with the diff size.
 
 ## Ideas
 
