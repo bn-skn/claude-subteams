@@ -53,7 +53,7 @@ CS_GITVARS='GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_COMMON
 
 cs__reset() {
   CS_KIND=(); CS_TXT=(); CS_SUB=(); CS_ARGS=(); CS_DIR=(); CS_DRAW=(); CS_ENV=(); CS_GENV=()
-  CS_PEXP=(); CS_REDIR=(); CS_X=(); CS_RUN=(); CS_GOPT=(); CS_SEP=(); CS_DEPTH=(); CS_CFG=(); CS_LITPS=(); CS_KW=(); CS_UGLOB=()
+  CS_PEXP=(); CS_REDIR=(); CS_X=(); CS_RUN=(); CS_GOPT=(); CS_SEP=(); CS_DEPTH=(); CS_CFG=(); CS_LITPS=(); CS_KW=(); CS_UGLOB=(); CS_QCMD=(); CS_ENVS=(); CS_ACOMMIT=(); CS_VWRAP=()
   CS_VN=(); CS_VV=(); CS_RELIABLE=1; CS_CUR="$PWD"; CS_CURRAW=""; CS_LGENV=0; CS_LEXP=0; CS_LCFG=0
   CS_SHAPE=""
 }
@@ -218,6 +218,8 @@ cs__tokenize() {
     function flag(r) { if (!(r in seen)) { seen[r] = 1; print FL r } }
     # quoted / escaped > * ? [ are marked (\001-\004) so later checks can tell
     # `echo "a -> b"` from a redirection and "src/[id]" from a shell glob
+    # \005 (in a token): the word was quoted / escaped / ANSI-C somewhere — so a
+    # COMMAND word built that way ("g"it, g\it, $'\x67it') is visible as such
     function mk(c) { return c == ">" ? "\001" : c == "*" ? "\002" : c == "?" ? "\003" : c == "[" ? "\004" : c }
     BEGIN { RS = "\001"; US = "\037"; GS = "\035"; FL = "\034"; s = ""; q = ""; tok = ""; has = 0; out = ""; nt = 0; nh = 0; ar = 0; bad = 0; held = ""; hsep = "" }
     { s = s $0 }
@@ -251,16 +253,16 @@ cs__tokenize() {
         }
         if (c == "\\") {
           nx = substr(s, i + 1, 1); i++
-          if (nx != "\n") { tok = tok mk(nx); has = 1 }
+          if (nx != "\n") { tok = tok "\005" mk(nx); has = 1 }
           continue
         }
-        if (c == "$" && substr(s, i + 1, 1) == "\047") { q = "A"; has = 1; i++; continue }
+        if (c == "$" && substr(s, i + 1, 1) == "\047") { q = "A"; tok = tok "\005"; has = 1; i++; continue }
         if (c == "$" && substr(s, i + 1, 1) == "(") {
           if (substr(s, i, length(E1)) == E1) { tok = tok E1; has = 1; i += length(E1) - 1; continue }
           flag("command substitution $( )")
         }
         if (c == "`" && substr(s, i, length(E2)) == E2) { tok = tok E2; has = 1; i += length(E2) - 1; continue }
-        if (c == "\047" || c == "\"") { q = c; has = 1; continue }
+        if (c == "\047" || c == "\"") { q = c; tok = tok "\005"; has = 1; continue }
         if (c == " " || c == "\t") { flush(); continue }
         if (c == "#" && !has) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
         if (c == "<" && substr(s, i + 1, 1) == ">") flag("<> read-write redirection")
@@ -342,6 +344,36 @@ cs__record() { # <kind> <tokens from index i…> uses locals of cs__stmt via dyn
   CS_REDIR[k]="$CS_R_REDIR"; CS_X[k]="$CS_R_X"; CS_RUN[k]="${CS_R_RUN:-0}"
   CS_GOPT[k]="${CS_R_GOPT:-0}"; CS_SEP[k]="${CS_STMT_SEP:-n}"; CS_DEPTH[k]="${CS_STMT_DEPTH:-0}"
   CS_CFG[k]="$CS_R_CFG"; CS_LITPS[k]="${CS_R_LITPS:-0}"; CS_KW[k]="${CS_R_KW:-0}"; CS_UGLOB[k]="${CS_R_UGLOB:-0}"
+  CS_QCMD[k]="${CS_R_QCMD:-0}"; CS_ENVS[k]="${CS_R_ENVS:-0}"; CS_ACOMMIT[k]="${CS_R_ACOMMIT:-0}"
+  CS_VWRAP[k]="${CS_R_VWRAP:-0}"
+}
+
+# cs__argcommit <first index> (uses T / n of cs__stmt) -> CS_R_ACOMMIT=1 when the
+# WORDS `git [global options] commit` sit among the arguments of a statement that is
+# not itself modelled as a git command: `./wrap.sh git commit`, `find -exec git
+# commit`, `watch git commit`, `$UNKNOWN commit-lock -- git commit`. Word by word: a
+# quoted multi-word string (echo "… && git commit", gh --body '…', ssh host '…') is
+# ONE argument and never equals `git` — prose stays ignored (round 5, items 1 and 9);
+# separately quoted words ("git" "commit") still reach a wrapper as git + commit.
+cs__argcommit() {
+  local p q
+  CS_R_ACOMMIT=0
+  p="$1"
+  while [ "$p" -lt "$n" ]; do
+    if [ "${T[$p]##*/}" = git ]; then
+      q=$((p + 1))
+      while [ "$q" -lt "$n" ]; do
+        case "${T[$q]}" in
+          -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env) q=$((q + 2)) ;;
+          -*) q=$((q + 1)) ;;
+          *) break ;;
+        esac
+      done
+      if [ "$q" -lt "$n" ] && [ "${T[$q]}" = commit ]; then CS_R_ACOMMIT=1; return 0; fi
+    fi
+    p=$((p + 1))
+  done
+  return 1
 }
 
 # cs_scan "<command line>" [depth] [inherited env 0/1] [inherited git env 0/1]
@@ -371,7 +403,7 @@ cs_scan() {
 cs__stmt() { # uses T from cs_scan
   local depth="$1" n=${#T[@]} i=0 w base wrap="" need_pos=0 j k v nm assigns=0 dir d raw
   local CS_R_ENV="$2" CS_R_GENV="$3" CS_R_X=0 CS_R_REDIR="" CS_R_SUB="" CS_R_ARGS="" CS_R_RUN=0 CS_STMT_TXT
-  local CS_R_GOPT=0 CS_R_CFG="" CS_R_LITPS=0 CS_R_KW=0 CS_R_UGLOB=0 PRE_REDIR=0
+  local CS_R_GOPT=0 CS_R_CFG="" CS_R_LITPS=0 CS_R_KW=0 CS_R_UGLOB=0 PRE_REDIR=0 CS_R_QCMD=0 CS_R_ENVS=0 CS_R_ACOMMIT=0 CS_R_VWRAP=0 CS_R_VVAL=""
   local CS_R_DIR="" CS_R_DRAW="" CS_R_DIRSET=0
   local -a TM
   [ "$CS_LGENV" = 1 ] && CS_R_GENV=1
@@ -379,7 +411,7 @@ cs__stmt() { # uses T from cs_scan
   # TM keeps the quote markers of cs__tokenize (redirections, shell globs); T is the
   # plain text every other use sees
   TM=("${T[@]}")
-  T=("${T[@]//$'\001'/>}"); T=("${T[@]//$'\002'/*}"); T=("${T[@]//$'\003'/?}"); T=("${T[@]//$'\004'/[}")
+  T=("${T[@]//$'\001'/>}"); T=("${T[@]//$'\002'/*}"); T=("${T[@]//$'\003'/?}"); T=("${T[@]//$'\004'/[}"); T=("${T[@]//$'\005'/}")
   CS_STMT_TXT=$(printf '%s ' "${T[@]}" | tr -d '\000-\037'); CS_STMT_TXT="${CS_STMT_TXT% }"
   while :; do
     while [ "$i" -lt "$n" ]; do
@@ -399,8 +431,9 @@ cs__stmt() { # uses T from cs_scan
               env:-u|env:--unset) i=$((i + 2)) ;;
               env:--unset=*) i=$((i + 1)) ;;
               env:--chdir=*) cs__envdir "${w#--chdir=}"; CS_R_CFG="${CS_R_CFG:-env --chdir}"; i=$((i + 1)) ;;
-              env:-S|env:--split-string) CS_R_CFG="${CS_R_CFG:-env $w}"; i=$((i + 2)) ;;
-              env:*) CS_R_CFG="${CS_R_CFG:-env $w}"; i=$((i + 1)) ;;   # -S…, -i, -0, --split-string=… : only NAME=value and -u pass
+              env:-S|env:--split-string) CS_R_CFG="${CS_R_CFG:-env $w}"; CS_R_ENVS=1; i=$((i + 2)) ;;
+              env:-S?*|env:--split-string=*) CS_R_CFG="${CS_R_CFG:-env $w}"; CS_R_ENVS=1; i=$((i + 1)) ;;
+              env:*) CS_R_CFG="${CS_R_CFG:-env $w}"; i=$((i + 1)) ;;   # (-S… handled above)   # -S…, -i, -0, --split-string=… : only NAME=value and -u pass
               sudo:-u|sudo:-g|sudo:-h|sudo:-C|sudo:-p|sudo:-r|sudo:-t|sudo:-U|doas:-u|doas:-C|nice:-n|ionice:-c|ionice:-n|ionice:-p|ionice:-P|ionice:-t|timeout:-s|timeout:-k|stdbuf:-i|stdbuf:-o|stdbuf:-e|flock:-w|flock:-E|xargs:-I|xargs:-n|xargs:-P|xargs:-L|xargs:-d|xargs:-E|xargs:-s|xargs:-a)
                 i=$((i + 2)) ;;
               *) i=$((i + 1)) ;;
@@ -441,8 +474,24 @@ cs__stmt() { # uses T from cs_scan
       fi
       return 0
     fi
-    w="${T[$i]}"; base="${w##*/}"
+    w="${T[$i]}"
+    # a command word held in a variable assigned a literal earlier in the line
+    # (`C=/abs/coord.sh; $C commit-lock -- …`, `W=flock; $W f git commit`): read it
+    # as that literal and look again (item 9) — an unknown one stays as it is
+    case "$w" in
+      *'$'*)
+        if cs_expand "$w" && [ -n "$CS_E" ]; then
+          case "$CS_E" in
+            *[[:space:]]*) CS_R_VVAL="$CS_E" ;;           # several words (G="git -C /x"): not modelled
+            *) T[i]="$CS_E"; TM[i]="$CS_E"; CS_R_VWRAP=1; continue ;;
+          esac
+        fi ;;
+    esac
+    base="${w##*/}"
     if [ "$base" = bash ] || [ "$base" = sh ]; then
+      case "${T[$((i + 1))]:-}" in
+        *'$'*) if cs_expand "${T[$((i + 1))]}" && [ -n "$CS_E" ]; then T[i + 1]="$CS_E"; TM[i + 1]="$CS_E"; CS_R_VWRAP=1; fi ;;
+      esac
       if [ "${T[$((i + 1))]##*/}" = coord.sh ]; then i=$((i + 1)); continue; fi
     fi
     if [ "$base" = coord.sh ]; then
@@ -458,6 +507,7 @@ cs__stmt() { # uses T from cs_scan
     break
   done
   case "$base" in fi|done|esac|case|for|select|function|'}'|'[['|'['|test|']]') CS_R_KW=1 ;; esac
+  case "${TM[$i]:-}" in *$'\005'*) CS_R_QCMD=1 ;; esac      # a quoted / escaped command word
   # output redirections of the statement (every kind) — on the MARKED tokens: a
   # quoted '>' is \001 there and never a redirection
   local loose=0 t nx
@@ -469,7 +519,7 @@ cs__stmt() { # uses T from cs_scan
     case "$t" in *'*'*|*'?'*|*'['*) CS_R_UGLOB=1 ;; esac   # an UNQUOTED glob char: the shell expands it
     cs__redir "$t" "$nx" "$loose"
     if [ -n "$CS_RT" ]; then
-      CS_RT="${CS_RT//$'\001'/>}"; CS_RT="${CS_RT//$'\002'/*}"; CS_RT="${CS_RT//$'\003'/?}"; CS_RT="${CS_RT//$'\004'/[}"
+      CS_RT="${CS_RT//$'\001'/>}"; CS_RT="${CS_RT//$'\002'/*}"; CS_RT="${CS_RT//$'\003'/?}"; CS_RT="${CS_RT//$'\004'/[}"; CS_RT="${CS_RT//$'\005'/}"
       cs__resolve_target "$CS_RT"; CS_R_REDIR="$CS_R_REDIR${CS_R_REDIR:+$'\037'}$CS_RT2"
       [ "$CS_RSKIP" = 1 ] && j=$((j + 1))
     fi
@@ -506,7 +556,7 @@ cs__stmt() { # uses T from cs_scan
         CS_R_ARGS=$(_gc_join "${T[@]:$((j + 1))}")
         for k in "${T[@]:$((j + 1))}"; do [ "$k" = run ] && CS_R_RUN=1; done
         cs__record st
-      else cs__record other; fi ;;
+      else cs__argcommit "$j"; cs__record other; fi ;;
     export|declare|typeset|readonly|local|set|source|.)
       CS_LEXP=1
       for k in "${T[@]:$((i + 1))}"; do
@@ -553,9 +603,20 @@ cs__stmt() { # uses T from cs_scan
       if [ "$j" -ge "$n" ]; then cs__record noop; return 0; fi
       if [ -n "$dir" ] && [ -d "$dir" ]; then dir=$(cs__canon_dir "$dir"); fi
       CS_R_SUB="${T[$j]}"; CS_R_ARGS=$(_gc_join "${T[@]:$((j + 1))}")
+      case "${TM[$j]:-}" in *$'\005'*) CS_R_QCMD=1 ;; esac    # a quoted / escaped git subcommand
       [ "$CS_R_DIRSET" = 1 ] || { CS_R_DIRSET=1; CS_R_DIR="$dir"; CS_R_DRAW="$raw"; }
       cs__record git ;;
-    *) cs__record other ;;
+    *)
+      cs__argcommit $((i + 1))
+      # a command word left as a $VAR (unknown, or several words: G="git -C /x"; $G
+      # commit) with the word `commit` in the statement or in the variable's value
+      case "$w" in
+        *'$'*)
+          local -a VW=()
+          read -r -a VW <<< "$CS_R_VVAL"
+          for k in "${T[@]:$((i + 1))}" ${VW[@]+"${VW[@]}"}; do [ "$k" = commit ] && CS_R_ACOMMIT=1; done ;;
+      esac
+      cs__record other ;;
   esac
   return 0
 }
@@ -716,6 +777,9 @@ cs_shape_ok() {
     fi
     if [ "$j" -le "$ck" ] && [ "${CS_KIND[j]}" = git ]; then
       case "${CS_SUB[j]}" in *'$'*|*'`'*) CS_BAD="'${CS_TXT[j]}' computes the git subcommand at run time"; return 1 ;; esac
+    fi
+    if [ "${CS_ACOMMIT[j]:-0}" = 1 ]; then
+      CS_BAD="'${CS_TXT[j]}' runs a git commit as an argument of a command the gate cannot model"; return 1
     fi
     if [ "$j" -lt "$ck" ] && cs__conditional "$j"; then
       if [ "${CS_KIND[j]}" = cd ]; then

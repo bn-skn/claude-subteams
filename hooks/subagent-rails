@@ -100,19 +100,27 @@ _reason_stated() {
   printf '%s\n' "$1" | awk 'NF { n++; if (n == 2) { ok = ($0 !~ /^[ \t]*#/); exit } } END { exit !ok }'
 }
 
-# _transcript_final <path> -> the agent's FINAL assistant output: line 1 "H" (a
-# SubagentHandback message) or "T" (plain text), then the message. Only the last
-# assistant turn counts — an earlier "Status: pass" never stands in for a later
-# handback "done" (M3).
+# _transcript_final <path> -> the agent's FINAL assistant turn: line 1 "H" (it has a
+# SubagentHandback call) or "T" (text only), then the message to read the status
+# from. Only the last assistant turn counts — an earlier turn's "Status: pass"
+# never stands in for a later handback "done" (M3). Within that final turn: the
+# handback message if it has a parsable Status, else the turn's own text (G2:
+# "Status: pass" text + handback "done" in ONE turn is a legitimate pass).
 _transcript_final() {
-  local j
+  local j h t
   [ -f "$1" ] || return 1
   j=$(tail -n 400 "$1" 2>/dev/null | jq -c 'select(.type == "assistant") | (.message.content // []) as $c
         | ([$c[]? | select(.type == "tool_use" and .name == "SubagentHandback") | (.input.message // "" | tostring)] | last) as $h
         | ([$c[]? | select(.type == "text") | .text] | join("\n")) as $t
-        | if $h != null then {k: "H", m: $h} elif ($t | length) > 0 then {k: "T", m: $t} else empty end' 2>/dev/null | tail -n 1)
+        | if $h != null or ($t | length) > 0 then {h: $h, t: $t} else empty end' 2>/dev/null | tail -n 1)
   [ -n "$j" ] || return 1
-  printf '%s\n%s' "$(printf '%s' "$j" | jq -r .k)" "$(printf '%s' "$j" | jq -r .m)"
+  t=$(printf '%s' "$j" | jq -r '.t // ""')
+  if [ "$(printf '%s' "$j" | jq -r 'if .h == null then "0" else "1" end')" = 1 ]; then
+    h=$(printf '%s' "$j" | jq -r '.h')
+    if [ -n "$(_status_of "$h")" ] || [ -z "$(_status_of "$t")" ]; then printf 'H\n%s' "${h:-$t}"; else printf 'H\n%s' "$t"; fi
+  else
+    printf 'T\n%s' "$t"
+  fi
 }
 
 # _test_receipt <ui|te> — SubagentStop for ui-tester / test-engineer.
@@ -162,7 +170,7 @@ _test_receipt() {
         n=$((n + 1)); [ "$n" -le 10 ] && [ "$(date +%s)" -lt "$deadline" ] || break
         sleep 0.2
       done
-      msg="${fin#*$'\n'}"; [ -n "$fin" ] || msg=""
+      case "$fin" in *$'\n'*) msg="${fin#*$'\n'}" ;; *) msg="" ;; esac   # never the bare kind letter
       st=$(_status_of "$msg")
     fi
   fi

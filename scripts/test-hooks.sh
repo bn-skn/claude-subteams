@@ -1166,6 +1166,52 @@ R=$(mkrepo r4l4); printf '{"scripts":{"test":"vitest","pretest":"npm run build"}
 sts "$R"; check "KEY r4 L4 a pretest that builds makes the default test script non-auto" "opt-in:[]" "$(jq -r '.suites[0].run' "$TMP/sout"):$(jq -c '.recommend.run' "$TMP/sout")"
 fi
 
+if sec r5; then
+echo "--- r5 3 / G4: real revert and real rebase-from-detached-HEAD conflicts are in-progress operations"
+R=$(mkc r5rv); printf 'v1\n' > "$R/src/lib/x.ts"; git -C "$R" commit -q -am v1; V1=$(git -C "$R" rev-parse HEAD)
+printf 'v2\n' > "$R/src/lib/x.ts"; git -C "$R" commit -q -am v2
+git -C "$R" revert --no-edit "$V1" >/dev/null 2>&1
+check "r5 the revert really stopped on a conflict (REVERT_HEAD = v1)" "$V1" "$(cat "$(git -C "$R" rev-parse --absolute-git-dir)/REVERT_HEAD" 2>/dev/null)"
+printf 'resolved\n' > "$R/src/lib/x.ts"; git -C "$R" add src/lib/x.ts
+tg "$R" 'git commit -m revert'
+check "KEY r5 3 a REAL conflicted revert (REVERT_HEAD = an ancestor, != HEAD) -> warning only" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'revert in progress')"
+git -C "$R" revert --abort >/dev/null 2>&1
+R=$(mkc r5rb); git -C "$R" checkout -q -b topic; echo 'topic' > "$R/src/lib/x.ts"; git -C "$R" commit -q -am topic
+git -C "$R" checkout -q main; echo 'main' > "$R/src/lib/x.ts"; git -C "$R" commit -q -am main
+git -C "$R" checkout -q --detach topic; git -C "$R" rebase -q main >/dev/null 2>&1
+check "r5 the rebase from a detached HEAD wrote head-name 'detached HEAD'" "detached HEAD" "$(cat "$(git -C "$R" rev-parse --absolute-git-dir)/rebase-merge/head-name" 2>/dev/null)"
+echo 'resolved' > "$R/src/lib/x.ts"; git -C "$R" add src/lib/x.ts
+tg "$R" 'git commit -m x'; check "KEY r5 G4 a REAL rebase started on a detached HEAD -> warning only" "0:1" "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'rebase in progress')"
+git -C "$R" rebase --abort >/dev/null 2>&1
+
+echo "--- r5 9: the REVIEW gate sees a commit behind a coord.sh / wrapper read from a variable (silent in 1.49.0)"
+R=$(mkrepo r5rv9); echo 'export const b = 2;' >> "$R/a.ts"; git -C "$R" add a.ts
+for c in "C=$DIR/scripts/coord.sh; bash \$C commit-lock -- git commit -m x" "C=$DIR/scripts/coord.sh; \$C commit-lock -- git commit -m x" "W=flock; \$W $TMP/r5l9 git commit -m x"; do
+  gate "$R" sNOREV9 "$c"
+  check "KEY r5 9 no contract, code staged, no review: '$c' -> review deny" "2:1" "$RC:$(has 'no code-reviewer subagent has finished' "$ERR")"
+done
+gate "$R" sNOREV9 'echo "Next: git add -A && git commit -m done"'; check "r5 9 twin: quoted prose in the same repo -> 0" 0 "$RC"
+P=$(mkrepo r5rv9p); echo 'export const b = 2;' >> "$P/a.ts"; echo more >> "$P/doc.md"     # both UNSTAGED
+gate "$P" sNOREV9 "C=$DIR/scripts/coord.sh; bash \$C commit-lock -- git commit -m x -- a.ts"
+check "KEY r5 9 the wrapped commit's own pathspec (unstaged code) -> review deny" "2:1" "$RC:$(has 'no code-reviewer subagent has finished' "$ERR")"
+gate "$P" sNOREV9 "C=$DIR/scripts/coord.sh; bash \$C commit-lock -- git commit -m x -- doc.md"; check "r5 9 twin: its pathspec names only the doc -> 0" 0 "$RC"
+D=$(mkrepo r5rv9d); echo more >> "$D/doc.md"; git -C "$D" add doc.md
+gate "$D" sNOREV9 "C=$DIR/scripts/coord.sh; bash \$C commit-lock -- git commit -m x"; check "r5 9 twin: docs-only staged -> 0" 0 "$RC"
+
+echo "--- r5 G2: the final turn's own text counts when its handback has no status; never 'first line: H'"
+R=$(mkc r5g2); addl "$R/src/lib/x.ts" 20 c; stage "$R"
+AGN=$((AGN+1)); ag_start "$R" claude-subteams:test-engineer "te$AGN"; sts "$R" run unit
+TP="$TMP/r5g2.jsonl"
+jq -nc '{type:"assistant",message:{role:"assistant",content:[{type:"text",text:"Status: pass\nall good"},{type:"tool_use",name:"SubagentHandback",input:{message:"done"}}]}}' > "$TP"
+run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "te$AGN" --arg p "$TP" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",agent_transcript_path:$p}')"
+check "KEY r5 G2 one final turn: text 'Status: pass' + handback 'done' -> pass" pass "$(lastrec "$R" te | jq -r .status)"
+sleep 1
+jq -nc '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",name:"SubagentHandback",input:{message:""}}]}}' > "$TP"
+run_hook "$R" "subagent-rails SubagentStop" "$(jq -nc --arg a "te$AGN" --arg p "$TP" '{session_id:"sx",agent_id:$a,agent_type:"claude-subteams:test-engineer",agent_transcript_path:$p}')"
+check "KEY r5 G2 an empty final handback -> rejected 'empty or missing final answer', not 'first line: H'" "rejected:1:0" \
+  "$(lastrec "$R" te | jq -r .status):$(lastrec "$R" te | jq -r .reason | grep -c 'empty or missing'):$(lastrec "$R" te | jq -r .reason | grep -c 'first line: H')"
+fi
+
 if sec corpus; then
 echo "--- corpus: commit-line shapes under a contract (all-receipts-green baseline)"
 # Baseline CB: contract repo, every change staged and checked (te + unit). must-ALLOW
@@ -1375,6 +1421,74 @@ rm -rf "$CPL"
 # 6 / 12: suite runs with a changed environment, also through escapes; the deny text
 tg "$CB" "PATH=/tmp/shim:\$PATH subteams-test\$'\\x73' run unit"
 check "KEY r4 B17 on the normalized text: PATH=… subteams-test\$'\\x73' run -> deny, text says 'the user's call'" "2:1" "$RC:$(has "the user's call; report it, do not edit the contract" "$ERR")"
+
+echo "--- corpus round 5"
+# 1: quoted prose with a separator + git commit is not a command (normalized hit needs visible obfuscation)
+corpus_allow "$CB" 'r5 echo "Next: git add -A && git commit -m done"' 'echo "Next: git add -A && git commit -m done"'
+corpus_allow "$CB" 'r5 echo "then; git commit"'                      'echo "then; git commit"'
+corpus_allow "$CB" "r5 printf 'Then: git add . && git commit' >> notes" "printf '%s\\n' 'Then: git add . && git commit' >> $TMP/notes.md"
+corpus_allow "$CB" "r5 gh pr create --body 'run: git add -A && git commit'" "gh pr create --title t --body 'run: git add -A && git commit'"
+corpus_allow "$CB" "r5 gh issue comment --body 'Repro: cd /repo; git commit -m x'" "gh issue comment 5 --body 'Repro: cd /repo; git commit -m x'"
+corpus_allow "$CB" "r5 git log --oneline --grep='; git commit'"      "git log --oneline --grep='; git commit'"
+corpus_allow "$CB" "r5 tmux send-keys -t w 'git add -A && git commit -m y' Enter" "tmux send-keys -t w 'git add -A && git commit -m y' Enter"
+corpus_allow "$CB" "r5 ssh host 'cd /x && git commit -m y'"          "ssh host 'cd /x && git commit -m y'"
+corpus_allow "$CB" "r5 docker exec c sh -c 'cd /app && git commit -m y'" "docker exec c sh -c 'cd /app && git commit -m y'"
+corpus_allow "$CB" 'r5 B17 echo "tip: cd x && FOO=1 subteams-tests run unit"' 'echo "tip: cd x && FOO=1 subteams-tests run unit"'
+# 2: --dry-run / -h / --help commit nothing
+for c in 'git commit --dry-run' 'git commit -h' 'git commit --help' 'git status; git commit --dry-run' 'git commit --dry-run --short -a'; do
+  corpus_allow "$CB" "r5 dry run: $c" "$c"
+done
+# 4: env -S / --split-string can hide the commit itself
+corpus_deny "r5 env -S 'git commit -am x'"              unstaged sneaks "env -S 'git commit -am x'"
+corpus_deny 'r5 env -S"git commit -am x"'               unstaged sneaks 'env -S"git commit -am x"'
+corpus_deny "r5 env --split-string='git commit -am x'"  unstaged sneaks "env --split-string='git commit -am x'"
+# G3: a commit inside a substitution (reported as passing; it never did — guarded now)
+corpus_deny 'r5 G3 x=$(git commit -am y)'          unstaged sneaks 'x=$(git commit -qam y)'
+corpus_deny 'r5 G3 echo $(git commit -am y)'       unstaged sneaks 'echo $(git commit -qam y)'
+corpus_deny 'r5 G3 `git commit -am y`'             unstaged sneaks '`git commit -qam y`'
+corpus_deny 'r5 G3 : "$(git commit -am y)"'        unstaged sneaks ': "$(git commit -qam y)"'
+# 9: a git commit in the ARGUMENTS of a statement the gate does not model as a commit.
+# One rule, both sides: an UNQUOTED `git … commit` -> routed when the wrapper resolves
+# (a literal coord.sh / flock / timeout / nice / command, or a VAR=literal earlier in
+# the line), else denied; a QUOTED one is an argument string (item 1 above) -> ignored.
+R9CO="$DIR/scripts/coord.sh"
+corpus_allow "$CB" 'r5 9 C=/abs/coord.sh; bash $C commit-lock -- git commit'   "C=$R9CO; bash \$C commit-lock -- git commit -m x"
+corpus_allow "$CB" 'r5 9 C=/abs/coord.sh; bash "$C" commit-lock -- git commit' "C=$R9CO; bash \"\$C\" commit-lock -- git commit -m x"
+corpus_allow "$CB" 'r5 9 C=/abs/coord.sh; $C commit-lock -- git commit'        "C=$R9CO; \$C commit-lock -- git commit -m x"
+corpus_allow "$CB" 'r5 9 C=/abs/coord.sh; "$C" commit-lock -- git commit'      "C=$R9CO; \"\$C\" commit-lock -- git commit -m x"
+corpus_allow "$CB" 'r5 9 W=flock; $W f git commit'                            "W=flock; \$W $TMP/r5lock git commit -m x"
+for c in "flock $TMP/r5lock git commit -m x" 'timeout 60 git commit -m x' 'time git commit -m x' 'nice git commit -m x' 'command git commit -m x' 'exec git commit -m x'; do
+  corpus_allow "$CB" "r5 9 known pass-through wrapper: $c" "$c"
+done
+corpus_allow "$CB" 'r5 9 unquoted words after echo are text: echo git commit -m x'   'echo git commit -m x'
+corpus_allow "$CB" "r5 9 quoted: grep -rn 'git commit' docs"                          "grep -rn 'git commit' docs"
+echo 'evil-unstaged' >> "$CB/src/lib/x.ts"     # (coord.sh needs a live coord dir to really run: rc only)
+tg "$CB" "C=$R9CO; bash \$C commit-lock -- git commit -qam x"
+check "corpus DENY r5 9 C=/abs/coord.sh; bash \$C commit-lock -- git commit -am (routed, unchecked change)" 2 "$RC"
+git -C "$CB" checkout -q -- src/lib/x.ts
+corpus_deny 'r5 9 W=flock; $W f git commit -am (routed, unchecked)'  unstaged sneaks "W=flock; \$W $TMP/r5lock git commit -qam x"
+corpus_deny 'r5 9 find -exec git commit -am'                         unstaged sneaks 'find @R@ -maxdepth 0 -exec git -C @R@ commit -qam x \;'
+printf '#!/bin/sh\nexec "$@"\n' > "$TMP/r5wrap.sh"; chmod +x "$TMP/r5wrap.sh"
+corpus_deny 'r5 9 /abs/wrap.sh git commit -am'                       unstaged sneaks "$TMP/r5wrap.sh git commit -qam x"
+corpus_deny 'r5 9 /abs/wrap.sh "git" "commit" -am (separately quoted words still run)' unstaged sneaks "$TMP/r5wrap.sh \"git\" 'commit' -qam x"
+for c in 'watch git commit -m x' 'parallel git commit ::: a' './wrap.sh git -C . commit -m x'; do
+  tg "$CB" "$c"; check "corpus DENY r5 9 unknown wrapper: $c" "2:1" "$RC:$(has 'as an argument of a command the gate cannot model' "$ERR")"
+done
+# a command word held in a variable that is git itself plus more words, or unknown
+corpus_deny 'r5 9 G="git -C /abs"; $G commit -am'   unstaged sneaks 'G="git -C @R@"; $G commit -qam x'
+corpus_deny 'r5 9 G="git commit"; $G -am'           unstaged sneaks 'G="git commit"; $G -qam x'
+tg "$CB" '$G commit -am x'; check "corpus DENY r5 9 unknown \$G commit -am x" 2 "$RC"
+corpus_allow "$CB" 'r5 9 twin: G=git; $G commit (one word, resolved and evaluated)' 'G=git; $G commit -m x'
+corpus_allow "$CB" 'r5 9 twin: G="git -C /abs"; $G status (no commit)'           'G="git -C @R@"; $G status'
+# G5's bypass half (91de048: `2>| f git commit` unseen, rc 0 even unchecked) is closed by
+# the word rule; the false deny on a CHECKED tree is G5 proper (second hand-back)
+corpus_deny 'r5 9 covers the G5 bypass: 2>| f git commit -am' unstaged sneaks "2>| $TMP/r5f9 git commit -qam x"
+tg "$CB" "$TMP/r5wrap.sh git commit -m y; git commit -m x"
+check "corpus DENY r5 9 a wrapped commit NEXT TO a plain one (enforced path names it)" "2:1" "$RC:$(has 'runs a git commit as an argument of a command the gate cannot model' "$ERR")"
+tg "$CB" '$C commit-lock -- git commit -m x'
+check "corpus DENY r5 9 unresolvable \$C commit-lock -> 'write coord.sh with a literal path'" "2:1" "$RC:$(has 'write coord.sh with a literal path' "$ERR")"
+tg "$CB" "C=$R9CO; F=src/lib/x.ts; bash \$C commit-lock -- git commit -m x -- \$F"
+check "corpus DENY r5 9 the exact E8 form (-- \$F): named, not silently mis-evaluated" "2:1" "$RC:$(has "commit pathspec '\$F' has dynamic characters" "$ERR")"
 
 # target resolution from ANOTHER cwd (in CB the old parser passed these by accident)
 echo 'evil-unstaged' >> "$CB/src/lib/x.ts"
