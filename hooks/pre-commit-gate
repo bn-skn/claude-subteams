@@ -513,6 +513,14 @@ elif [ "$CS_LIB" -eq 1 ] && [ "$TC_LIB" -eq 1 ] && [ "$HAVE_JQ" -eq 1 ] && [ "$C
   # warn-only: best effort; any doubt -> the index tree (the old behaviour)
   cs_prior_ok "$TG_CK" && TG_CT_MODE=warn
 fi
+# Item 8 (E12): without a contract, a commit line the gate cannot model (a pipe or
+# other commands before the commit, several commits, an unreliable parse) still
+# gets the no-contract warning — evaluated like `subteams-tests status`: the index
+# when something is staged, else the working tree (what `git add -A` would commit).
+TG_UNMODELLED=0
+if [ "$TG_ENFORCE" -eq 0 ] && [ "$TG_CONTRACT" -eq 0 ] && [ -z "$TG_CT_MODE" ] && [ "$TG_SKIP" -eq 0 ] && [ -n "$TG_REPO" ]; then
+  TG_UNMODELLED=1
+fi
 
 # Without jq the review gate below cannot run: the old fail-open (a contract repo
 # was already handled above).
@@ -740,7 +748,7 @@ _test_gate() {
         4) _tg_deny "Test gate: $CS_CTERR. Pass the message as a heredoc on stdin: git commit -F - <<'EOF' … EOF." ;;
         *) _tg_deny "Test gate: cannot compute the content of this commit — ${CS_CTERR:-internal error}. Stage separately (git add …), check with 'subteams-tests status', then commit with a plain 'git commit -m …'." ;;
       esac ;;
-    warn) if cs_commit_tree "$TG_CK"; then TG_TREE="$CS_TREE"; else TG_TREE=""; fi ;;
+    warn) if cs_commit_tree "$TG_CK"; then TG_TREE="$CS_TREE"; else TG_TREE=""; TG_UNMODELLED=1; fi ;;
   esac
   if [ -n "$TG_TREE" ]; then tree="$TG_TREE"
   else
@@ -753,7 +761,11 @@ _test_gate() {
   fi
   if [ -n "$TG_BASE" ]; then base="$TG_BASE"; btree=$(git -C "$TG_REPO" rev-parse "$TG_BASE^{tree}" 2>/dev/null)
   else base=$(tc_empty_tree "$TG_REPO"); btree="$base"; fi
-  [ "$tree" = "$btree" ] && return 0          # nothing staged: nothing to check
+  if [ "$tree" = "$btree" ]; then            # nothing staged: nothing to check …
+    [ "$TG_UNMODELLED" -eq 1 ] || return 0
+    tree=$(tc_snapshot_tree "$TG_REPO") || return 0   # … unless the line was not modelled: the working tree
+    [ "$tree" = "$btree" ] && return 0
+  fi
   files=$(tc_changed_files "$TG_REPO" "$base" "$tree") || {
     [ "$TG_ENFORCE" -eq 1 ] && _tg_deny "Test gate: git diff of the staged commit failed — cannot check it. Retry; if it persists, check the repository state."
     return 0; }
@@ -839,7 +851,7 @@ $(_tg_list "$TC_REQ_MISSING")"
   tc_requirements "$TG_REPO" "$tree" "$base" "$cfg" none || return 0
   _tg_anchor
   [ "$TC_REQ_OK" -eq 1 ] && return 0
-  _tg_warn "no test contract (warning only, not blocking): this commit has no matching checks — $(_tg_items "$TC_REQ_MISSING")." \
+  _tg_warn "no test contract (warning only, not blocking): this commit has no matching checks — $(_tg_items "$TC_REQ_MISSING").$([ "$TG_UNMODELLED" -eq 1 ] && printf ' Commit line not modelled — checked the %s instead.' "$([ "$(tc_index_tree "$TG_REPO")" = "$btree" ] && echo 'working tree' || echo 'staged index')")" \
     "Missing checks (no contract → not enforced; using-subteams §6.7 describes the flow):
 $(_tg_list "$TC_REQ_MISSING")"
 }

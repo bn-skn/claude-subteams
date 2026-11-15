@@ -954,7 +954,7 @@ tc_suite_check() {
         p="${res#*$'\t'}"
         if [ -z "$why" ]; then
           case "${TC_UNSTAGED:-}" in
-            *$'\n'"$p"$'\n'*) why="$p has unstaged changes — the suite ran on the working-tree version, the commit takes another; $(tc__unstaged_hint)" ;;
+            *$'\n'"$p"$'\n'*) why="$p has changes that are not in this commit (staged or unstaged) — the suite ran on the working-tree version, the commit takes another; $(tc__unstaged_hint)" ;;
             *) why="content changed since the last run ($p)" ;;
           esac
         fi
@@ -1370,7 +1370,7 @@ tc__unstaged_note() {
   while IFS= read -r p; do
     [ -n "$p" ] && tc_in_group "$p" "$1" && out="$out${out:+, }$p"
   done <<< "${TC_UNSTAGED:-}"
-  [ -n "$out" ] && printf '; note: %s has unstaged changes — the %s check saw the working-tree version; %s' "$out" "$2" "$(tc__unstaged_hint)"
+  [ -n "$out" ] && printf '; note: %s has changes that are not in this commit (staged or unstaged) — the %s check saw the working-tree version; %s' "$out" "$2" "$(tc__unstaged_hint)"
   return 0
 }
 

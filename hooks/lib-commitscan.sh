@@ -293,6 +293,7 @@ cs__tokenize() {
         }
         else if (c == ")" && ar > 0) ar--
         if (c == "`") flag("command substitution with backticks")
+        if (c == "|" && substr(s, i - 1, 1) == ">") { tok = tok c; has = 1; continue }   # >| clobber redirection, not a pipe
         if (c == "\n" || c == ";" || c == "|" || c == "(" || c == ")" || c == "`") {
           sep = (c == "\n" ? "n" : c)
           if (c == "|" && substr(s, i + 1, 1) == "|") { sep = "O"; i++; flag("|| (or-list)") }
@@ -447,7 +448,7 @@ cs__stmt() { # uses T from cs_scan
       # here; the redirect scan below sees every token of the statement
       case "${TM[$i]}" in
         [0-9]'>'*|[0-9][0-9]'>'*|'>'*|'&>'*|[0-9]'<'*|'<'*)
-          case "${TM[$i]}" in *'>'|*'<'|'&>'|'>>'|'>|') i=$((i + 2)) ;; *) i=$((i + 1)) ;; esac
+          case "${TM[$i]}" in *'>'|*'<'|'&>'|'>>'|*'>|') i=$((i + 2)) ;; *) i=$((i + 1)) ;; esac
           PRE_REDIR=1; continue ;;
       esac
       if _gc_is_assign "$w"; then
@@ -731,7 +732,11 @@ cs__in_repo() { # <absolute path> -> 0 if inside CS_REPO (lexically, via its can
   r="${CS_REPO%/}"
   case "$p/" in "$r"/*) return 0 ;; esac
   if [ -L "$p" ]; then                      # a file symlink outside the repo pointing at a tracked file
-    l=$(readlink -f -- "$p" 2>/dev/null) || l=$(tc_realpath "$p" 2>/dev/null) || return 0
+    l=$(readlink -f -- "$p" 2>/dev/null) || l=$(tc_realpath "$p" 2>/dev/null) || {
+      # dangling and not resolvable: judge the link text itself (lexically)
+      l=$(readlink -- "$p" 2>/dev/null) || return 0
+      case "$l" in /*) ;; *) l="$(dirname -- "$p")/$l" ;; esac
+    }
     case "$l/" in "$r"/*) return 0 ;; esac
   fi
   d=$(dirname -- "$p")
@@ -782,7 +787,7 @@ cs_shape_ok() {
       CS_BAD="'${CS_TXT[j]}' runs a git commit as an argument of a command the gate cannot model"; return 1
     fi
     if [ "$j" -lt "$ck" ] && cs__conditional "$j"; then
-      if [ "${CS_KIND[j]}" = cd ]; then
+      if [ "${CS_KIND[j]}" = cd ] && ! cs__same_chain "$j" "$ck"; then
         CS_BAD="'${CS_TXT[j]}' runs only if an earlier command of its && chain succeeds — the gate cannot know the directory"; return 1
       fi
       if [ "${CS_KIND[j]}" = git ] && case "${CS_SUB[j]}" in add|stage|rm) true ;; *) false ;; esac && ! cs__same_chain "$j" "$ck"; then
@@ -804,6 +809,19 @@ cs_shape_ok() {
   done
   [ "${CS_X[ck]}" = 1 ] && { CS_BAD="the commit takes arguments from stdin (xargs)"; return 1; }
   return 0
+}
+
+# cs__new_branch <sub> <args> -> 0 for exactly `checkout -b <new>` / `switch -c|--create
+# <new>`: no start point, no other option — a new branch at HEAD changes neither
+# the index nor the work tree, so the commit records the same tree (it only lands
+# on the new branch). -B / -C (reset), --orphan, -t / --track, a start point: no.
+cs__new_branch() {
+  local -a A
+  IFS=$'\037' read -r -a A <<< "$2"
+  [ "${#A[@]}" -eq 2 ] || return 1
+  case "$1:${A[0]}" in checkout:-b|switch:-c|switch:--create) ;; *) return 1 ;; esac
+  case "${A[1]}" in ''|-*) return 1 ;; esac
+  git check-ref-format --branch "${A[1]}" >/dev/null 2>&1
 }
 
 # cs__conditional <i> -> 0 if statement i sits behind an earlier element of its &&
@@ -844,6 +862,7 @@ cs_prior_ok() {
     esac
     # git ("read-only" with -c / --config-env / --exec-path can run anything)
     [ "${CS_GOPT[j]}" = 1 ] || ! cs_readonly_git "${CS_SUB[j]}" "${CS_ARGS[j]}" || continue
+    [ "${CS_GOPT[j]}" = 1 ] || ! cs__new_branch "${CS_SUB[j]}" "${CS_ARGS[j]}" || continue
     case "${CS_SUB[j]}" in
       add|stage|rm)
         t=$(cs_top_of "${CS_DIR[j]}") || t=""

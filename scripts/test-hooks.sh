@@ -607,8 +607,8 @@ sts "$R" status; check "B1 status agrees" true "$(jq -r .ok "$TMP/sout")"
 R=$(mkc fx1b); addl "$R/src/lib/x.ts" 3 a; stage "$R"; addl "$R/src/lib/x.ts" 1 unstaged
 te_check "$R"; full "$R"; tg "$R" 'git commit -m x'
 check "KEY B1 unstaged hunk: deny names the file and says add/revert, no stash / --include-untracked" "2:1:1:0" \
-  "$RC:$(has 'src/lib/x.ts has unstaged changes' "$ERR"):$(has 'add it to this commit, or revert/finish that edit, then re-run' "$ERR"):$(printf '%s' "$ERR" | grep -c 'stash\|include-untracked')"
-sts "$R" status; check "B1 status names it too" 1 "$(jq -r '.missing[]' "$TMP/sout" | grep -c 'src/lib/x.ts has unstaged changes')"
+  "$RC:$(has 'src/lib/x.ts has changes that are not in this commit' "$ERR"):$(has 'add it to this commit, or revert/finish that edit, then re-run' "$ERR"):$(printf '%s' "$ERR" | grep -c 'stash\|include-untracked')"
+sts "$R" status; check "B1 status names it too" 1 "$(jq -r '.missing[]' "$TMP/sout" | grep -c 'src/lib/x.ts has changes that are not in this commit')"
 fi
 
 if sec fix02-mindrift; then
@@ -1053,7 +1053,7 @@ coord_set() { # <owner> <pid> <trusted>
 }
 rm -f "$CD/claims.json"; tg "$R" 'git commit -m x'
 check "KEY r3i unclaimed: deny names the file, says add/revert, no stash advice" "2:1:1:0" \
-  "$RC:$(has 'src/lib/y.ts has unstaged changes' "$ERR"):$(has 'add it to this commit, or revert/finish that edit, then re-run' "$ERR"):$(has 'stash' "$ERR")"
+  "$RC:$(has 'src/lib/y.ts has changes that are not in this commit' "$ERR"):$(has 'add it to this commit, or revert/finish that edit, then re-run' "$ERR"):$(has 'stash' "$ERR")"
 CLAUDE_SUBTEAMS_MULTI_INSTANCE=1 tg "$R" 'git commit -m x'; check "r3i with multi-instance on, the deny adds the claim hint" 1 "$(has 'have it claim the file' "$ERR")"
 coord_set peer1 $$ true; tg "$R" 'git commit -m x'
 check "KEY r3i claimed by another LIVE instance -> allow + warning naming file and instance" "0:1" \
@@ -1197,6 +1197,22 @@ check "KEY r5 9 the wrapped commit's own pathspec (unstaged code) -> review deny
 gate "$P" sNOREV9 "C=$DIR/scripts/coord.sh; bash \$C commit-lock -- git commit -m x -- doc.md"; check "r5 9 twin: its pathspec names only the doc -> 0" 0 "$RC"
 D=$(mkrepo r5rv9d); echo more >> "$D/doc.md"; git -C "$D" add doc.md
 gate "$D" sNOREV9 "C=$DIR/scripts/coord.sh; bash \$C commit-lock -- git commit -m x"; check "r5 9 twin: docs-only staged -> 0" 0 "$RC"
+
+echo "--- r5 8 (E12): no contract + a commit line the gate cannot model -> still a warning (working tree)"
+R=$(mkrepo r5e12); printf '{"scripts":{"test":"true"}}' > "$R/package.json"; git -C "$R" add -A; git -C "$R" commit -q -m p
+echo 'body{color:red}' > "$R/style.css"; git -C "$R" add style.css; git -C "$R" commit -q -m css; echo 'a{}' >> "$R/style.css"
+tg "$R" 'npm test 2>&1 | grep -E "^# (pass|fail)" && git add style.css && git commit -q -m x && git log --oneline -1'
+check "KEY r5 8 unmodelled line, nothing staged: rc 0 + warning with 'Commit line not modelled — checked the working tree'" "0:1" \
+  "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage 2>/dev/null | grep -c 'Commit line not modelled — checked the working tree instead')"
+tg "$R" 'git add style.css && git commit -m x'
+check "r5 8 twin: the modellable form warns WITHOUT the 'not modelled' note" "0:1:0" \
+  "$RC:$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'no test contract'):$(printf '%s' "$OUT" | jq -r .systemMessage | grep -c 'not modelled')"
+
+echo "--- r5 7: the partial-commit deny names a STAGED file accurately"
+R=$(mkc r5w); addl "$R/src/lib/x.ts" 2 a; addl "$R/src/lib/y.ts" 2 b; stage "$R"; sts "$R" run unit
+tg "$R" 'git commit -m x -- src/lib/x.ts'
+check "KEY r5 7 a staged file left out of a partial commit: 'changes that are not in this commit (staged or unstaged)'" "2:1:0" \
+  "$RC:$(has 'src/lib/y.ts has changes that are not in this commit (staged or unstaged)' "$ERR"):$(has 'has unstaged changes' "$ERR")"
 
 echo "--- r5 G2: the final turn's own text counts when its handback has no status; never 'first line: H'"
 R=$(mkc r5g2); addl "$R/src/lib/x.ts" 20 c; stage "$R"
@@ -1442,6 +1458,27 @@ done
 corpus_deny "r5 env -S 'git commit -am x'"              unstaged sneaks "env -S 'git commit -am x'"
 corpus_deny 'r5 env -S"git commit -am x"'               unstaged sneaks 'env -S"git commit -am x"'
 corpus_deny "r5 env --split-string='git commit -am x'"  unstaged sneaks "env --split-string='git commit -am x'"
+# 5: a conditional cd chained to the commit with && is safe (if it fails, the commit does not run)
+corpus_allow "$CB" 'r5 git status && cd /abs && git commit'              'git status && cd @R@ && git commit -m x'
+corpus_allow "$CB" 'r5 subteams-tests status && cd /abs && git commit'   'subteams-tests status && cd @R@ && git commit -m x'
+corpus_allow "$CB" 'r5 git -C /abs status --short && cd /abs && git commit' 'git -C @R@ status --short && cd @R@ && git commit -m x'
+# 6: a new branch at HEAD before the commit (checkout -b / switch -c|--create, nothing else)
+corpus_allow "$CB" 'r5 git checkout -b docs/readme-typo && git add … && git commit' 'git checkout -b docs/readme-typo && git add src/lib/x.ts && git commit -m x'
+corpus_allow "$CB" 'r5 git switch -c t1 && git commit'          'git switch -c t1 && git commit -m x'
+corpus_allow "$CB" 'r5 git switch --create t2 && git commit'    'git switch --create t2 && git commit -m x'
+for c in 'git checkout -b x HEAD~1 && git commit -m x' 'git checkout -B x && git commit -m x' 'git checkout --orphan x && git commit -m x' \
+         'git checkout -b x -t && git commit -m x' 'git switch -c x HEAD~1 && git commit -m x' 'git checkout main && git commit -m x'; do
+  tg "$CB" "$c"; check "corpus DENY r5 new-branch twin (start point / reset / orphan / track / switching): $c" 2 "$RC"
+done
+# G5: a `2>|` prefix redirect hid the whole commit from both scanners (91de048: rc 0 even unchecked)
+corpus_deny 'r5 2>| file git commit -am x (prefix clobber redirect)' unstaged sneaks "2>| $TMP/r5f git commit -am x"
+corpus_allow "$CB" 'r5 2>| file git commit (checked: evaluated, allowed)' "2>| $TMP/r5f git commit -m x"
+corpus_allow "$CB" 'r5 git commit -m x 2>| file (suffix clobber: not a pipe)' "git commit -m x 2>| $TMP/r5f"
+# G6: a redirect into a DANGLING symlink outside the repo is outside the repo
+ln -sfn "$TMP/no/such/dir/file" "$TMP/r5-dangle"
+corpus_allow "$CB" 'r5 echo > dangling symlink outside the repo && git commit' "echo x > $TMP/r5-dangle && git commit -m x"
+ln -sfn "$CB/no/such/file" "$TMP/r5-dangle-in"
+tg "$CB" "echo x > $TMP/r5-dangle-in && git commit -m x"; check "corpus DENY r5 twin: a dangling symlink pointing INTO the repo" 2 "$RC"
 # G3: a commit inside a substitution (reported as passing; it never did — guarded now)
 corpus_deny 'r5 G3 x=$(git commit -am y)'          unstaged sneaks 'x=$(git commit -qam y)'
 corpus_deny 'r5 G3 echo $(git commit -am y)'       unstaged sneaks 'echo $(git commit -qam y)'
