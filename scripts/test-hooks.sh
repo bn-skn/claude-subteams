@@ -1634,10 +1634,22 @@ fi
 
 if sec corpus-nc; then
 echo "--- corpus: no-contract parity — the review gate answers like 1.49 (080fb12) on 20 forms"
+# The 1.49 baseline is a fixture, not `git show 080fb12:…`: the installed plugin has no .git
+# and the marketplace clone is shallow, so `git show` wrote empty files, the empty old gate
+# answered 0 and every code-staged form read as a false parity FAIL (1.50.2).
 mkdir -p "$TMP/old149/hooks"
-git -C "$DIR" show 080fb12:hooks/pre-commit-gate > "$TMP/old149/hooks/pre-commit-gate"
-git -C "$DIR" show 080fb12:hooks/lib-gitcmd.sh > "$TMP/old149/hooks/lib-gitcmd.sh"
+cp "$DIR/tests/fixtures/hooks-1.49/pre-commit-gate" "$DIR/tests/fixtures/hooks-1.49/lib-gitcmd.sh" "$TMP/old149/hooks/"
+if git -C "$DIR" cat-file -e '080fb12^{commit}' 2>/dev/null; then # full clone: fixture == 1.49
+  for f in pre-commit-gate lib-gitcmd.sh; do
+    git -C "$DIR" show "080fb12:hooks/$f" | cmp -s - "$TMP/old149/hooks/$f"
+    check "parity baseline: fixture $f matches 080fb12" 0 "$?"
+  done
+fi
 PS=$(mkrepo par-staged); echo 'x' >> "$PS/a.ts"; git -C "$PS" add a.ts
+# negative control: a broken baseline (empty, or lib missing -> `|| exit 0`) allows everything
+# and turns every parity line into a false FAIL; the 1.49 gate must deny unreviewed staged code
+o=$( (cd "$PS" && bash_json sPARITY 'git commit -m x' | bash "$TMP/old149/hooks/pre-commit-gate") >/dev/null 2>&1; echo $?)
+check "parity baseline: 1.49 gate denies unreviewed staged code (baseline is live)" 2 "$o"
 PM=$(mkrepo par-md); echo 'x' >> "$PM/doc.md"; git -C "$PM" add doc.md; echo 'z' >> "$PM/a.ts"
 par() { # <repo> <command> -> "old:new" rc of the two gates (no review marker)
   local j o n; j=$(bash_json sPARITY "$2")

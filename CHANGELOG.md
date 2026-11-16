@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.50.2] - 2026-11-16
+
+Test harness only — no hook, script or `bin/` change.
+
+### Fixed
+- `scripts/test-hooks.sh` section `corpus-nc` (no-contract parity with 1.49) gave 18 false FAILs outside a full clone: it read the 1.49 gate via `git show 080fb12:…`, but the installed plugin has no `.git` and the marketplace clone is shallow, so the baseline came out empty and answered 0 on every form. The baseline is now a fixture (`tests/fixtures/hooks-1.49/`, both files byte-identical to 080fb12); in a full clone the suite checks the fixture against 080fb12, and everywhere a negative control checks the baseline is live (the 1.49 gate denies unreviewed staged code). Found by a second instance running the suite from the plugin cache.
+
 ## [1.50.1] - 2026-11-15
 
 Docs and skills only — places the 1.50 test flow (`using-subteams` §6.7) did not reach. No hook, script or `bin/` change.
